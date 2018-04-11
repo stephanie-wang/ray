@@ -32,6 +32,20 @@ bool CheckDuplicateActorTask(
   return false;
 };
 
+/// A helper function to send out heartbeats to the given object table about
+/// all tasks in the given queue.
+void SendTaskQueueHeartbeats(ray::gcs::ObjectTable &object_table,
+                             const std::list<ray::raylet::Task> &queue) {
+  JobID job_id = JobID::nil();
+  for (const auto &task : queue) {
+    const auto &spec = task.GetTaskSpecification();
+    for (int64_t i = 0; i < spec.NumReturns(); i++) {
+      auto object_id = spec.ReturnId(i);
+      object_table.Append(job_id, object_id, nullptr, nullptr);
+    }
+  }
+}
+
 }  // namespace
 
 namespace ray {
@@ -50,11 +64,21 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       worker_pool_(config.num_initial_workers, config.worker_command),
       local_queues_(SchedulingQueue()),
       scheduling_policy_(local_queues_),
-      reconstruction_policy_([this](const TaskID &task_id) { ResubmitTask(task_id); }),
+      reconstruction_policy_(io_service_, gcs_client_->client_table().GetLocalClientId(),
+                             gcs_client_->object_table(),
+                             gcs_client_->task_reconstruction_log(),
+                             [this](const TaskID &task_id) { ResubmitTask(task_id); },
+                             /*reconstruction_timeout_ms=*/1000),
       task_dependency_manager_(
-          object_manager,
-          // reconstruction_policy_,
-          [this](const TaskID &task_id) { HandleWaitingTaskReady(task_id); }),
+          [this](const ObjectID &object_id) {
+            RAY_CHECK_OK(object_manager_.Pull(object_id));
+            // Ask the reconstruction policy to reconstruct this object if necessary.
+            // TODO(swang): Should we wait for the Lookup to fail before trying to
+            // reconstruct the object?
+            reconstruction_policy_.Listen(object_id);
+          },
+          [this](const TaskID &task_id) { HandleWaitingTaskReady(task_id); },
+          [this](const TaskID &task_id) { HandleReadyTaskWaiting(task_id); }),
       lineage_cache_(gcs_client_->client_table().GetLocalClientId(),
                      gcs_client->raylet_task_table(), gcs_client->raylet_task_table()),
       remote_clients_(),
@@ -65,6 +89,15 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
   cluster_resource_map_.emplace(local_client_id,
                                 SchedulingResources(config.resource_config));
+
+  RAY_CHECK_OK(object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info) {
+    ObjectID object_id = ObjectID::from_binary(object_info.object_id);
+    reconstruction_policy_.Cancel(object_id);
+    task_dependency_manager_.HandleObjectLocal(object_id);
+  }));
+  RAY_CHECK_OK(object_manager_.SubscribeObjDeleted([this](const ObjectID &object_id) {
+    task_dependency_manager_.HandleObjectMissing(object_id);
+  }));
 }
 
 ray::Status NodeManager::RegisterGcs() {
@@ -79,6 +112,17 @@ ray::Status NodeManager::RegisterGcs() {
   gcs_client_->raylet_task_table().Subscribe(
       JobID::nil(), gcs_client_->client_table().GetLocalClientId(),
       task_committed_callback, nullptr);
+
+  // Subscribe to notifications from the object table.
+  auto object_notification_callback = [this](gcs::AsyncGcsClient *client,
+                                             const ObjectID &id,
+                                             const std::vector<ObjectTableDataT> data) {
+    // Route object table notifications to the reconstruction policy to determine
+    // whether reconstruction is necessary.
+    reconstruction_policy_.HandleNotification(id, data);
+  };
+  RAY_RETURN_NOT_OK(gcs_client_->object_table().Subscribe(
+      UniqueID::nil(), UniqueID::nil(), object_notification_callback, nullptr));
 
   // Register a callback for actor creation notifications.
   auto actor_creation_callback = [this](
@@ -111,7 +155,18 @@ ray::Status NodeManager::RegisterGcs() {
   return ray::Status::OK();
 }
 
+void NodeManager::PendingObjectsHeartbeat() {
+  auto &object_table = gcs_client_->object_table();
+  // TODO(swang): Send notifications about puts.
+  SendTaskQueueHeartbeats(object_table, local_queues_.GetWaitingTasks());
+  SendTaskQueueHeartbeats(object_table, local_queues_.GetReadyTasks());
+  SendTaskQueueHeartbeats(object_table, local_queues_.GetScheduledTasks());
+  SendTaskQueueHeartbeats(object_table, local_queues_.GetRunningTasks());
+}
+
 void NodeManager::Heartbeat() {
+  PendingObjectsHeartbeat();
+
   RAY_LOG(DEBUG) << "[Heartbeat] sending heartbeat.";
   auto &heartbeat_table = gcs_client_->heartbeat_table();
   auto heartbeat_data = std::make_shared<HeartbeatTableDataT>();
@@ -161,7 +216,6 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
     cluster_resource_map_[client_id] = local_resources_;
     return;
   }
-
   // TODO(atumanov): make remote client lookup O(1)
   if (std::find(remote_clients_.begin(), remote_clients_.end(), client_id) ==
       remote_clients_.end()) {
@@ -374,6 +428,11 @@ void NodeManager::HandleWaitingTaskReady(const TaskID &task_id) {
   ScheduleTasks();
 }
 
+void NodeManager::HandleReadyTaskWaiting(const TaskID &task_id) {
+  auto waiting_tasks = local_queues_.RemoveTasks({task_id});
+  local_queues_.QueueWaitingTasks(std::vector<Task>(waiting_tasks));
+}
+
 void NodeManager::ScheduleTasks() {
   auto policy_decision = scheduling_policy_.Schedule(
       cluster_resource_map_, gcs_client_->client_table().GetLocalClientId(),
@@ -461,14 +520,11 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
 }
 
 void NodeManager::QueueTask(const Task &task) {
-  // Queue the task depending on the availability of its arguments.
-  if (task_dependency_manager_.TaskReady(task)) {
-    local_queues_.QueueReadyTasks(std::vector<Task>({task}));
-    ScheduleTasks();
-  } else {
-    local_queues_.QueueWaitingTasks(std::vector<Task>({task}));
-    task_dependency_manager_.SubscribeTaskReady(task);
-  }
+  // Queue the task.
+  local_queues_.QueueWaitingTasks({task});
+  // Subscribe to the task's dependencies. The task will be moved to the ready
+  // queue depending on the availability of its arguments.
+  task_dependency_manager_.SubscribeTask(task);
 }
 
 void NodeManager::AssignTask(Task &task) {
@@ -534,6 +590,10 @@ void NodeManager::AssignTask(Task &task) {
     lineage_cache_.AddReadyTask(task);
     // Mark the task as running.
     local_queues_.QueueRunningTasks(std::vector<Task>({task}));
+    // Tell the task dependency manager that we no longer need this task's
+    // object dependencies. The task dependency manager assumes that the task's
+    // return values are pending creation.
+    task_dependency_manager_.UnsubscribeExecutingTask(spec.TaskId());
   } else {
     RAY_LOG(WARNING) << "Failed to send task to worker, disconnecting client";
     // We failed to send the task to the worker, so disconnect the worker.
@@ -586,7 +646,7 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
   if (task.GetTaskSpecification().IsActorCreationTask() ||
       task.GetTaskSpecification().IsActorTask()) {
     auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
-    task_dependency_manager_.MarkDependencyReady(dummy_object);
+    task_dependency_manager_.HandleObjectLocal(dummy_object);
   }
 
   // Unset the worker's assigned task.
@@ -594,7 +654,22 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
 }
 
 void NodeManager::ResubmitTask(const TaskID &task_id) {
-  throw std::runtime_error("Method not implemented");
+  // TODO(swang): Test this codepath for reconstruction.
+  auto lookup_callback = [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
+                                const protocol::TaskT &task_data) {
+    RAY_LOG(INFO) << "Reconstructing! " << task_id;
+    const Task task(task_data);
+    SubmitTask(task, Lineage());
+  };
+  auto failure_callback = [this](ray::gcs::AsyncGcsClient *client,
+                                 const TaskID &task_id) {
+    Lineage lineage = lineage_cache_.GetUncommittedLineage(task_id);
+    auto task_entry = lineage.GetEntry(task_id);
+    RAY_CHECK(task_entry) << "Entry not found in GCS or lineage cache!";
+    SubmitTask(task_entry->TaskData(), lineage);
+  };
+  RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
+      JobID::nil(), task_id, lookup_callback, failure_callback));
 }
 
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
@@ -633,6 +708,9 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     // lineage cache since the receiving node is now responsible for writing
     // the task to the GCS.
     lineage_cache_.RemoveWaitingTask(task_id);
+    // Tell the task dependency manager that we no longer need this task's
+    // object dependencies.
+    task_dependency_manager_.UnsubscribeForwardedTask(task_id);
   } else {
     // TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
     // lost.
