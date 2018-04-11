@@ -646,6 +646,7 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
   if (task.GetTaskSpecification().IsActorCreationTask() ||
       task.GetTaskSpecification().IsActorTask()) {
     auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
+    reconstruction_policy_.Cancel(dummy_object);
     task_dependency_manager_.HandleObjectLocal(dummy_object);
   }
 
