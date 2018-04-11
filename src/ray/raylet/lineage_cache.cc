@@ -161,7 +161,7 @@ void MergeLineageHelper(const UniqueID &task_id, const Lineage &lineage_from,
   // in lineage_to. This also prevents us from traversing the same node twice.
   if (lineage_to.SetEntry(std::move(entry_copy))) {
     for (const auto &parent_id : parent_ids) {
-      RAY_LOG(INFO) << "parent task: " << parent_id;
+      RAY_LOG(DEBUG) << "parent task: " << parent_id;
       MergeLineageHelper(parent_id, lineage_from, lineage_to, stopping_condition);
     }
   }
@@ -169,7 +169,7 @@ void MergeLineageHelper(const UniqueID &task_id, const Lineage &lineage_from,
 
 void LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage) {
   auto task_id = task.GetTaskSpecification().TaskId();
-  RAY_LOG(INFO) << "Adding waiting task " << task_id;
+  RAY_LOG(DEBUG) << "Adding waiting task " << task_id;
   // Merge the uncommitted lineage into the lineage cache.
   MergeLineageHelper(task_id, uncommitted_lineage, lineage_, [](GcsStatus status) {
     if (status != GcsStatus_NONE) {

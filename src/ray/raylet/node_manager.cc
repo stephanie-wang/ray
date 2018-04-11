@@ -655,10 +655,10 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
 }
 
 void NodeManager::ResubmitTask(const TaskID &task_id) {
+  RAY_LOG(INFO) << "Reconstructing! " << task_id;
   // TODO(swang): Test this codepath for reconstruction.
   auto lookup_callback = [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
                                 const protocol::TaskT &task_data) {
-    RAY_LOG(INFO) << "Reconstructing! " << task_id;
     const Task task(task_data);
     SubmitTask(task, Lineage());
   };
