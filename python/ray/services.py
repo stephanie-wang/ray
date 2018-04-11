@@ -921,7 +921,13 @@ def start_raylet(redis_address,
                gcs_ip_address,
                gcs_port,
                start_worker_command]
-    pid = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
+    if RUN_RAYLET_PROFILER:
+        pid = subprocess.Popen(["valgrind", "--tool=callgrind"] + command,
+                               stdout=stdout_file, stderr=stderr_file)
+        time.sleep(1.0)
+    else:
+        pid = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
+        time.sleep(0.1)
 
     if cleanup:
         all_processes[PROCESS_TYPE_RAYLET].append(pid)
