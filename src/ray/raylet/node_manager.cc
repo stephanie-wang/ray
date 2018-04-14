@@ -288,7 +288,16 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
   actor_registration.ExtendFrontier(ActorHandleID::nil(),
                                     actor_registration.GetActorCreationDependency());
   auto inserted = actor_registry_.emplace(actor_id, std::move(actor_registration));
-  RAY_CHECK(inserted.second);
+  if (!inserted.second) {
+    // If we weren't able to insert the actor's location, check that the
+    // existing entry is the same as the new one.
+    // TODO(swang): This is not true in the case of failures.
+    RAY_CHECK(actor_registration.GetNodeManagerId() ==
+              inserted.first->second.GetNodeManagerId())
+        << "Actor scheduled on " << inserted.first->second.GetNodeManagerId()
+        << ", but received notification for " << actor_registration.GetNodeManagerId();
+    return;
+  }
 
   // Dequeue any methods that were submitted before the actor's location was
   // known.
