@@ -19,7 +19,7 @@ class Stream(object):
         return
 
     def _push(self, elements):
-        if len(self.downstream_nodes):
+        if len(self.downstream_nodes) and len(elements):
             partitions = {}
             for i in range(len(self.downstream_nodes)):
                 partitions[i] = []
