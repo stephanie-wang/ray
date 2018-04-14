@@ -1,6 +1,5 @@
 import ray
 import time
-import uuid
 from collections import defaultdict
 import logging
 import hashlib
@@ -22,6 +21,7 @@ class Stream(object):
         return
 
     def _push(self, elements):
+        put_latency = 0
         if len(self.downstream_nodes) and len(elements):
             partitions = {}
             for i in range(len(self.downstream_nodes)):
@@ -35,9 +35,9 @@ class Stream(object):
             for partition_index, partition in partitions.items():
                 start = time.time()
                 x = ray.put(partition)
-                log.debug("put: %f seconds", time.time() - start)
+                put_latency += (time.time() - start)
                 self.downstream_nodes[partition_index].push.remote(x)
-                log.debug("Took %f seconds", time.time() - start)
+        return put_latency
 
 
 class ProcessingStream(Stream):
@@ -45,10 +45,11 @@ class ProcessingStream(Stream):
         now = time.time()
 
         elements = self.process_elements(elements)
-        self._push(elements)
+        put_latency = self._push(elements)
 
         latency = time.time() - now
-        log.debug("latency: %s %f seconds", self.__class__.__name__, latency)
+        log.debug("latency: %s %f s put; %f s total", self.__class__.__name__,
+                  put_latency, latency)
 
     def process_elements(self, elements):
         raise NotImplementedError()
@@ -57,8 +58,14 @@ class ProcessingStream(Stream):
 class SourceStream(Stream):
     def start(self):
         while True:
+            now = time.time()
+
             elements = self.generate_elements()
-            self._push(elements)
+            put_latency = self._push(elements)
+
+            latency = time.time() - now
+            log.debug("latency: %s %f s put; %f s total",
+                      self.__class__.__name__, put_latency, latency)
 
     def generate_elements(self, elements):
         raise NotImplementedError()
