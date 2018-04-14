@@ -25,7 +25,7 @@ SLEEP_TIME = 10
 @ray.remote
 class ThroughputLogger(stream_push.ProcessingStream):
     def __init__(self, *downstream_nodes):
-        super().__init__(None, *downstream_nodes)
+        super().__init__(*downstream_nodes)
 
         self.events = []
         self.max_latency_ms = 0
@@ -48,7 +48,7 @@ class ThroughputLogger(stream_push.ProcessingStream):
 @ray.remote
 class ParseJson(stream_push.ProcessingStream):
     def __init__(self, *downstream_nodes):
-        super().__init__(None, *downstream_nodes)
+        super().__init__(*downstream_nodes)
 
         self.events = []
 
@@ -58,15 +58,19 @@ class ParseJson(stream_push.ProcessingStream):
 
 @ray.remote
 class Filter(stream_push.ProcessingStream):
+    def __init__(self, *downstream_nodes):
+        super().__init__(*downstream_nodes)
+
     def process_elements(self, elements):
+        #return elements
         return [element for element in elements if element["event_type"] ==
                 "view"]
 
 
 @ray.remote
 class Project(stream_push.ProcessingStream):
-    def __init__(self, ad_to_campaign_map, *downstream_nodes):
-        super().__init__(None, *downstream_nodes)
+    def __init__(self, ad_to_campaign_map, partition_func, *downstream_nodes):
+        super().__init__(*downstream_nodes)
 
         self.ad_to_campaign_map = ad_to_campaign_map
 
@@ -80,7 +84,7 @@ class Project(stream_push.ProcessingStream):
 class GroupBy(stream_push.ProcessingStream):
     # TODO(swang): Shard the reducers.
     def __init__(self, *downstream_nodes):
-        super().__init__(None, *downstream_nodes)
+        super().__init__(*downstream_nodes)
 
         self.windows = defaultdict(Counter)
         self.latencies = defaultdict(lambda: defaultdict(float))
@@ -89,7 +93,8 @@ class GroupBy(stream_push.ProcessingStream):
         for campaign_id, window in elements:
             self.windows[campaign_id][window] += 1
             new_latency_ms = (time.time() - window - WINDOW_SIZE_SEC) * 1000
-            self.latencies[campaign_id][window] = max(self.latencies[campaign_id][window], new_latency_ms)
+            self.latencies[campaign_id][window] = max(
+                self.latencies[campaign_id][window], new_latency_ms)
 
         return []
 
@@ -98,7 +103,7 @@ class GroupBy(stream_push.ProcessingStream):
 class EventGenerator(stream_push.SourceStream):
     def __init__(self, ad_to_campaign_map, time_slice_start_ms, time_slice_ms,
                  time_slice_num_events, *downstream_nodes):
-        super().__init__(None, *downstream_nodes)
+        super().__init__(*downstream_nodes)
 
         self.ad_ids = list(ad_to_campaign_map.keys())
 
@@ -114,7 +119,7 @@ class EventGenerator(stream_push.SourceStream):
         # Sleep until the start of the next time slice.
         self.time_slice_start_ms += self.time_slice_ms
         diff = (self.time_slice_start_ms / 1000) - time.time()
-        if diff > (0.1 * self.time_slice_ms / 1000):
+        if diff > (0.2 * self.time_slice_ms / 1000):
             time.sleep(diff)
         elif diff < -0.1:
             log.warning("Falling behind by %f seconds", -1 * diff)
@@ -187,11 +192,15 @@ if __name__ == '__main__':
                     range(args.num_reducers)]
     else:
         reducers = [GroupBy.remote() for _ in range(args.num_reducers)]
+
+    def ad_id_key_func(event):
+        return event["ad_id"]
     projectors = stream_push.group_by_stream(args.num_mappers, Project,
-                                             [ad_to_campaign_map], reducers)
+                                             [ad_to_campaign_map], reducers,
+                                             ad_id_key_func)
     filters = stream_push.map_stream(args.num_mappers, Filter, [], projectors)
     mappers = stream_push.map_stream(args.num_mappers, ParseJson, [],
-                                     projectors)
+                                     filters)
 
     # Create the event generator source.
     ray.get([mapper.ready.remote() for mapper in mappers])
