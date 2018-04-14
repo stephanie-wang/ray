@@ -22,7 +22,6 @@ class Stream(object):
         return
 
     def _push(self, elements):
-        now = time.time()
         if len(self.downstream_nodes) and len(elements):
             partitions = {}
             for i in range(len(self.downstream_nodes)):
@@ -39,14 +38,17 @@ class Stream(object):
                 log.debug("put: %f seconds", time.time() - start)
                 self.downstream_nodes[partition_index].push.remote(x)
                 log.debug("Took %f seconds", time.time() - start)
-        latency = time.time() - now
-        log.debug("latency: %s %f seconds", self.__class__.__name__, latency)
 
 
 class ProcessingStream(Stream):
     def push(self, elements):
+        now = time.time()
+
         elements = self.process_elements(elements)
         self._push(elements)
+
+        latency = time.time() - now
+        log.debug("latency: %s %f seconds", self.__class__.__name__, latency)
 
     def process_elements(self, elements):
         raise NotImplementedError()
