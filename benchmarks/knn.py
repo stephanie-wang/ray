@@ -10,11 +10,14 @@ import ray
 DEBUG = True
 
 logging.basicConfig()
-log = logging.getLogger()
+log = logging.getLogger(__name__)
 if DEBUG:
     log.setLevel(logging.DEBUG)
+else:
+    log.setLevel(logging.INFO)
 
-LEAF_SIZE = 2 ** 7
+# Leaf size of 2 ** 4 yields 6ms per knn_brute_force call, including ray.put.
+LEAF_SIZE = 2 ** 4
 BISECT_S = 5
 ALPHA = int(1 / 0.3)
 
@@ -30,7 +33,7 @@ def read_idx(filename):
 def load_mnist(mnist_filename):
     data = read_idx(mnist_filename)
     data = np.reshape(data, (data.shape[0], data.shape[1] * data.shape[2])).T
-    return data
+    return data / np.linalg.norm(data)
 
 
 # Helper methods for matrix operations.
@@ -40,19 +43,19 @@ def center(X):
 
 
 def bisect(X):
+    XTX = np.matmul(X.transpose(), X)
+
     q = np.zeros(X.shape[1])
     q[0] = 1
-    XTX = np.matmul(X.transpose(), X)
-    XTX_pow = XTX
+    Q_basis = [q]
+    for i in range(1, BISECT_S):
+        q = np.matmul(XTX, q)
+        Q_basis.append(q)
 
-    Q_basis = [q, np.matmul(XTX, q)]
-    for i in range(2, BISECT_S):
-        XTX_pow = np.matmul(XTX_pow, XTX)
-        Q_basis.append(np.matmul(XTX_pow, q))
     Q = np.stack(Q_basis, axis=1)
     Q, _ = np.linalg.qr(Q)
     T = np.matmul(np.matmul(Q.transpose(), XTX), Q)
-    eigs, eigvs = np.linalg.eigh(T)
+    _, eigvs = np.linalg.eigh(T)
 
     v = np.matmul(Q, eigvs[:, -1])
     margin = 0
@@ -92,15 +95,17 @@ def knn_brute_force(X, k, indices):
         G[i] = [j for (j, _) in neighbors]
     latency = time.time() - start
     log.debug("leaf size %d took %f seconds", len(indices), latency)
-    if DEBUG:
-        return G, distances, (latency, 1)
-    else:
-        return G, distances
+    return G, distances, (latency, 1)
 
 
 @ray.remote
 def knn(X_id, k, indices):
+    if DEBUG:
+        logging.basicConfig()
+        log.setLevel(logging.DEBUG)
+
     X = ray.get(X_id[0])
+
     log.debug("iteration size: %d", len(indices))
     if len(indices) <= LEAF_SIZE:
         return knn_brute_force(X, k, indices)
@@ -140,15 +145,12 @@ def knn(X_id, k, indices):
     log.debug("node conquer size %d took %f seconds", len(indices),
               time.time() - start)
 
-    if DEBUG:
-        latencies = knn_pos[2], knn_mid[2], knn_neg[2]
-        num_tasks = sum(count for _, count in latencies)
-        mean_latency = sum(subtask_latency * count for
-                           subtask_latency, count in latencies)
-        mean_latency = (mean_latency + latency) / (num_tasks + 1)
-        return G, distances, (mean_latency, num_tasks + 1)
-    else:
-        return G, distances
+    latencies = knn_pos[2], knn_mid[2], knn_neg[2]
+    num_tasks = sum(count for _, count in latencies)
+    mean_latency = sum(subtask_latency * count for
+                       subtask_latency, count in latencies)
+    mean_latency = (mean_latency + latency) / (num_tasks + 1)
+    return G, distances, (mean_latency, num_tasks + 1)
 
 
 if __name__ == '__main__':
@@ -171,16 +173,13 @@ if __name__ == '__main__':
             X = X[:, :args.num_samples]
     log.info("loading data took %f seconds", time.time() - start)
 
-    ray.init()
-    time.sleep(1)
+    ray.init(num_workers=100)
+    time.sleep(10)
 
     start = time.time()
     X_id = ray.put(X)
-    if DEBUG:
-        _, _, task_latencies = ray.get(
-            knn.remote([X_id], args.k, np.arange(X.shape[1])))
-        log.info("%d tasks with mean latency %f", task_latencies[1],
-                 task_latencies[0])
-    else:
-        ray.get(knn.remote([X_id], args.k, np.arange(X.shape[1])))
+    _, _, task_latencies = ray.get(
+        knn.remote([X_id], args.k, np.arange(X.shape[1])))
+    log.info("%d tasks with mean latency %f", task_latencies[1],
+             task_latencies[0])
     log.info("Ray took %f seconds", time.time() - start)
