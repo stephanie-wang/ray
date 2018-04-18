@@ -810,7 +810,15 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // Increment forward count for the forwarded task.
   lineage_cache_entry_task.GetTaskExecutionSpec().IncrementNumForwards();
 
-  // TODO: don't send the uncommitted lineage if GCS-only mode.
+  // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
+  // mode, remove the uncommitted entries from the lineage cache.
+  if (gcs_delay_ms_ >= 0) {
+    auto task_entry = uncommitted_lineage.PopEntry(task_id);
+    RAY_CHECK(task_entry);
+    uncommitted_lineage = Lineage();
+    RAY_CHECK(uncommitted_lineage.SetEntry(std::move(*task_entry)));
+  }
+
   flatbuffers::FlatBufferBuilder fbb;
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
   fbb.Finish(request);
