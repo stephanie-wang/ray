@@ -43,18 +43,18 @@ def center(X):
 
 
 def bisect(X):
-    XTX = np.matmul(X.transpose(), X)
-
     q = np.zeros(X.shape[1])
     q[0] = 1
     Q_basis = [q]
     for i in range(1, BISECT_S):
-        q = np.matmul(XTX, q)
+        q = np.matmul(X, q)
+        q = np.matmul(X.T, q)
         Q_basis.append(q)
 
     Q = np.stack(Q_basis, axis=1)
     Q, _ = np.linalg.qr(Q)
-    T = np.matmul(np.matmul(Q.transpose(), XTX), Q)
+    XQ = np.matmul(X, Q)
+    T = np.matmul(XQ.T, XQ)
     _, eigvs = np.linalg.eigh(T)
 
     v = np.matmul(Q, eigvs[:, -1])
