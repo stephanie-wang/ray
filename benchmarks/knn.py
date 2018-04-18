@@ -1,6 +1,6 @@
-import heapq
 import logging
 import numpy as np
+import scipy.spatial
 import struct
 import time
 
@@ -16,8 +16,8 @@ if DEBUG:
 else:
     log.setLevel(logging.INFO)
 
-# Leaf size of 2 ** 4 yields 6ms per knn_brute_force call, including ray.put.
-LEAF_SIZE = 2 ** 4
+# Leaf size of 2 ** 5 yields 1ms per knn_brute_force call, including ray.put.
+LEAF_SIZE = 2 ** 5
 BISECT_S = 5
 ALPHA = int(1 / 0.3)
 
@@ -80,19 +80,25 @@ def distance_key(i, j):
 
 def knn_brute_force(X, k, indices):
     start = time.time()
-    G = {}
+    X = X[:, indices]
+    # distances is a hash table keyed by (i, j), where i and j are indices into
+    # X, with i < j.
     distances = {}
-    for i in indices:
-        for j in indices:
-            if i < j:
-                distances[distance_key(i, j)] = np.linalg.norm(
-                    X[:, i] - X[:, j])
-    for i in indices:
-        neighbors = heapq.nsmallest(
-            k,
-            [(j, distances[distance_key(i, j)]) for j in indices if j != i],
-            key=lambda pair: pair[1])
-        G[i] = [j for (j, _) in neighbors]
+
+    # Compute all pairwise distances with scipy.
+    pdistances = scipy.spatial.distance.pdist(X.T)
+    pdistances_square = scipy.spatial.distance.squareform(pdistances)
+
+    for i in range(len(indices)):
+        for j in range(len(indices)):
+            if indices[i] < indices[j]:
+                distances[(indices[i], indices[j])] = pdistances_square[i, j]
+
+    # Get the k points that are closest to each point in the X subarray. Skip
+    # the first element since this should be the point itself.
+    index = np.argsort(pdistances_square)[:, 1:(k + 1)]
+    G = indices[index]
+
     latency = time.time() - start
     log.debug("leaf size %d took %f seconds", len(indices), latency)
     return G, distances, (latency, 1)
@@ -132,15 +138,37 @@ def knn(X_id, k, indices):
 
     start = time.time()
     distances = {**knn_pos[1], **knn_mid[1], **knn_neg[1]}
-    G = knn_pos[0]
+
+    G = np.zeros((len(indices), k))
+
+    G_pos = knn_pos[0]
     G_mid = knn_mid[0]
     G_neg = knn_neg[0]
-    for i in indices:
-        neighbors = [
-            (j, distances[distance_key(i, j)]) for j in
-            (G.get(i, []) + G_mid.get(i, []) + G_neg.get(i, []))]
-        G[i] = [j for (j, _) in
-                sorted(neighbors, key=lambda pair: pair[1])[:k]]
+
+    g = np.zeros(3 * k)
+    g_idx = np.zeros(3 * k)
+    i_pos, i_mid, i_neg = 0, 0, 0
+    for i, idx in enumerate(indices):
+        g_idx.fill(-1)
+        g.fill(np.inf)
+        if X_pos_condition[i]:
+            g_idx[:k] = G_pos[i_pos]
+            g[:k] = [distances[distance_key(idx, j_idx)] for j_idx in
+                     g_idx[:k]]
+            i_pos += 1
+        if X_mid_condition[i]:
+            g_idx[k:2 * k] = G_mid[i_mid]
+            g[k:2 * k] = [distances[distance_key(idx, j_idx)] for j_idx in
+                          g_idx[k:2 * k]]
+            i_mid += 1
+        if X_neg_condition[i]:
+            g_idx[2 * k:] = G_neg[i_neg]
+            g[2 * k:] = [distances[distance_key(idx, j_idx)] for j_idx in
+                         g_idx[2 * k:]]
+            i_neg += 1
+        _, nearest = np.unique(g, return_index=True)
+        G[i] = g_idx[nearest[:k]]
+
     latency += time.time() - start
     log.debug("node conquer size %d took %f seconds", len(indices),
               time.time() - start)
@@ -156,6 +184,7 @@ def knn(X_id, k, indices):
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument('--use-raylet', action='store_true')
     parser.add_argument('--data-file', type=str)
     parser.add_argument('--num-samples', type=int)
     parser.add_argument('--num-dimensions', type=int)
@@ -173,9 +202,10 @@ if __name__ == '__main__':
             X = X[:, :args.num_samples]
     log.info("loading data took %f seconds", time.time() - start)
 
-    ray.init(num_workers=100)
+    ray.init(use_raylet=args.use_raylet)
     time.sleep(10)
 
+    log.info("Starting...")
     start = time.time()
     X_id = ray.put(X)
     _, _, task_latencies = ray.get(
