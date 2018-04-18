@@ -1347,7 +1347,8 @@ def _init(address_info=None,
           plasma_directory=None,
           huge_pages=False,
           include_webui=True,
-          use_raylet=False):
+          use_raylet=False,
+          gcs_delay_ms=-1):
     """Helper method to connect to an existing Ray cluster or start a new one.
 
     This method handles two cases. Either a Ray cluster already exists and we
@@ -1470,7 +1471,8 @@ def _init(address_info=None,
             plasma_directory=plasma_directory,
             huge_pages=huge_pages,
             include_webui=include_webui,
-            use_raylet=use_raylet)
+            use_raylet=use_raylet,
+            gcs_delay_ms=gcs_delay_ms)
     else:
         if redis_address is None:
             raise Exception("When connecting to an existing cluster, "

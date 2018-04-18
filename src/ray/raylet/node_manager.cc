@@ -83,7 +83,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
                      gcs_client->raylet_task_table(), gcs_client->raylet_task_table()),
       remote_clients_(),
       remote_server_connections_(),
-      actor_registry_() {
+      actor_registry_(),
+      gcs_delay_ms_(config.gcs_delay_ms) {
   RAY_CHECK(heartbeat_period_ms_ > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -315,7 +316,8 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     // The task's uncommitted lineage was already added to the local lineage
     // cache upon the initial submission, so it's okay to resubmit it with an
     // empty lineage this time.
-    SubmitTask(method, Lineage());
+    // Skip the write to the GCS.
+    _SubmitTask(method, Lineage());
   }
 }
 
@@ -493,7 +495,12 @@ void NodeManager::ProcessNodeManagerMessage(
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpecReadonly().NumForwards();
-    SubmitTask(task, uncommitted_lineage);
+
+    std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+
+    // Skip the write to the GCS.
+    _SubmitTask(task, uncommitted_lineage);
   } break;
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
@@ -550,6 +557,51 @@ void NodeManager::ScheduleTasks() {
 }
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
+  TaskID task_id = task.GetTaskSpecification().TaskId();
+  if (gcs_delay_ms_ == 0) {
+    gcs_task_cache_.emplace(task_id, task);
+    FlushTask(task_id);
+  } else if (gcs_delay_ms_ > 0) {
+    auto gcs_delay = boost::posix_time::milliseconds(gcs_delay_ms_);
+    auto gcs_timer = std::unique_ptr<boost::asio::deadline_timer>(
+        new boost::asio::deadline_timer(io_service_, gcs_delay));
+    gcs_timer->async_wait([this, task_id](const boost::system::error_code &error) {
+      RAY_CHECK(!error);
+      gcs_task_timers_.erase(task_id);
+      FlushTask(task_id);
+    });
+    gcs_task_cache_.emplace(task_id, task);
+    gcs_task_timers_.emplace(task_id, std::move(gcs_timer));
+  } else {
+    _SubmitTask(task, uncommitted_lineage);
+  }
+}
+
+void NodeManager::FlushTask(const TaskID &task_id) {
+  auto task_entry = gcs_task_cache_.find(task_id);
+  RAY_CHECK(task_entry != gcs_task_cache_.end());
+
+  auto task = std::move(task_entry->second);
+  gcs_task_cache_.erase(task_entry);
+
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = task.ToFlatbuffer(fbb);
+  fbb.Finish(message);
+  auto task_data = std::make_shared<protocol::TaskT>();
+  auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
+  root->UnPackTo(task_data.get());
+
+  gcs::raylet::TaskTable::WriteCallback task_callback = [this](
+      ray::gcs::AsyncGcsClient *client, const TaskID &id,
+      const std::shared_ptr<protocol::TaskT> data) {
+    Task task(*data);
+    _SubmitTask(task, Lineage());
+  };
+  RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+      task.GetTaskSpecification().DriverId(), task_id, task_data, task_callback));
+}
+
+void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // Add the task and its uncommitted lineage to the lineage cache.
@@ -740,14 +792,16 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
   auto lookup_callback = [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
                                 const protocol::TaskT &task_data) {
     const Task task(task_data);
-    SubmitTask(task, Lineage());
+    // Skip the write to the GCS.
+    _SubmitTask(task, Lineage());
   };
   auto failure_callback = [this](ray::gcs::AsyncGcsClient *client,
                                  const TaskID &task_id) {
     Lineage lineage = lineage_cache_.GetUncommittedLineage(task_id);
     auto task_entry = lineage.GetEntry(task_id);
     RAY_CHECK(task_entry) << "Entry not found in GCS or lineage cache!";
-    SubmitTask(task_entry->TaskData(), lineage);
+    // Skip the write to the GCS.
+    _SubmitTask(task_entry->TaskData(), lineage);
   };
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id, lookup_callback, failure_callback));
@@ -757,8 +811,18 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
 
-  // Get and serialize the task's uncommitted lineage.
-  auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
+  Lineage uncommitted_lineage;
+  // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
+  // mode, remove the uncommitted entries from the lineage cache.
+  if (gcs_delay_ms_ >= 0) {
+    // TODO(swang): Don't get the uncommitted lineage for these tasks.
+    LineageEntry task_entry(task, GcsStatus_UNCOMMITTED_WAITING);
+    RAY_CHECK(uncommitted_lineage.SetEntry(std::move(task_entry)));
+  } else {
+    // Get and serialize the task's uncommitted lineage.
+    uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
+  }
+
   Task &lineage_cache_entry_task =
       uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
   // Increment forward count for the forwarded task.
