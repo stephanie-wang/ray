@@ -24,6 +24,7 @@ struct NodeManagerConfig {
   int num_initial_workers;
   std::vector<std::string> worker_command;
   uint64_t heartbeat_period_ms;
+  int gcs_delay_ms;
 };
 
 class NodeManager {
@@ -98,6 +99,11 @@ class NodeManager {
   /// "running" task state.
   void DispatchTasks();
 
+  /// Helper method for submitting a task. NOTE(swang): For benchmark
+  /// purposes only!
+  void _SubmitTask(const Task &task, const Lineage &uncommitted_lineage);
+  void FlushTask(const TaskID &task_id);
+
   boost::asio::io_service &io_service_;
   ObjectManager &object_manager_;
   /// A client connection to the GCS.
@@ -124,6 +130,13 @@ class NodeManager {
   std::unordered_map<ClientID, TcpServerConnection, UniqueIDHasher>
       remote_server_connections_;
   std::unordered_map<ActorID, ActorRegistration, UniqueIDHasher> actor_registry_;
+
+  // NOTE(swang): For benchmark purposes only. -1 means use lineage stash. >= 0
+  // means sleep for that many ms before writing to the GCS.
+  int gcs_delay_ms_;
+  std::unordered_map<TaskID, std::unique_ptr<boost::asio::deadline_timer>, UniqueIDHasher>
+      gcs_task_timers_;
+  std::unordered_map<TaskID, Task, UniqueIDHasher> gcs_task_cache_;
 };
 
 }  // namespace raylet

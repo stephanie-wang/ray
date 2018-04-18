@@ -6,7 +6,7 @@
 
 #ifndef RAYLET_TEST
 int main(int argc, char *argv[]) {
-  RAY_CHECK(argc == 9);
+  RAY_CHECK(argc >= 9);
 
   const std::string raylet_socket_name = std::string(argv[1]);
   const std::string store_socket_name = std::string(argv[2]);
@@ -16,6 +16,10 @@ int main(int argc, char *argv[]) {
   int num_initial_workers = std::stoi(argv[6]);
   const std::string worker_command = std::string(argv[7]);
   const std::string static_resource_list = std::string(argv[8]);
+  int gcs_delay_ms = -1;
+  if (argc == 10) {
+    gcs_delay_ms = std::stoi(argv[9]);
+  }
 
   // Configuration for the node manager.
   ray::raylet::NodeManagerConfig node_manager_config;
@@ -35,6 +39,7 @@ int main(int argc, char *argv[]) {
   RAY_LOG(INFO) << "Starting raylet with static resource configuration: "
                 << node_manager_config.resource_config.ToString();
   node_manager_config.num_initial_workers = num_initial_workers;
+  node_manager_config.gcs_delay_ms = gcs_delay_ms;
   // Use a default worker that can execute empty tasks with dependencies.
 
   std::stringstream worker_command_stream(worker_command);

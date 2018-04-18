@@ -913,7 +913,8 @@ def start_raylet(redis_address,
                  num_workers=0,
                  stdout_file=None,
                  stderr_file=None,
-                 cleanup=True):
+                 cleanup=True,
+                 gcs_delay_ms=-1):
     """Start a raylet, which is a combined local scheduler and object manager.
 
     Args:
@@ -959,7 +960,7 @@ def start_raylet(redis_address,
     command = [
         RAYLET_EXECUTABLE, raylet_name, plasma_store_name, node_ip_address,
         gcs_ip_address, gcs_port, str(num_workers), start_worker_command,
-        resource_argument,
+        resource_argument, str(gcs_delay_ms),
     ]
     if RUN_RAYLET_PROFILER:
         pid = subprocess.Popen(["valgrind", "--tool=callgrind"] + command,
@@ -1227,7 +1228,8 @@ def start_ray_processes(address_info=None,
                         plasma_directory=None,
                         huge_pages=False,
                         autoscaling_config=None,
-                        use_raylet=False):
+                        use_raylet=False,
+                        gcs_delay_ms=-1):
     """Helper method to start Ray processes.
 
     Args:
@@ -1482,7 +1484,8 @@ def start_ray_processes(address_info=None,
                     num_workers=workers_per_local_scheduler[i],
                     stdout_file=raylet_stdout_file,
                     stderr_file=raylet_stderr_file,
-                    cleanup=cleanup))
+                    cleanup=cleanup,
+                    gcs_delay_ms=gcs_delay_ms))
 
     if not use_raylet:
         # Start any workers that the local scheduler has not already started.
@@ -1536,7 +1539,8 @@ def start_ray_node(node_ip_address,
                    resources=None,
                    plasma_directory=None,
                    huge_pages=False,
-                   use_raylet=False):
+                   use_raylet=False,
+                   gcs_delay_ms=-1):
     """Start the Ray processes for a single node.
 
     This assumes that the Ray processes on some master node have already been
@@ -1594,7 +1598,8 @@ def start_ray_node(node_ip_address,
         resources=resources,
         plasma_directory=plasma_directory,
         huge_pages=huge_pages,
-        use_raylet=use_raylet)
+        use_raylet=use_raylet,
+        gcs_delay_ms=gcs_delay_ms)
 
 
 def start_ray_head(address_info=None,
@@ -1616,7 +1621,8 @@ def start_ray_head(address_info=None,
                    plasma_directory=None,
                    huge_pages=False,
                    autoscaling_config=None,
-                   use_raylet=False):
+                   use_raylet=False,
+                   gcs_delay_ms=-1):
     """Start Ray in local mode.
 
     Args:
@@ -1693,7 +1699,8 @@ def start_ray_head(address_info=None,
         plasma_directory=plasma_directory,
         huge_pages=huge_pages,
         autoscaling_config=autoscaling_config,
-        use_raylet=use_raylet)
+        use_raylet=use_raylet,
+        gcs_delay_ms=gcs_delay_ms)
 
 
 def try_to_create_directory(directory_path):

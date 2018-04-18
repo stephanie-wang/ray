@@ -83,7 +83,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
                      gcs_client->raylet_task_table(), gcs_client->raylet_task_table()),
       remote_clients_(),
       remote_server_connections_(),
-      actor_registry_() {
+      actor_registry_(),
+      gcs_delay_ms_(config.gcs_delay_ms) {
   RAY_CHECK(heartbeat_period_ms_ > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -550,6 +551,51 @@ void NodeManager::ScheduleTasks() {
 }
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
+  TaskID task_id = task.GetTaskSpecification().TaskId();
+  if (gcs_delay_ms_ == 0) {
+    gcs_task_cache_.emplace(task_id, task);
+    FlushTask(task_id);
+  } else if (gcs_delay_ms_ > 0) {
+    auto gcs_delay = boost::posix_time::milliseconds(gcs_delay_ms_);
+    auto gcs_timer = std::unique_ptr<boost::asio::deadline_timer>(
+        new boost::asio::deadline_timer(io_service_, gcs_delay));
+    gcs_timer->async_wait([this, task_id](const boost::system::error_code &error) {
+      RAY_CHECK(!error);
+      gcs_task_timers_.erase(task_id);
+      FlushTask(task_id);
+    });
+    gcs_task_cache_.emplace(task_id, task);
+    gcs_task_timers_.emplace(task_id, std::move(gcs_timer));
+  } else {
+    _SubmitTask(task, uncommitted_lineage);
+  }
+}
+
+void NodeManager::FlushTask(const TaskID &task_id) {
+  auto task_entry = gcs_task_cache_.find(task_id);
+  RAY_CHECK(task_entry != gcs_task_cache_.end());
+
+  auto task = std::move(task_entry->second);
+  gcs_task_cache_.erase(task_entry);
+
+  flatbuffers::FlatBufferBuilder fbb;
+  auto message = task.ToFlatbuffer(fbb);
+  fbb.Finish(message);
+  auto task_data = std::make_shared<protocol::TaskT>();
+  auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
+  root->UnPackTo(task_data.get());
+
+  gcs::raylet::TaskTable::WriteCallback task_callback = [this](
+      ray::gcs::AsyncGcsClient *client, const TaskID &id,
+      const std::shared_ptr<protocol::TaskT> data) {
+    Task task(*data);
+    _SubmitTask(task, Lineage());
+  };
+  RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+      task.GetTaskSpecification().DriverId(), task_id, task_data, task_callback));
+}
+
+void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // Add the task and its uncommitted lineage to the lineage cache.
@@ -764,6 +810,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // Increment forward count for the forwarded task.
   lineage_cache_entry_task.GetTaskExecutionSpec().IncrementNumForwards();
 
+  // TODO: don't send the uncommitted lineage if GCS-only mode.
   flatbuffers::FlatBufferBuilder fbb;
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
   fbb.Finish(request);
