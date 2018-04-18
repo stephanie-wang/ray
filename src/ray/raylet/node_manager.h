@@ -94,6 +94,9 @@ class NodeManager {
                       const HeartbeatTableDataT &data);
   /// Send notifications to the GCS about objects that are pending creation.
   void PendingObjectsHeartbeat();
+  /// Dispatch locally scheduled tasks. This attempts the transition from "scheduled" to
+  /// "running" task state.
+  void DispatchTasks();
 
   boost::asio::io_service &io_service_;
   ObjectManager &object_manager_;

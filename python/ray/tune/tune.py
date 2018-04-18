@@ -16,7 +16,6 @@ from ray.tune.trial_scheduler import FIFOScheduler
 from ray.tune.web_server import TuneServer
 from ray.tune.experiment import Experiment
 
-
 _SCHEDULERS = {
     "FIFO": FIFOScheduler,
     "MedianStopping": MedianStoppingRule,
@@ -30,13 +29,16 @@ def _make_scheduler(args):
     if args.scheduler in _SCHEDULERS:
         return _SCHEDULERS[args.scheduler](**args.scheduler_config)
     else:
-        raise TuneError(
-            "Unknown scheduler: {}, should be one of {}".format(
-                args.scheduler, _SCHEDULERS.keys()))
+        raise TuneError("Unknown scheduler: {}, should be one of {}".format(
+            args.scheduler, _SCHEDULERS.keys()))
 
 
-def run_experiments(experiments, scheduler=None, with_server=False,
-                    server_port=TuneServer.DEFAULT_PORT, verbose=True):
+def run_experiments(experiments,
+                    scheduler=None,
+                    with_server=False,
+                    server_port=TuneServer.DEFAULT_PORT,
+                    verbose=True,
+                    queue_trials=False):
     """Tunes experiments.
 
     Args:
@@ -48,23 +50,32 @@ def run_experiments(experiments, scheduler=None, with_server=False,
             using the Client API.
         server_port (int): Port number for launching TuneServer.
         verbose (bool): How much output should be printed for each trial.
+        queue_trials (bool): Whether to queue trials when the cluster does
+            not currently have enough resources to launch one. This should
+            be set to True when running on an autoscaling cluster to enable
+            automatic scale-up.
     """
 
     if scheduler is None:
         scheduler = FIFOScheduler()
 
     runner = TrialRunner(
-        scheduler, launch_web_server=with_server, server_port=server_port,
-        verbose=verbose)
+        scheduler,
+        launch_web_server=with_server,
+        server_port=server_port,
+        verbose=verbose,
+        queue_trials=queue_trials)
     exp_list = experiments
     if isinstance(experiments, Experiment):
         exp_list = [experiments]
     elif type(experiments) is dict:
-        exp_list = [Experiment.from_json(name, spec)
-                    for name, spec in experiments.items()]
+        exp_list = [
+            Experiment.from_json(name, spec)
+            for name, spec in experiments.items()
+        ]
 
-    if (type(exp_list) is list and
-            all(isinstance(exp, Experiment) for exp in exp_list)):
+    if (type(exp_list) is list
+            and all(isinstance(exp, Experiment) for exp in exp_list)):
         for experiment in exp_list:
             scheduler.add_experiment(experiment, runner)
     else:

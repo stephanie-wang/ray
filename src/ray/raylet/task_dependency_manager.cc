@@ -13,8 +13,17 @@ TaskDependencyManager::TaskDependencyManager(
       task_waiting_callback_(task_waiting_handler) {
 }
 
+bool TaskDependencyManager::CheckObjectLocal(const ObjectID &object_id) const {
+  auto entry = local_objects_.find(object_id);
+  if (entry == local_objects_.end()) {
+    return false;
+  }
+  return entry->second.status == ObjectAvailability::kLocal;
+}
+
 void TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {
   RAY_LOG(DEBUG) << "object ready " << object_id.hex();
+
   // Add the object to the table of locally available objects.
   auto &object_entry = local_objects_[object_id];
   RAY_CHECK(object_entry.status != ObjectAvailability::kLocal);

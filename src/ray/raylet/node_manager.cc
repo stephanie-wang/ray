@@ -209,7 +209,7 @@ void NodeManager::Heartbeat() {
 
 void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   ClientID client_id = ClientID::from_binary(client_data.client_id);
-  RAY_LOG(DEBUG) << "[ClientAdded] received callback from client id " << client_id.hex();
+  RAY_LOG(DEBUG) << "[ClientAdded] received callback from client id " << client_id;
   if (client_id == gcs_client_->client_table().GetLocalClientId()) {
     // We got a notification for ourselves, so we are connected to the GCS now.
     // Save this NodeManager's resource information in the cluster resource map.
@@ -219,12 +219,12 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   // TODO(atumanov): make remote client lookup O(1)
   if (std::find(remote_clients_.begin(), remote_clients_.end(), client_id) ==
       remote_clients_.end()) {
-    RAY_LOG(DEBUG) << "a new client: " << client_id.hex();
+    RAY_LOG(DEBUG) << "a new client: " << client_id;
     remote_clients_.push_back(client_id);
   } else {
     // NodeManager connection to this client was already established.
     RAY_LOG(DEBUG) << "received a new client connection that already exists: "
-                   << client_id.hex();
+                   << client_id;
     return;
   }
 
@@ -247,8 +247,7 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
 
 void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &client_id,
                                  const HeartbeatTableDataT &heartbeat_data) {
-  RAY_LOG(DEBUG) << "[HeartbeatAdded]: received heartbeat from client id "
-                 << client_id.hex();
+  RAY_LOG(DEBUG) << "[HeartbeatAdded]: received heartbeat from client id " << client_id;
   if (client_id == gcs_client_->client_table().GetLocalClientId()) {
     // Skip heartbeats from self.
     return;
@@ -258,7 +257,7 @@ void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &cl
   if (this->cluster_resource_map_.count(client_id) == 0) {
     // Haven't received the client registration for this client yet, skip this heartbeat.
     RAY_LOG(INFO) << "[HeartbeatAdded]: received heartbeat from unknown client id "
-                  << client_id.hex();
+                  << client_id;
     return;
   }
   SchedulingResources &resources = this->cluster_resource_map_[client_id];
@@ -325,6 +324,31 @@ void NodeManager::ProcessNewClient(std::shared_ptr<LocalClientConnection> client
   client->ProcessMessages();
 }
 
+void NodeManager::DispatchTasks() {
+  // Work with a copy of scheduled tasks.
+  auto scheduled_tasks = local_queues_.GetScheduledTasks();
+  // Return if there are no tasks to schedule.
+  if (scheduled_tasks.empty()) {
+    return;
+  }
+  const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
+
+  for (const auto &task : scheduled_tasks) {
+    const auto &local_resources =
+        cluster_resource_map_[my_client_id].GetAvailableResources();
+    const auto &task_resources = task.GetTaskSpecification().GetRequiredResources();
+    if (!task_resources.IsSubset(local_resources)) {
+      // Not enough local resources for this task right now, skip this task.
+      continue;
+    }
+    // We have enough resources for this task. Assign task.
+    // TODO(atumanov): perform the task state/queue transition inside AssignTask.
+    auto dispatched_task =
+        local_queues_.RemoveTasks({task.GetTaskSpecification().TaskId()});
+    AssignTask(dispatched_task.front());
+  }
+}
+
 void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> client,
                                        int64_t message_type,
                                        const uint8_t *message_data) {
@@ -349,21 +373,9 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     }
     // Return the worker to the idle pool.
     worker_pool_.PushWorker(worker);
-    // Check if there is a scheduled task that can now be assigned to the newly
-    // idle worker.
-    auto scheduled_tasks = local_queues_.GetScheduledTasks();
-    if (!scheduled_tasks.empty()) {
-      // Find a scheduled task that whose actor ID matches that of the newly
-      // idle worker.
-      auto worker_actor_id = worker->GetActorId();
-      for (const auto &task : scheduled_tasks) {
-        if (task.GetTaskSpecification().ActorId() == worker_actor_id) {
-          auto scheduled_tasks =
-              local_queues_.RemoveTasks({task.GetTaskSpecification().TaskId()});
-          AssignTask(scheduled_tasks.front());
-        }
-      }
-    }
+    // Call task dispatch to assign work to the new worker.
+    DispatchTasks();
+
   } break;
   case protocol::MessageType_DisconnectClient: {
     // Remove the dead worker from the pool and stop listening for messages.
@@ -393,7 +405,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // TODO(hme): handle multiple object ids.
     auto message = flatbuffers::GetRoot<protocol::ReconstructObject>(message_data);
     ObjectID object_id = from_flatbuf(*message->object_id());
-    RAY_LOG(DEBUG) << "reconstructing object " << object_id.hex();
+    RAY_LOG(DEBUG) << "reconstructing object " << object_id;
     RAY_CHECK_OK(object_manager_.Pull(object_id));
   } break;
 
@@ -443,6 +455,7 @@ void NodeManager::HandleReadyTaskWaiting(const TaskID &task_id) {
 }
 
 void NodeManager::ScheduleTasks() {
+  // This method performs the transition of tasks from PENDING to SCHEDULED.
   auto policy_decision = scheduling_policy_.Schedule(
       cluster_resource_map_, gcs_client_->client_table().GetLocalClientId(),
       remote_clients_);
@@ -450,12 +463,12 @@ void NodeManager::ScheduleTasks() {
   for (const auto &pair : policy_decision) {
     TaskID task_id = pair.first;
     ClientID client_id = pair.second;
-    RAY_LOG(DEBUG) << task_id.hex() << " --> " << client_id.hex();
+    RAY_LOG(DEBUG) << task_id << " --> " << client_id;
   }
 
   // Extract decision for this local scheduler.
   std::unordered_set<TaskID, UniqueIDHasher> local_task_ids;
-  // Iterate over (taskid, clientid) pairs, extract tasks to run on the local client.
+  // Iterate over (taskid, clientid) pairs, extract tasks assigned to the local node.
   for (const auto &task_schedule : policy_decision) {
     TaskID task_id = task_schedule.first;
     ClientID client_id = task_schedule.second;
@@ -471,11 +484,10 @@ void NodeManager::ScheduleTasks() {
     }
   }
 
-  // Assign the tasks to workers.
+  // Transition locally scheduled tasks to SCHEDULED and dispatch scheduled tasks.
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
-  for (auto &task : tasks) {
-    AssignTask(task);
-  }
+  local_queues_.QueueScheduledTasks(tasks);
+  DispatchTasks();
 }
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
@@ -547,11 +559,6 @@ void NodeManager::AssignTask(Task &task) {
     }
   }
 
-  // Resource accounting: acquire resources for the scheduled task.
-  const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
-  RAY_CHECK(
-      this->cluster_resource_map_[my_client_id].Acquire(spec.GetRequiredResources()));
-
   // Try to get an idle worker that can execute this task.
   std::shared_ptr<Worker> worker = worker_pool_.PopWorker(spec.ActorId());
   if (worker == nullptr) {
@@ -575,6 +582,11 @@ void NodeManager::AssignTask(Task &task) {
   auto status = worker->Connection()->WriteMessage(protocol::MessageType_ExecuteTask,
                                                    fbb.GetSize(), fbb.GetBufferPointer());
   if (status.ok()) {
+    // Resource accounting: acquire resources for the assigned task.
+    const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
+    RAY_CHECK(
+        this->cluster_resource_map_[my_client_id].Acquire(spec.GetRequiredResources()));
+
     // We successfully assigned the task to the worker.
     worker->AssignTaskId(spec.TaskId());
     // If the task was an actor task, then record this execution to guarantee
@@ -683,7 +695,8 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
 }
 
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
-  auto task_id = task.GetTaskSpecification().TaskId();
+  const auto &spec = task.GetTaskSpecification();
+  auto task_id = spec.TaskId();
 
   // Get and serialize the task's uncommitted lineage.
   auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
@@ -696,8 +709,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
   fbb.Finish(request);
 
-  RAY_LOG(DEBUG) << "Forwarding task " << task_id.hex() << " to " << node_id.hex()
-                 << " spillback="
+  RAY_LOG(DEBUG) << "Forwarding task " << task_id << " to " << node_id << " spillback="
                  << lineage_cache_entry_task.GetTaskExecutionSpec().NumForwards();
 
   auto client_info = gcs_client_->client_table().GetClient(node_id);
@@ -705,8 +717,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // Lookup remote server connection for this node_id and use it to send the request.
   if (remote_server_connections_.count(node_id) == 0) {
     // TODO(atumanov): caller must handle failure to ensure tasks are not lost.
-    RAY_LOG(INFO) << "No NodeManager connection found for GCS client id "
-                  << node_id.hex();
+    RAY_LOG(INFO) << "No NodeManager connection found for GCS client id " << node_id;
     return ray::Status::IOError("NodeManager connection not found");
   }
 
@@ -721,11 +732,30 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     // Tell the task dependency manager that we no longer need this task's
     // object dependencies.
     task_dependency_manager_.UnsubscribeForwardedTask(task_id);
+
+    // Preemptively push any local arguments to the receiving node. For now, we
+    // only do this with actor tasks, since actor tasks must be executed by a
+    // specific process and therefore have affinity to the receiving node.
+    if (spec.IsActorTask()) {
+      // Iterate through the object's arguments. NOTE(swang): We do not include
+      // the execution dependencies here since those cannot be transferred
+      // between nodes.
+      for (int i = 0; i < spec.NumArgs(); ++i) {
+        int count = spec.ArgIdCount(i);
+        for (int j = 0; j < count; j++) {
+          ObjectID argument_id = spec.ArgId(i, j);
+          // If the argument is local, then push it to the receiving node.
+          if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
+            RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
+          }
+        }
+      }
+    }
   } else {
     // TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
     // lost.
-    RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task "
-                   << task_id.hex() << " to node " << node_id.hex();
+    RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
+                   << " to node " << node_id;
   }
   return status;
 }

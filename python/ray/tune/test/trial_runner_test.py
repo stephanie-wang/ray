@@ -12,7 +12,7 @@ from ray.rllib import _register_all
 from ray.tune import Trainable, TuneError
 from ray.tune import register_env, register_trainable, run_experiments
 from ray.tune.registry import _default_registry, TRAINABLE_CLASS
-from ray.tune.result import DEFAULT_RESULTS_DIR
+from ray.tune.result import DEFAULT_RESULTS_DIR, TrainingResult
 from ray.tune.util import pin_in_object_store, get_pinned_object
 from ray.tune.experiment import Experiment
 from ray.tune.trial import Trial, Resources
@@ -23,7 +23,7 @@ from ray.tune.variant_generator import generate_trials, grid_search, \
 
 class TrainableFunctionApiTest(unittest.TestCase):
     def setUp(self):
-        ray.init()
+        ray.init(num_cpus=4, num_gpus=0)
 
     def tearDown(self):
         ray.worker.cleanup()
@@ -37,6 +37,25 @@ class TrainableFunctionApiTest(unittest.TestCase):
             return get_pinned_object(X)
 
         self.assertEqual(ray.get(f.remote()), "hello")
+
+    def testFetchPinned(self):
+        X = pin_in_object_store("hello")
+
+        def train(config, reporter):
+            get_pinned_object(X)
+            reporter(timesteps_total=100, done=True)
+
+        register_trainable("f1", train)
+        [trial] = run_experiments({
+            "foo": {
+                "run": "f1",
+                "config": {
+                    "script_min_iter_time_s": 0,
+                },
+            }
+        })
+        self.assertEqual(trial.status, Trial.TERMINATED)
+        self.assertEqual(trial.last_result.timesteps_total, 100)
 
     def testRegisterEnv(self):
         register_env("foo", lambda: None)
@@ -57,166 +76,252 @@ class TrainableFunctionApiTest(unittest.TestCase):
         self.assertRaises(TypeError, lambda: register_trainable("foo", B()))
         self.assertRaises(TypeError, lambda: register_trainable("foo", A))
 
+    def testBuiltInTrainableResources(self):
+        class B(Trainable):
+            @classmethod
+            def default_resource_request(cls, config):
+                return Resources(cpu=config["cpu"], gpu=config["gpu"])
+
+            def _train(self):
+                return TrainingResult(timesteps_this_iter=1, done=True)
+
+        register_trainable("B", B)
+
+        def f(cpus, gpus, queue_trials):
+            return run_experiments(
+                {
+                    "foo": {
+                        "run": "B",
+                        "config": {
+                            "cpu": cpus,
+                            "gpu": gpus,
+                        },
+                    }
+                },
+                queue_trials=queue_trials)[0]
+
+        # Should all succeed
+        self.assertEqual(f(0, 0, False).status, Trial.TERMINATED)
+        self.assertEqual(f(1, 0, True).status, Trial.TERMINATED)
+        self.assertEqual(f(1, 0, True).status, Trial.TERMINATED)
+
+        # Infeasible even with queueing enabled (no gpus)
+        self.assertRaises(TuneError, lambda: f(1, 1, True))
+
+        # Too large resource request
+        self.assertRaises(TuneError, lambda: f(100, 100, False))
+        self.assertRaises(TuneError, lambda: f(0, 100, False))
+        self.assertRaises(TuneError, lambda: f(100, 0, False))
+
+        # TODO(ekl) how can we test this is queued (hangs)?
+        # f(100, 0, True)
+
     def testRewriteEnv(self):
         def train(config, reporter):
             reporter(timesteps_total=1)
+
         register_trainable("f1", train)
 
-        [trial] = run_experiments({"foo": {
-            "run": "f1",
-            "env": "CartPole-v0",
-        }})
+        [trial] = run_experiments({
+            "foo": {
+                "run": "f1",
+                "env": "CartPole-v0",
+            }
+        })
         self.assertEqual(trial.config["env"], "CartPole-v0")
 
     def testConfigPurity(self):
         def train(config, reporter):
             assert config == {"a": "b"}, config
             reporter(timesteps_total=1)
+
         register_trainable("f1", train)
-        run_experiments({"foo": {
-            "run": "f1",
-            "config": {"a": "b"},
-        }})
+        run_experiments({
+            "foo": {
+                "run": "f1",
+                "config": {
+                    "a": "b"
+                },
+            }
+        })
 
     def testLogdir(self):
         def train(config, reporter):
             assert "/tmp/logdir/foo" in os.getcwd(), os.getcwd()
             reporter(timesteps_total=1)
+
         register_trainable("f1", train)
-        run_experiments({"foo": {
-            "run": "f1",
-            "local_dir": "/tmp/logdir",
-            "config": {"a": "b"},
-        }})
+        run_experiments({
+            "foo": {
+                "run": "f1",
+                "local_dir": "/tmp/logdir",
+                "config": {
+                    "a": "b"
+                },
+            }
+        })
 
     def testLongFilename(self):
         def train(config, reporter):
             assert "/tmp/logdir/foo" in os.getcwd(), os.getcwd()
             reporter(timesteps_total=1)
+
         register_trainable("f1", train)
-        run_experiments({"foo": {
-            "run": "f1",
-            "local_dir": "/tmp/logdir",
-            "config": {
-                "a" * 50: lambda spec: 5.0 / 7,
-                "b" * 50: lambda spec: "long" * 40},
-        }})
+        run_experiments({
+            "foo": {
+                "run": "f1",
+                "local_dir": "/tmp/logdir",
+                "config": {
+                    "a" * 50: lambda spec: 5.0 / 7,
+                    "b" * 50: lambda spec: "long" * 40
+                },
+            }
+        })
 
     def testBadParams(self):
         def f():
             run_experiments({"foo": {}})
+
         self.assertRaises(TuneError, f)
 
     def testBadParams2(self):
         def f():
-            run_experiments({"foo": {
-                "run": "asdf",
-                "bah": "this param is not allowed",
-            }})
+            run_experiments({
+                "foo": {
+                    "run": "asdf",
+                    "bah": "this param is not allowed",
+                }
+            })
+
         self.assertRaises(TuneError, f)
 
     def testBadParams3(self):
         def f():
-            run_experiments({"foo": {
-                "run": grid_search("invalid grid search"),
-            }})
+            run_experiments({
+                "foo": {
+                    "run": grid_search("invalid grid search"),
+                }
+            })
+
         self.assertRaises(TuneError, f)
 
     def testBadParams4(self):
         def f():
-            run_experiments({"foo": {
-                "run": "asdf",
-            }})
+            run_experiments({
+                "foo": {
+                    "run": "asdf",
+                }
+            })
+
         self.assertRaises(TuneError, f)
 
     def testBadParams5(self):
         def f():
-            run_experiments({"foo": {
-                "run": "PPO",
-                "stop": {"asdf": 1}
-            }})
+            run_experiments({"foo": {"run": "PPO", "stop": {"asdf": 1}}})
+
         self.assertRaises(TuneError, f)
 
     def testBadParams6(self):
         def f():
-            run_experiments({"foo": {
-                "run": "PPO",
-                "trial_resources": {"asdf": 1}
-            }})
+            run_experiments({
+                "foo": {
+                    "run": "PPO",
+                    "trial_resources": {
+                        "asdf": 1
+                    }
+                }
+            })
+
         self.assertRaises(TuneError, f)
 
     def testBadReturn(self):
         def train(config, reporter):
             reporter()
+
         register_trainable("f1", train)
 
         def f():
-            run_experiments({"foo": {
-                "run": "f1",
-                "config": {
-                    "script_min_iter_time_s": 0,
-                },
-            }})
+            run_experiments({
+                "foo": {
+                    "run": "f1",
+                    "config": {
+                        "script_min_iter_time_s": 0,
+                    },
+                }
+            })
+
         self.assertRaises(TuneError, f)
 
     def testEarlyReturn(self):
         def train(config, reporter):
             reporter(timesteps_total=100, done=True)
             time.sleep(99999)
+
         register_trainable("f1", train)
-        [trial] = run_experiments({"foo": {
-            "run": "f1",
-            "config": {
-                "script_min_iter_time_s": 0,
-            },
-        }})
+        [trial] = run_experiments({
+            "foo": {
+                "run": "f1",
+                "config": {
+                    "script_min_iter_time_s": 0,
+                },
+            }
+        })
         self.assertEqual(trial.status, Trial.TERMINATED)
         self.assertEqual(trial.last_result.timesteps_total, 100)
 
     def testAbruptReturn(self):
         def train(config, reporter):
             reporter(timesteps_total=100)
+
         register_trainable("f1", train)
-        [trial] = run_experiments({"foo": {
-            "run": "f1",
-            "config": {
-                "script_min_iter_time_s": 0,
-            },
-        }})
+        [trial] = run_experiments({
+            "foo": {
+                "run": "f1",
+                "config": {
+                    "script_min_iter_time_s": 0,
+                },
+            }
+        })
         self.assertEqual(trial.status, Trial.TERMINATED)
         self.assertEqual(trial.last_result.timesteps_total, 100)
 
     def testErrorReturn(self):
         def train(config, reporter):
             raise Exception("uh oh")
+
         register_trainable("f1", train)
 
         def f():
-            run_experiments({"foo": {
-                "run": "f1",
-                "config": {
-                    "script_min_iter_time_s": 0,
-                },
-            }})
+            run_experiments({
+                "foo": {
+                    "run": "f1",
+                    "config": {
+                        "script_min_iter_time_s": 0,
+                    },
+                }
+            })
+
         self.assertRaises(TuneError, f)
 
     def testSuccess(self):
         def train(config, reporter):
             for i in range(100):
                 reporter(timesteps_total=i)
+
         register_trainable("f1", train)
-        [trial] = run_experiments({"foo": {
-            "run": "f1",
-            "config": {
-                "script_min_iter_time_s": 0,
-            },
-        }})
+        [trial] = run_experiments({
+            "foo": {
+                "run": "f1",
+                "config": {
+                    "script_min_iter_time_s": 0,
+                },
+            }
+        })
         self.assertEqual(trial.status, Trial.TERMINATED)
         self.assertEqual(trial.last_result.timesteps_total, 99)
 
 
 class RunExperimentTest(unittest.TestCase):
-
     def setUp(self):
         ray.init()
 
@@ -228,6 +333,7 @@ class RunExperimentTest(unittest.TestCase):
         def train(config, reporter):
             for i in range(100):
                 reporter(timesteps_total=i)
+
         register_trainable("f1", train)
         trials = run_experiments({
             "foo": {
@@ -251,13 +357,14 @@ class RunExperimentTest(unittest.TestCase):
         def train(config, reporter):
             for i in range(100):
                 reporter(timesteps_total=i)
+
         register_trainable("f1", train)
         exp1 = Experiment(**{
-                "name": "foo",
-                "run": "f1",
-                "config": {
-                    "script_min_iter_time_s": 0
-                }
+            "name": "foo",
+            "run": "f1",
+            "config": {
+                "script_min_iter_time_s": 0
+            }
         })
         [trial] = run_experiments(exp1)
         self.assertEqual(trial.status, Trial.TERMINATED)
@@ -267,20 +374,21 @@ class RunExperimentTest(unittest.TestCase):
         def train(config, reporter):
             for i in range(100):
                 reporter(timesteps_total=i)
+
         register_trainable("f1", train)
         exp1 = Experiment(**{
-                "name": "foo",
-                "run": "f1",
-                "config": {
-                    "script_min_iter_time_s": 0
-                }
+            "name": "foo",
+            "run": "f1",
+            "config": {
+                "script_min_iter_time_s": 0
+            }
         })
         exp2 = Experiment(**{
-                "name": "bar",
-                "run": "f1",
-                "config": {
-                    "script_min_iter_time_s": 0
-                }
+            "name": "bar",
+            "run": "f1",
+            "config": {
+                "script_min_iter_time_s": 0
+            }
         })
         trials = run_experiments([exp1, exp2])
         for trial in trials:
@@ -289,6 +397,13 @@ class RunExperimentTest(unittest.TestCase):
 
 
 class VariantGeneratorTest(unittest.TestCase):
+    def setUp(self):
+        ray.init()
+
+    def tearDown(self):
+        ray.worker.cleanup()
+        _register_all()  # re-register the evicted objects
+
     def testParseToTrials(self):
         trials = generate_trials({
             "run": "PPO",
@@ -306,9 +421,8 @@ class VariantGeneratorTest(unittest.TestCase):
         self.assertEqual(trials[0].trainable_name, "PPO")
         self.assertEqual(trials[0].experiment_tag, "0")
         self.assertEqual(trials[0].max_failures, 5)
-        self.assertEqual(
-            trials[0].local_dir,
-            os.path.join(DEFAULT_RESULTS_DIR, "tune-pong"))
+        self.assertEqual(trials[0].local_dir,
+                         os.path.join(DEFAULT_RESULTS_DIR, "tune-pong"))
         self.assertEqual(trials[1].experiment_tag, "1")
 
     def testEval(self):
@@ -392,11 +506,13 @@ class VariantGeneratorTest(unittest.TestCase):
         trials = generate_trials({
             "run": "PPO",
             "config": {
-                "x": grid_search([
+                "x":
+                grid_search([
                     lambda spec: spec.config.y * 100,
                     lambda spec: spec.config.y * 200
                 ]),
-                "y": lambda spec: 1,
+                "y":
+                lambda spec: 1,
             },
         })
         trials = list(trials)
@@ -406,12 +522,13 @@ class VariantGeneratorTest(unittest.TestCase):
 
     def testRecursiveDep(self):
         try:
-            list(generate_trials({
-                "run": "PPO",
-                "config": {
-                    "foo": lambda spec: spec.config.foo,
-                },
-            }))
+            list(
+                generate_trials({
+                    "run": "PPO",
+                    "config": {
+                        "foo": lambda spec: spec.config.foo,
+                    },
+                }))
         except RecursiveDependencyError as e:
             assert "`foo` recursively depends on" in str(e), e
         else:
@@ -442,12 +559,15 @@ class TrialRunnerTest(unittest.TestCase):
 
         register_trainable("f1", train)
 
-        experiments = {"foo": {
-            "run": "f1",
-            "config": {
-                "a" * 50: lambda spec: 5.0 / 7,
-                "b" * 50: lambda spec: "long" * 40},
-        }}
+        experiments = {
+            "foo": {
+                "run": "f1",
+                "config": {
+                    "a" * 50: lambda spec: 5.0 / 7,
+                    "b" * 50: lambda spec: "long" * 40
+                },
+            }
+        }
 
         for name, spec in experiments.items():
             for trial in generate_trials(spec, name):
@@ -458,7 +578,7 @@ class TrialRunnerTest(unittest.TestCase):
     def testTrialErrorOnStart(self):
         ray.init()
         _default_registry.register(TRAINABLE_CLASS, "asdf", None)
-        trial = Trial("asdf")
+        trial = Trial("asdf", resources=Resources(1, 0))
         try:
             trial.start()
         except Exception as e:
@@ -468,12 +588,12 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=4, num_gpus=2)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 1},
+            "stopping_criterion": {
+                "training_iteration": 1
+            },
             "resources": Resources(cpu=1, gpu=0, extra_cpu=3, extra_gpu=1),
         }
-        trials = [
-            Trial("__fake", **kwargs),
-            Trial("__fake", **kwargs)]
+        trials = [Trial("__fake", **kwargs), Trial("__fake", **kwargs)]
         for t in trials:
             runner.add_trial(t)
 
@@ -489,12 +609,12 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=4, num_gpus=1)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 1},
+            "stopping_criterion": {
+                "training_iteration": 1
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
-        trials = [
-            Trial("__fake", **kwargs),
-            Trial("__fake", **kwargs)]
+        trials = [Trial("__fake", **kwargs), Trial("__fake", **kwargs)]
         for t in trials:
             runner.add_trial(t)
 
@@ -518,12 +638,12 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=4, num_gpus=2)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 5},
+            "stopping_criterion": {
+                "training_iteration": 5
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
-        trials = [
-            Trial("__fake", **kwargs),
-            Trial("__fake", **kwargs)]
+        trials = [Trial("__fake", **kwargs), Trial("__fake", **kwargs)]
         for t in trials:
             runner.add_trial(t)
 
@@ -547,13 +667,13 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=4, num_gpus=2)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 1},
+            "stopping_criterion": {
+                "training_iteration": 1
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
         _default_registry.register(TRAINABLE_CLASS, "asdf", None)
-        trials = [
-            Trial("asdf", **kwargs),
-            Trial("__fake", **kwargs)]
+        trials = [Trial("asdf", **kwargs), Trial("__fake", **kwargs)]
         for t in trials:
             runner.add_trial(t)
 
@@ -644,7 +764,9 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=1, num_gpus=1)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 1},
+            "stopping_criterion": {
+                "training_iteration": 1
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
         runner.add_trial(Trial("__fake", **kwargs))
@@ -675,7 +797,9 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=1, num_gpus=1)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 2},
+            "stopping_criterion": {
+                "training_iteration": 2
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
         runner.add_trial(Trial("__fake", **kwargs))
@@ -692,7 +816,9 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=1, num_gpus=1)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 2},
+            "stopping_criterion": {
+                "training_iteration": 2
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
         runner.add_trial(Trial("__fake", **kwargs))
@@ -721,14 +847,17 @@ class TrialRunnerTest(unittest.TestCase):
         ray.init(num_cpus=4, num_gpus=2)
         runner = TrialRunner()
         kwargs = {
-            "stopping_criterion": {"training_iteration": 5},
+            "stopping_criterion": {
+                "training_iteration": 5
+            },
             "resources": Resources(cpu=1, gpu=1),
         }
         trials = [
             Trial("__fake", **kwargs),
             Trial("__fake", **kwargs),
             Trial("__fake", **kwargs),
-            Trial("__fake", **kwargs)]
+            Trial("__fake", **kwargs)
+        ]
         for t in trials:
             runner.add_trial(t)
         runner.step()

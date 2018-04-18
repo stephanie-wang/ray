@@ -117,7 +117,7 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --env CartPole-v0 \
     --run APEX \
     --stop '{"training_iteration": 2}' \
-    --config '{"num_workers": 2, "timesteps_per_iteration": 1000}'
+    --config '{"num_workers": 2, "timesteps_per_iteration": 1000, "gpu": false}'
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     python /ray/python/ray/rllib/train.py \
@@ -180,6 +180,20 @@ docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     --run PG \
     --stop '{"training_iteration": 2}' \
     --config '{"batch_size": 500, "num_workers": 1}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
+    --env Pendulum-v0 \
+    --run DDPG \
+    --stop '{"training_iteration": 2}' \
+    --config '{"num_workers": 1}'
+
+docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
+    python /ray/python/ray/rllib/train.py \
+    --env MountainCarContinuous-v0 \
+    --run DDPG \
+    --stop '{"training_iteration": 2}' \
+    --config '{"num_workers": 1}'
 
 docker run --rm --shm-size=10G --memory=10G $DOCKER_SHA \
     sh /ray/test/jenkins_tests/multi_node_tests/test_rllib_eval.sh

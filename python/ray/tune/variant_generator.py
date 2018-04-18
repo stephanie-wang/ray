@@ -53,12 +53,16 @@ def generate_trials(unresolved_spec, output_path=''):
             else:
                 experiment_tag = str(i)
             i += 1
+            if "trial_resources" in spec:
+                resources = json_to_resources(spec["trial_resources"])
+            else:
+                resources = None
             yield Trial(
                 trainable_name=spec["run"],
                 config=spec.get("config", {}),
                 local_dir=os.path.join(args.local_dir, output_path),
                 experiment_tag=experiment_tag,
-                resources=json_to_resources(spec.get("trial_resources", {})),
+                resources=resources,
                 stopping_criterion=spec.get("stop", {}),
                 checkpoint_freq=args.checkpoint_freq,
                 restore_path=spec.get("restore"),
@@ -163,8 +167,8 @@ def _generate_variants(spec):
             for path, value in grid_vars:
                 resolved_vars[path] = _get_value(spec, path)
             for k, v in resolved.items():
-                if (k in resolved_vars and v != resolved_vars[k] and
-                        _is_resolved(resolved_vars[k])):
+                if (k in resolved_vars and v != resolved_vars[k]
+                        and _is_resolved(resolved_vars[k])):
                     raise ValueError(
                         "The variable `{}` could not be unambiguously "
                         "resolved to a single value. Consider simplifying "
@@ -262,16 +266,16 @@ def _unresolved_values(spec):
     for k, v in spec.items():
         resolved, v = _try_resolve(v)
         if not resolved:
-            found[(k,)] = v
+            found[(k, )] = v
         elif isinstance(v, dict):
             # Recurse into a dict
             for (path, value) in _unresolved_values(v).items():
-                found[(k,) + path] = value
+                found[(k, ) + path] = value
         elif isinstance(v, list):
             # Recurse into a list
             for i, elem in enumerate(v):
                 for (path, value) in _unresolved_values({i: elem}).items():
-                    found[(k,) + path] = value
+                    found[(k, ) + path] = value
     return found
 
 
