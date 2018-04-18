@@ -910,6 +910,7 @@ def start_raylet(redis_address,
                  plasma_store_name,
                  worker_path,
                  resources=None,
+                 num_workers=0,
                  stdout_file=None,
                  stderr_file=None,
                  cleanup=True):
@@ -957,7 +958,8 @@ def start_raylet(redis_address,
 
     command = [
         RAYLET_EXECUTABLE, raylet_name, plasma_store_name, node_ip_address,
-        gcs_ip_address, gcs_port, start_worker_command, resource_argument
+        gcs_ip_address, gcs_port, str(num_workers), start_worker_command,
+        resource_argument,
     ]
     if RUN_RAYLET_PROFILER:
         pid = subprocess.Popen(["valgrind", "--tool=callgrind"] + command,
@@ -1477,6 +1479,7 @@ def start_ray_processes(address_info=None,
                     object_store_addresses[i].name,
                     worker_path,
                     resources=resources[i],
+                    num_workers=workers_per_local_scheduler[i],
                     stdout_file=raylet_stdout_file,
                     stderr_file=raylet_stderr_file,
                     cleanup=cleanup))
