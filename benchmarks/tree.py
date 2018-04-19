@@ -1,13 +1,14 @@
 import ray
 import logging
 import time
+import numpy as np
 
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(logging.DEBUG)
 
-NUM_TRIALS = 10
+NUM_TRIALS = 30
 
 
 @ray.remote
@@ -31,13 +32,13 @@ if __name__ == '__main__':
     parser.add_argument('--use-raylet', action='store_true')
     parser.add_argument('--num-recursions', type=int, required=True)
     parser.add_argument('--num-nodes', type=int, required=True)
-    parser.add_argument('--task-delay', type=int, default=0)
-    parser.add_argument('--gcs-delay', type=int)
+    parser.add_argument('--task-delay-ms', type=int, default=1)
+    parser.add_argument('--gcs-delay-ms', type=int)
 
     args = parser.parse_args()
 
-    num_tasks = args.num_nodes * args.num_recursions
-    num_initial_workers = min(num_tasks, 500)
+    num_tasks = 2 ** args.num_recursions
+    num_initial_workers = min(args.num_recursions * args.num_nodes, 500)
 
     ray.worker._init(
             start_ray_local=True,
@@ -46,13 +47,18 @@ if __name__ == '__main__':
             num_local_schedulers=args.num_nodes,
             num_cpus=4,
             num_workers=num_initial_workers,
-            gcs_delay_ms=args.gcs_delay if args.gcs_delay is not None else -1
+            gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1
             )
-    time.sleep(30)
+    time.sleep(5)
+
+    x = np.ones(10 ** 8)
+    for _ in range(100):
+        ray.put(x)
+
 
     for _ in range(NUM_TRIALS):
         time.sleep(1)
 
         start = time.time()
-        ray.get(tree.remote(num_tasks, args.task_delay))
+        ray.get(tree.remote(num_tasks, args.task_delay_ms))
         log.info("Ray took %f seconds", time.time() - start)
