@@ -56,7 +56,7 @@ class ReconstructionPolicyTest : public ::testing::Test {
         reconstruction_policy_(std::make_shared<ReconstructionPolicy>(
             io_service_, ClientID::from_random(), mock_gcs_, mock_gcs_,
             [this](const TaskID &task_id) { TriggerReconstruction(task_id); },
-            reconstruction_timeout_ms_)),
+            reconstruction_timeout_ms_, nullptr)),
         timer_canceled_(false) {}
 
   uint64_t GetReconstructionTimeoutMs() const { return reconstruction_timeout_ms_; }

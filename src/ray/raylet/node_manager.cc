@@ -64,11 +64,18 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       worker_pool_(config.num_initial_workers, config.worker_command),
       local_queues_(SchedulingQueue()),
       scheduling_policy_(local_queues_),
-      reconstruction_policy_(io_service_, gcs_client_->client_table().GetLocalClientId(),
-                             gcs_client_->object_table(),
-                             gcs_client_->task_reconstruction_log(),
-                             [this](const TaskID &task_id) { ResubmitTask(task_id); },
-                             /*reconstruction_timeout_ms=*/1000),
+      reconstruction_policy_(
+          io_service_, gcs_client_->client_table().GetLocalClientId(),
+          gcs_client_->object_table(), gcs_client_->task_reconstruction_log(),
+          [this](const TaskID &task_id) {
+            io_service_.post([this, task_id]() { ResubmitTask(task_id); });
+          },
+          /*reconstruction_timeout_ms=*/1000,
+          [this](const ObjectID &object_id, const ClientID &client_id) {
+            io_service_.post([this, object_id, client_id]() {
+              object_manager_.Pull(object_id, client_id);
+            });
+          }),
       task_dependency_manager_(
           [this](const ObjectID &object_id) {
             RAY_CHECK_OK(object_manager_.Pull(object_id));

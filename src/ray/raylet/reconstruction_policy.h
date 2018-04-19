@@ -45,13 +45,15 @@ class ReconstructionPolicy {
       gcs::PubsubInterface<ObjectID> &object_pubsub,
       gcs::LogInterface<TaskID, TaskReconstructionData> &task_reconstruction_log,
       const ReconstructionCallback &reconstruction_handler,
-      uint64_t reconstruction_timeout_ms)
+      uint64_t reconstruction_timeout_ms,
+      std::function<void(const ObjectID &, const ClientID &)> object_added_handler)
       : reconstruction_timeout_ms_(reconstruction_timeout_ms),
         reconstruction_timer_(io_service),
         client_id_(client_id),
         object_pubsub_(object_pubsub),
         task_reconstruction_log_(task_reconstruction_log),
-        reconstruction_handler_(reconstruction_handler) {
+        reconstruction_handler_(reconstruction_handler),
+        object_added_handler_(object_added_handler) {
     // Start the reconstruction timer.
     Tick();
   }
@@ -133,6 +135,7 @@ class ReconstructionPolicy {
   /// The objects that we have not received a notification for since the last
   /// timer reset.
   std::unordered_map<ObjectID, int, UniqueIDHasher> object_ticks_;
+  std::function<void(const ObjectID &, const ClientID &)> object_added_handler_;
 };
 
 }  // namespace raylet
