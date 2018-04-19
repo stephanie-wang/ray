@@ -77,8 +77,12 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
             // reconstruct the object?
             reconstruction_policy_.Listen(object_id);
           },
-          [this](const TaskID &task_id) { HandleWaitingTaskReady(task_id); },
-          [this](const TaskID &task_id) { HandleReadyTaskWaiting(task_id); }),
+          [this](const TaskID &task_id) {
+            io_service_.post([this, task_id]() { HandleWaitingTaskReady(task_id); });
+          },
+          [this](const TaskID &task_id) {
+            io_service_.post([this, task_id]() { HandleReadyTaskWaiting(task_id); });
+          }),
       lineage_cache_(gcs_client_->client_table().GetLocalClientId(),
                      gcs_client->raylet_task_table(), gcs_client->raylet_task_table()),
       remote_clients_(),
