@@ -86,6 +86,13 @@ void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   local_objects_[object_id] = object_info;
   ray::Status status =
       object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
+
+  // std::chrono::microseconds start =
+  // std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  // RAY_LOG(INFO) << object_id << " available on " << client_id_ << " at " <<
+  // start.count() / 1000;
 }
 
 void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
@@ -106,6 +113,13 @@ ray::Status ObjectManager::SubscribeObjDeleted(
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id) {
+  // std::chrono::microseconds start =
+  // std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  // RAY_LOG(INFO) << "pull object " << object_id << " on " << client_id_ << " at " <<
+  // start.count() / 1000;
+
   return PullGetLocations(object_id);
 }
 
@@ -120,9 +134,20 @@ void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
 }
 
 ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
+  //std::chrono::microseconds start = std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch());
+  //RAY_LOG(INFO) << object_id << " GetLocations on " << client_id_ << " at "
+  //              << start.count() / 1000;
+
   ray::Status status_code = object_directory_->GetLocations(
       object_id,
       [this](const std::vector<ClientID> &client_ids, const ObjectID &object_id) {
+        // std::chrono::microseconds start =
+        // std::chrono::duration_cast<std::chrono::microseconds>(
+        //    std::chrono::system_clock::now().time_since_epoch()
+        //);
+        // RAY_LOG(INFO) << object_id << " GetLocations success on " << client_id_ << " at
+        // " << start.count() / 1000;
         return GetLocationsSuccess(client_ids, object_id);
       },
       [this](const ObjectID &object_id) { return GetLocationsFailed(object_id); });
@@ -141,11 +166,23 @@ void ObjectManager::GetLocationsFailed(const ObjectID &object_id) {
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &client_id) {
+  //std::chrono::microseconds start = std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch());
+  //RAY_LOG(INFO) << object_id << " Pull from a client " << client_id_ << " at "
+  //              << start.count() / 1000;
+
   return PullEstablishConnection(object_id, client_id);
 };
 
 ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                                    const ClientID &client_id) {
+  // std::chrono::microseconds start =
+  // std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  // RAY_LOG(INFO) << object_id << " PullEstablishConnection on " << client_id_ << " at "
+  // << start.count() / 1000;
+
   // Check if object is already local, and client_id is not itself.
   if (local_objects_.count(object_id) != 0 || client_id == client_id_) {
     return ray::Status::OK();
@@ -185,6 +222,13 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
 
 ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
                                            std::shared_ptr<SenderConnection> conn) {
+  // std::chrono::microseconds start =
+  // std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  // RAY_LOG(INFO) << "sending pull for object " << object_id << " on " << client_id_ << "
+  // at " << start.count() / 1000;
+
   flatbuffers::FlatBufferBuilder fbb;
   auto message = object_manager_protocol::CreatePullRequestMessage(
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));

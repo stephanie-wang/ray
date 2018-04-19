@@ -1,5 +1,7 @@
 #include "ray/raylet/node_manager.h"
 
+#include <chrono>
+
 #include "common_protocol.h"
 #include "ray/raylet/format/node_manager_generated.h"
 
@@ -404,6 +406,12 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     return;
   } break;
   case protocol::MessageType_SubmitTask: {
+    // std::chrono::microseconds start =
+    // std::chrono::duration_cast<std::chrono::microseconds>(
+    //    std::chrono::system_clock::now().time_since_epoch()
+    //);
+    // RAY_LOG(INFO) << "received submit task at " << start.count() / 1000;
+
     // Read the task submitted by the client.
     auto message = flatbuffers::GetRoot<protocol::SubmitTaskRequest>(message_data);
     TaskExecutionSpecification task_execution_spec(
@@ -431,6 +439,12 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // worker is unblocked.
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     if (worker && !worker->IsBlocked()) {
+      // std::chrono::microseconds start =
+      // std::chrono::duration_cast<std::chrono::microseconds>(
+      //    std::chrono::system_clock::now().time_since_epoch()
+      //);
+      // RAY_LOG(INFO) << "worker blocked at " << start.count() / 1000;
+
       RAY_CHECK(!worker->GetAssignedTaskId().is_nil());
       auto tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
       const auto &task = tasks.front();
@@ -476,8 +490,8 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       if (!not_oversubscribed) {
         const SchedulingResources &local_resources =
             cluster_resource_map_[gcs_client_->client_table().GetLocalClientId()];
-        RAY_LOG(WARNING) << "Resources oversubscribed: "
-                         << local_resources.GetAvailableResources().ToString();
+        RAY_LOG(DEBUG) << "Resources oversubscribed: "
+                       << local_resources.GetAvailableResources().ToString();
       }
       // Mark the task as running again.
       local_queues_.QueueRunningTasks(tasks);
@@ -503,6 +517,12 @@ void NodeManager::ProcessNodeManagerMessage(
     const uint8_t *message_data) {
   switch (message_type) {
   case protocol::MessageType_ForwardTaskRequest: {
+    // std::chrono::microseconds start =
+    // std::chrono::duration_cast<std::chrono::microseconds>(
+    //    std::chrono::system_clock::now().time_since_epoch()
+    //);
+    // RAY_LOG(INFO) << "received forward task at " << start.count() / 1000;
+
     auto message = flatbuffers::GetRoot<protocol::ForwardTaskRequest>(message_data);
     TaskID task_id = from_flatbuf(*message->task_id());
 
@@ -754,6 +774,11 @@ void NodeManager::AssignTask(Task &task) {
     // worker once one becomes available.
     local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
   }
+  // std::chrono::microseconds start =
+  // std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  // RAY_LOG(INFO) << "dispatched task at " << start.count() / 1000;
 }
 
 void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
@@ -897,6 +922,11 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
                    << " to node " << node_id;
   }
+
+  std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  // RAY_LOG(INFO) << "sent forward task at " << end.count() / 1000;
+
   return status;
 }
 
