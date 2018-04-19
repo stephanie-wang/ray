@@ -510,7 +510,16 @@ void NodeManager::ProcessNodeManagerMessage(
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpecReadonly().NumForwards();
+
+    std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
+        std::chrono::system_clock::now().time_since_epoch());
+
     SubmitTask(task, uncommitted_lineage);
+  } break;
+  case protocol::MessageType_DisconnectClient: {
+    // TODO(swang): Handle this error.
+    RAY_LOG(INFO) << "node manager disconnected";
+    return;
   } break;
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
