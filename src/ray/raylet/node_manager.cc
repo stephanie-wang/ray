@@ -518,6 +518,11 @@ void NodeManager::ProcessNodeManagerMessage(
     // Skip the write to the GCS.
     _SubmitTask(task, uncommitted_lineage);
   } break;
+  case protocol::MessageType_DisconnectClient: {
+    // TODO(swang): Handle this error.
+    RAY_LOG(INFO) << "node manager disconnected";
+    return;
+  } break;
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
   }
