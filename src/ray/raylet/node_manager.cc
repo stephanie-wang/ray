@@ -419,6 +419,10 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     ObjectID object_id = from_flatbuf(*message->object_id());
     RAY_LOG(DEBUG) << "reconstructing object " << object_id;
     RAY_CHECK_OK(object_manager_.Pull(object_id));
+    if (task_dependency_manager_.CheckObjectLocal(object_id) ==
+        TaskDependencyManager::ObjectAvailability::kRemote) {
+      reconstruction_policy_.Listen(object_id);
+    }
 
     // If the blocked client is a worker, and the worker isn't already blocked,
     // then release any CPU resources that it acquired for its assigned task
@@ -870,7 +874,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
         for (int j = 0; j < count; j++) {
           ObjectID argument_id = spec.ArgId(i, j);
           // If the argument is local, then push it to the receiving node.
-          if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
+          if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
+              TaskDependencyManager::ObjectAvailability::kLocal) {
             RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
           }
         }

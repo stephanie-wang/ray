@@ -13,12 +13,13 @@ TaskDependencyManager::TaskDependencyManager(
       task_waiting_callback_(task_waiting_handler) {
 }
 
-bool TaskDependencyManager::CheckObjectLocal(const ObjectID &object_id) const {
+TaskDependencyManager::ObjectAvailability TaskDependencyManager::CheckObjectLocal(
+    const ObjectID &object_id) const {
   auto entry = local_objects_.find(object_id);
   if (entry == local_objects_.end()) {
-    return false;
+    return ObjectAvailability::kRemote;
   }
-  return entry->second.status == ObjectAvailability::kLocal;
+  return entry->second.status;
 }
 
 void TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {
@@ -109,6 +110,7 @@ void TaskDependencyManager::SubscribeTask(const Task &task) {
       // pending creation.
       return_entry.status = ObjectAvailability::kWaiting;
     }
+    // TODO(swang): Cancel this object in the reconstruction policy.
   }
 
   auto emplaced = task_dependencies_.emplace(task_id, task_entry);
