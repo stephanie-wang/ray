@@ -24,6 +24,25 @@ class ReconstructionPolicy;
 /// transfer from a remote node or reconstruction.
 class TaskDependencyManager {
  public:
+  /// The status of the object, with respect to the local object store.
+  enum class ObjectAvailability : unsigned int {
+    /// The object is not local and will not be created by any locally queued
+    /// task.
+    kRemote = 0,
+    /// The task that creates this object is waiting to be executed. If the
+    /// task is dequeued and forwarded to another node, then the object will be
+    /// marked as remote. If the task is dequeued and begins execution, then
+    /// the object will be marked as being constructed.
+    kWaiting,
+    /// The task that creates this object has started execution and will create
+    /// the object upon completion.  The object will be marked as local once
+    /// the notification that it is local is received.
+    kConstructing,
+    /// The object is local. The object will be marked as remote if a
+    /// notification that it is missing is received.
+    kLocal,
+  };
+
   /// Create a task dependency manager.
   ///
   /// \param object_remote_handler The handler to call for an object that is
@@ -41,7 +60,7 @@ class TaskDependencyManager {
   ///
   /// \param object_id The object to check for.
   /// \return Whether the object is local.
-  bool CheckObjectLocal(const ObjectID &object_id) const;
+  ObjectAvailability CheckObjectLocal(const ObjectID &object_id) const;
 
   /// Subscribe to a task that is waiting or ready to execute. The registered
   /// remote object handler will be called for any missing dependencies that
@@ -81,25 +100,6 @@ class TaskDependencyManager {
   void HandleObjectMissing(const ray::ObjectID &object_id);
 
  private:
-  /// The status of the object, with respect to the local object store.
-  enum class ObjectAvailability : unsigned int {
-    /// The object is not local and will not be created by any locally queued
-    /// task.
-    kRemote = 0,
-    /// The task that creates this object is waiting to be executed. If the
-    /// task is dequeued and forwarded to another node, then the object will be
-    /// marked as remote. If the task is dequeued and begins execution, then
-    /// the object will be marked as being constructed.
-    kWaiting,
-    /// The task that creates this object has started execution and will create
-    /// the object upon completion.  The object will be marked as local once
-    /// the notification that it is local is received.
-    kConstructing,
-    /// The object is local. The object will be marked as remote if a
-    /// notification that it is missing is received.
-    kLocal,
-  };
-
   struct ObjectEntry {
     /// The IDs of the tasks that are queued locally and dependent on this
     /// object.
