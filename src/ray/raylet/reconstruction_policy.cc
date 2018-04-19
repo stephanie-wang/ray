@@ -5,21 +5,28 @@ namespace {
 /// A helper function to process location entries from the object table log.
 /// Each location entry contains a node manager ID and a flag indicating
 /// whether the object was added or evicted from that node.
-void ReduceObjectTableDataT(std::unordered_set<ClientID, UniqueIDHasher> &locations,
-                            const std::vector<ObjectTableDataT> &new_location_entries) {
+std::unordered_set<ClientID, UniqueIDHasher> ReduceObjectTableDataT(
+    std::unordered_set<ClientID, UniqueIDHasher> &locations,
+    const std::vector<ObjectTableDataT> &new_location_entries) {
+  std::unordered_set<ClientID, UniqueIDHasher> new_locations;
   for (const auto &location_entry : new_location_entries) {
     ClientID node_manager_id = ClientID::from_binary(location_entry.manager);
     if (location_entry.is_eviction) {
       // The object was evicted from the node. Erase the node manager from the
       // set of known locations.
       locations.erase(node_manager_id);
+      new_locations.erase(node_manager_id);
     } else {
       // The object was made available at the node. Add the node manager to the
       // set of known locations.
       RAY_CHECK(locations.count(node_manager_id) == 0);
-      locations.insert(node_manager_id);
+      auto inserted = locations.insert(node_manager_id);
+      if (inserted.second) {
+        new_locations.insert(node_manager_id);
+      }
     }
   }
+  return new_locations;
 }
 }
 
@@ -98,7 +105,8 @@ void ReconstructionPolicy::HandleNotification(
   if (timer != object_ticks_.end()) {
     // Apply the new location entries from the log to the cached set of
     // locations.
-    ReduceObjectTableDataT(entry->second.locations, new_location_entries);
+    auto new_clients =
+        ReduceObjectTableDataT(entry->second.locations, new_location_entries);
     // Check whether the object now exists at some location.
     if (entry->second.locations.empty()) {
       if (new_location_entries.empty()) {
@@ -117,6 +125,11 @@ void ReconstructionPolicy::HandleNotification(
       // There is a known location for the object. Reset the timer for the
       // object ID and wait for the transfer.
       timer->second = entry->second.num_ticks;
+      for (const auto &client_id : new_clients) {
+        if (object_added_handler_) {
+          object_added_handler_(object_id, client_id);
+        }
+      }
     }
   }
 }
@@ -164,6 +177,8 @@ void ReconstructionPolicy::HandleTaskLogAppend(
 }
 
 void ReconstructionPolicy::Reconstruct(const ObjectID &object_id) {
+  RAY_LOG(WARNING) << "Reconstructing object " << object_id;
+
   auto object_entry = listening_objects_.find(object_id);
   TaskID task_id = ComputeTaskId(object_id);
   reconstructing_tasks_[task_id].push_back(object_id);
