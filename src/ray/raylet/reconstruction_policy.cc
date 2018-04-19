@@ -1,5 +1,7 @@
 #include "reconstruction_policy.h"
 
+#include <chrono>
+
 namespace {
 
 /// A helper function to process location entries from the object table log.
@@ -39,6 +41,7 @@ void ReconstructionPolicy::Listen(const ObjectID &object_id) {
   if (listening_objects_.count(object_id) == 1) {
     return;
   }
+  RAY_LOG(DEBUG) << "ReconstructionPolicy: listening for object " << object_id;
   // Listen for this object.
   ObjectEntry entry;
   entry.object_id = object_id;
@@ -87,12 +90,19 @@ void ReconstructionPolicy::Cancel(const ObjectID &object_id) {
   // Stop listening for the object.
   size_t removed = listening_objects_.erase(object_id);
   if (removed > 0) {
+    RAY_LOG(DEBUG) << "ReconstructionPolicy: canceled object " << object_id;
     RAY_CHECK_OK(object_pubsub_.CancelNotifications(JobID::nil(), object_id, client_id_));
   }
 }
 
 void ReconstructionPolicy::HandleNotification(
     const ObjectID &object_id, const std::vector<ObjectTableDataT> new_location_entries) {
+  // std::chrono::microseconds start =
+  // std::chrono::duration_cast<std::chrono::microseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  // RAY_LOG(INFO) << object_id << " notification at " << start.count() / 1000;
+
   auto entry = listening_objects_.find(object_id);
   // Do nothing for objects we are not listening for.
   if (entry == listening_objects_.end()) {
