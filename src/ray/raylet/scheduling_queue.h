@@ -96,7 +96,7 @@ class SchedulingQueue {
   /// Queue tasks in the scheduled state.
   ///
   /// \param tasks The tasks to queue.
-  void QueueScheduledTasks(const std::vector<Task> &tasks);
+  void QueueScheduledTasks(const std::vector<Task> &tasks, bool head = false);
 
   /// Queue tasks in the running state.
   ///

@@ -88,8 +88,14 @@ void SchedulingQueue::QueueReadyTasks(const std::vector<Task> &tasks) {
   queueTasks(ready_tasks_, tasks);
 }
 
-void SchedulingQueue::QueueScheduledTasks(const std::vector<Task> &tasks) {
-  queueTasks(scheduled_tasks_, tasks);
+void SchedulingQueue::QueueScheduledTasks(const std::vector<Task> &tasks, bool head) {
+  if (head) {
+    for (auto &task : tasks) {
+      scheduled_tasks_.push_front(task);
+    }
+  } else {
+    queueTasks(scheduled_tasks_, tasks);
+  }
 }
 
 void SchedulingQueue::QueueRunningTasks(const std::vector<Task> &tasks) {
