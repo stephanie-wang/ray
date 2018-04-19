@@ -573,7 +573,7 @@ void NodeManager::ScheduleTasks() {
 
   // Transition locally scheduled tasks to SCHEDULED and dispatch scheduled tasks.
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
-  local_queues_.QueueScheduledTasks(tasks);
+  local_queues_.QueueScheduledTasks(tasks, /*head=*/true);
   DispatchTasks();
 }
 
