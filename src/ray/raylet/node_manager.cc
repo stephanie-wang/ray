@@ -174,6 +174,7 @@ void NodeManager::PendingObjectsHeartbeat() {
   SendTaskQueueHeartbeats(object_table, local_queues_.GetReadyTasks());
   SendTaskQueueHeartbeats(object_table, local_queues_.GetScheduledTasks());
   SendTaskQueueHeartbeats(object_table, local_queues_.GetRunningTasks());
+  SendTaskQueueHeartbeats(object_table, local_queues_.GetBlockedTasks());
 }
 
 void NodeManager::Heartbeat() {
