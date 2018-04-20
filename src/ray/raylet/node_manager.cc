@@ -82,11 +82,17 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           }),
       task_dependency_manager_(
           [this](const ObjectID &object_id) {
-            RAY_CHECK_OK(object_manager_.Pull(object_id));
-            // Ask the reconstruction policy to reconstruct this object if necessary.
-            // TODO(swang): Should we wait for the Lookup to fail before trying to
-            // reconstruct the object?
-            reconstruction_policy_.Listen(object_id);
+            io_service_.post([this, object_id]() {
+              RAY_CHECK_OK(object_manager_.Pull(object_id));
+              // Ask the reconstruction policy to reconstruct this object if necessary.
+              // TODO(swang): Should we wait for the Lookup to fail before trying to
+              // reconstruct the object?
+              reconstruction_policy_.Listen(object_id);
+            });
+          },
+          [this](const ObjectID &object_id) {
+            io_service_.post(
+                [this, object_id]() { reconstruction_policy_.Cancel(object_id); });
           },
           [this](const TaskID &task_id) {
             io_service_.post([this, task_id]() { HandleWaitingTaskReady(task_id); });

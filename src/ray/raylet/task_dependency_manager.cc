@@ -6,12 +6,13 @@ namespace raylet {
 
 TaskDependencyManager::TaskDependencyManager(
     std::function<void(const ObjectID)> object_remote_handler,
+    std::function<void(const ObjectID)> cancel_object_remote_handler,
     std::function<void(const TaskID &)> task_ready_handler,
     std::function<void(const TaskID &)> task_waiting_handler)
     : object_remote_callback_(object_remote_handler),
+      cancel_object_remote_callback_(cancel_object_remote_handler),
       task_ready_callback_(task_ready_handler),
-      task_waiting_callback_(task_waiting_handler) {
-}
+      task_waiting_callback_(task_waiting_handler) {}
 
 TaskDependencyManager::ObjectAvailability TaskDependencyManager::CheckObjectLocal(
     const ObjectID &object_id) const {
@@ -110,7 +111,8 @@ void TaskDependencyManager::SubscribeTask(const Task &task) {
       // pending creation.
       return_entry.status = ObjectAvailability::kWaiting;
     }
-    // TODO(swang): Cancel this object in the reconstruction policy.
+
+    cancel_object_remote_callback_(return_id);
   }
 
   auto emplaced = task_dependencies_.emplace(task_id, task_entry);
@@ -152,8 +154,10 @@ void TaskDependencyManager::UnsubscribeTask(const TaskID &task_id,
       }
     }
     if (dependent_tasks.empty()) {
+      // There are no more tasks dependent on this object.
       if (argument_entry->second.status == ObjectAvailability::kRemote) {
         local_objects_.erase(argument_entry);
+        cancel_object_remote_callback_(argument_id);
       }
     }
   }
