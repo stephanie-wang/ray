@@ -747,7 +747,12 @@ void NodeManager::AssignTask(Task &task) {
     return;
   }
 
-  RAY_LOG(DEBUG) << "Assigning task to worker with pid " << worker->Pid();
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(DEBUG) << "Assigning task " << spec.TaskId() << " at " << start.count();
+
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
                                               fbb.CreateVector(std::vector<int>()));
@@ -854,7 +859,6 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
 }
 
 void NodeManager::ResubmitTask(const TaskID &task_id) {
-  RAY_LOG(INFO) << "Reconstructing! " << task_id;
   // TODO(swang): Test this codepath for reconstruction.
   auto lookup_callback = [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
                                 const protocol::TaskT &task_data) {

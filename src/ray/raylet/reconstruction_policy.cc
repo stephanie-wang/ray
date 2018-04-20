@@ -41,7 +41,11 @@ void ReconstructionPolicy::Listen(const ObjectID &object_id) {
   if (listening_objects_.count(object_id) == 1) {
     return;
   }
-  RAY_LOG(INFO) << "ReconstructionPolicy: listening for object " << object_id;
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+     std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "ReconstructionPolicy: listening for object " << object_id << " at " << start.count();
   // Listen for this object.
   ObjectEntry entry;
   entry.object_id = object_id;
@@ -97,11 +101,11 @@ void ReconstructionPolicy::Cancel(const ObjectID &object_id) {
 
 void ReconstructionPolicy::HandleNotification(
     const ObjectID &object_id, const std::vector<ObjectTableDataT> new_location_entries) {
-  // std::chrono::microseconds start =
-  // std::chrono::duration_cast<std::chrono::microseconds>(
-  //    std::chrono::system_clock::now().time_since_epoch()
-  //);
-  // RAY_LOG(INFO) << object_id << " notification at " << start.count() / 1000;
+   std::chrono::milliseconds start =
+   std::chrono::duration_cast<std::chrono::milliseconds>(
+     std::chrono::system_clock::now().time_since_epoch()
+   );
+   RAY_LOG(INFO) << object_id << " notification at " << start.count();
 
   auto entry = listening_objects_.find(object_id);
   // Do nothing for objects we are not listening for.
@@ -187,7 +191,11 @@ void ReconstructionPolicy::HandleTaskLogAppend(
 }
 
 void ReconstructionPolicy::Reconstruct(const ObjectID &object_id) {
-  RAY_LOG(WARNING) << "Reconstructing object " << object_id;
+   std::chrono::milliseconds start =
+   std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(WARNING) << "Reconstructing object " << object_id << " at " << start.count();
 
   auto object_entry = listening_objects_.find(object_id);
   TaskID task_id = ComputeTaskId(object_id);
