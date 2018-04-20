@@ -192,7 +192,7 @@ void NodeManager::PendingObjectsHeartbeat() {
   auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch());
   if ((now - last_heartbeat_at_).count() >
-      2 * static_cast<int64_t>(heartbeat_period_ms_)) {
+      1000) {
     RAY_LOG(FATAL) << "Fell behind on heartbeats";
   }
   last_heartbeat_at_ = now;
