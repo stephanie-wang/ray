@@ -30,6 +30,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--use-raylet', action='store_true')
+    parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--num-recursions', type=int, required=True)
     parser.add_argument('--num-nodes', type=int, required=True)
     parser.add_argument('--task-delay-ms', type=int, default=1)
@@ -38,18 +39,25 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     num_tasks = 2 ** args.num_recursions
-    num_initial_workers = min(args.num_recursions * args.num_nodes, 500)
+    num_initial_workers = min(4 * args.num_recursions * args.num_nodes, 500)
+
+    huge_pages = not args.no_hugepages
+    if huge_pages:
+        plasma_directory = "/mnt/hugepages"
+    else:
+        plasma_directory = None
 
     ray.worker._init(
             start_ray_local=True,
             use_raylet=args.use_raylet,
-            redirect_output=False,
             num_local_schedulers=args.num_nodes,
             num_cpus=4,
             num_workers=num_initial_workers,
-            gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1
+            gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1,
+            huge_pages=huge_pages,
+            plasma_directory=plasma_directory
             )
-    time.sleep(5)
+    #time.sleep(5)
 
     x = np.ones(10 ** 8)
     for _ in range(100):
