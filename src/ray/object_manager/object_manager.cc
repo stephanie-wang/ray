@@ -167,10 +167,10 @@ void ObjectManager::GetLocationsFailed(const ObjectID &object_id) {
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &client_id) {
-  //std::chrono::microseconds start = std::chrono::duration_cast<std::chrono::microseconds>(
-  //    std::chrono::system_clock::now().time_since_epoch());
-  //RAY_LOG(INFO) << object_id << " Pull from a client " << client_id_ << " at "
-  //              << start.count() / 1000;
+  std::chrono::microseconds start = std::chrono::duration_cast<std::chrono::microseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  RAY_LOG(INFO) << object_id << " Pull from a client " << client_id_ << " at "
+                << start.count() / 1000;
 
   return PullEstablishConnection(object_id, client_id);
 };
