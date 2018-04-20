@@ -16,6 +16,7 @@ Status Log<ID, Data>::Append(const JobID &job_id, const ID &id,
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
+  RAY_LOG(INFO) << "Append " << id << " at " << start.count();
 
   auto d = std::shared_ptr<CallbackData>(
       new CallbackData({id, data, nullptr, nullptr, this, client_}));
