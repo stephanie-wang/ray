@@ -144,7 +144,8 @@ ray::Status NodeManager::RegisterGcs() {
     reconstruction_policy_.HandleNotification(id, data);
   };
   RAY_RETURN_NOT_OK(gcs_client_->object_table().Subscribe(
-      UniqueID::nil(), UniqueID::nil(), object_notification_callback, nullptr));
+      UniqueID::nil(), gcs_client_->client_table().GetLocalClientId(),
+      object_notification_callback, nullptr));
 
   // Register a callback for actor creation notifications.
   auto actor_creation_callback = [this](
