@@ -1,5 +1,7 @@
 #include "ray/gcs/tables.h"
 
+#include <chrono>
+
 #include "common_protocol.h"
 #include "ray/gcs/client.h"
 
@@ -10,10 +12,21 @@ namespace gcs {
 template <typename ID, typename Data>
 Status Log<ID, Data>::Append(const JobID &job_id, const ID &id,
                              std::shared_ptr<DataT> data, const WriteCallback &done) {
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+
   auto d = std::shared_ptr<CallbackData>(
       new CallbackData({id, data, nullptr, nullptr, this, client_}));
   int64_t callback_index =
-      RedisCallbackManager::instance().add([d, done](const std::string &data) {
+      RedisCallbackManager::instance().add([d, done, id, start](const std::string &data) {
+        std::chrono::milliseconds end =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch()
+        );
+        RAY_LOG(INFO) << "Append " << id << " at " << start.count() << " took " << (end - start).count();
+
         RAY_CHECK(data.empty());
         if (done != nullptr) {
           (done)(d->client, d->id, d->data);
