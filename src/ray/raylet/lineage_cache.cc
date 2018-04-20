@@ -274,6 +274,7 @@ Status LineageCache::Flush() {
     auto task_data = std::make_shared<protocol::TaskT>();
     auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
     root->UnPackTo(task_data.get());
+    RAY_LOG(DEBUG) << "task committing: " << ready_task_id;
     RAY_CHECK_OK(task_storage_.Add(task->TaskData().GetTaskSpecification().DriverId(),
                                    ready_task_id, task_data, task_callback));
 
@@ -294,6 +295,7 @@ void PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
   if (!entry) {
     return;
   }
+  RAY_LOG(DEBUG) << "task removed: " << task_id;
   auto status = entry->GetStatus();
   RAY_CHECK(status == GcsStatus_UNCOMMITTED_REMOTE || status == GcsStatus_COMMITTED);
   for (const auto &parent_id : entry->GetParentTaskIds()) {
