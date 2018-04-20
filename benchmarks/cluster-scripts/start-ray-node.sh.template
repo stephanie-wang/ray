@@ -1,0 +1,6 @@
+#!/bin/bash
+
+
+export PATH=/home/ubuntu/anaconda3/bin/:$PATH
+
+ray start --huge-pages --plasma-directory /mnt/hugepages --redis-address={HEAD}:6379 --use-raylet --gcs-delay-ms {GCS_DELAY_MS}
