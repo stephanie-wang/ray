@@ -756,7 +756,7 @@ void NodeManager::AssignTask(Task &task) {
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
-  RAY_LOG(DEBUG) << "Assigning task " << spec.TaskId() << " at " << start.count();
+  RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " at " << start.count();
 
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
@@ -890,8 +890,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
-  RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task forwarded "
-                << task_id << " at " << start.count();
+  RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task " << task_id  << " forwarded to "
+                << node_id << " at " << start.count();
 
   Lineage uncommitted_lineage;
   // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS

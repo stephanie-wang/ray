@@ -195,7 +195,7 @@ void ReconstructionPolicy::Reconstruct(const ObjectID &object_id) {
    std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()
   );
-  RAY_LOG(WARNING) << "Reconstructing object " << object_id << " at " << start.count();
+  RAY_LOG(FATAL) << "Reconstructing object " << object_id << " at " << start.count();
 
   auto object_entry = listening_objects_.find(object_id);
   TaskID task_id = ComputeTaskId(object_id);
