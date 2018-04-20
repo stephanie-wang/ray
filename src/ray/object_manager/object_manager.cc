@@ -124,13 +124,14 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id) {
 }
 
 void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
-  pull_requests_[object_id] = std::shared_ptr<boost::asio::deadline_timer>(
-      new asio::deadline_timer(*main_service_, boost::posix_time::milliseconds(wait_ms)));
-  pull_requests_[object_id]->async_wait(
-      [this, object_id](const boost::system::error_code &error_code) {
-        pull_requests_.erase(object_id);
-        RAY_CHECK_OK(PullGetLocations(object_id));
-      });
+  // pull_requests_[object_id] = std::shared_ptr<boost::asio::deadline_timer>(
+  //    new asio::deadline_timer(*main_service_,
+  //    boost::posix_time::milliseconds(wait_ms)));
+  // pull_requests_[object_id]->async_wait(
+  //    [this, object_id](const boost::system::error_code &error_code) {
+  //      pull_requests_.erase(object_id);
+  //      RAY_CHECK_OK(PullGetLocations(object_id));
+  //    });
 }
 
 ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
@@ -471,7 +472,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
       // TODO(hme): This chunk failed, so create a pull request for this chunk.
     }
   } else {
-    RAY_LOG(ERROR) << "Buffer Create Failed: " << chunk_status.second.message();
+    // RAY_LOG(ERROR) << "Buffer Create Failed: " << chunk_status.second.message();
     // Read object into empty buffer.
     uint64_t buffer_length = buffer_pool_.GetBufferLength(chunk_index, data_size);
     std::vector<uint8_t> mutable_vec;
