@@ -816,7 +816,12 @@ void NodeManager::AssignTask(Task &task) {
 
 void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
   TaskID task_id = worker->GetAssignedTaskId();
-  RAY_LOG(DEBUG) << "Finished task " << task_id;
+   std::chrono::milliseconds start =
+   std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "Finished task " << task_id << " at " << start.count();
+
   auto tasks = local_queues_.RemoveTasks({task_id});
   auto task = *tasks.begin();
 
