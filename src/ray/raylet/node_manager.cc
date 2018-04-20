@@ -75,7 +75,9 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           /*reconstruction_timeout_ms=*/1000,
           [this](const ObjectID &object_id, const ClientID &client_id) {
             io_service_.post([this, object_id, client_id]() {
-              object_manager_.Pull(object_id, client_id);
+              if (!(client_id == gcs_client_->client_table().GetLocalClientId())) {
+                object_manager_.Pull(object_id, client_id);
+              }
             });
           }),
       task_dependency_manager_(
@@ -427,9 +429,9 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     auto message = flatbuffers::GetRoot<protocol::ReconstructObject>(message_data);
     ObjectID object_id = from_flatbuf(*message->object_id());
     RAY_LOG(DEBUG) << "reconstructing object " << object_id;
-    RAY_CHECK_OK(object_manager_.Pull(object_id));
     if (task_dependency_manager_.CheckObjectLocal(object_id) ==
         TaskDependencyManager::ObjectAvailability::kRemote) {
+      RAY_CHECK_OK(object_manager_.Pull(object_id));
       reconstruction_policy_.Listen(object_id);
     }
 
