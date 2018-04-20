@@ -172,6 +172,8 @@ ray::Status NodeManager::RegisterGcs() {
       }));
 
   // Start sending heartbeats to the GCS.
+  last_heartbeat_at_ = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
   Heartbeat();
 
   return ray::Status::OK();
@@ -185,6 +187,14 @@ void NodeManager::PendingObjectsHeartbeat() {
   SendTaskQueueHeartbeats(object_table, local_queues_.GetScheduledTasks());
   SendTaskQueueHeartbeats(object_table, local_queues_.GetRunningTasks());
   SendTaskQueueHeartbeats(object_table, local_queues_.GetBlockedTasks());
+
+  auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  if ((now - last_heartbeat_at_).count() >
+      2 * static_cast<int64_t>(heartbeat_period_ms_)) {
+    RAY_LOG(FATAL) << "Fell behind on heartbeats";
+  }
+  last_heartbeat_at_ = now;
 }
 
 void NodeManager::Heartbeat() {

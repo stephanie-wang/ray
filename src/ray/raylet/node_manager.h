@@ -1,6 +1,8 @@
 #ifndef RAY_RAYLET_NODE_MANAGER_H
 #define RAY_RAYLET_NODE_MANAGER_H
 
+#include <chrono>
+
 // clang-format off
 #include "ray/raylet/task.h"
 #include "ray/object_manager/object_manager.h"
@@ -137,6 +139,7 @@ class NodeManager {
   std::unordered_map<TaskID, std::unique_ptr<boost::asio::deadline_timer>, UniqueIDHasher>
       gcs_task_timers_;
   std::unordered_map<TaskID, Task, UniqueIDHasher> gcs_task_cache_;
+  std::chrono::milliseconds last_heartbeat_at_;
 };
 
 }  // namespace raylet
