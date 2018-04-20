@@ -41,7 +41,7 @@ void ReconstructionPolicy::Listen(const ObjectID &object_id) {
   if (listening_objects_.count(object_id) == 1) {
     return;
   }
-  RAY_LOG(DEBUG) << "ReconstructionPolicy: listening for object " << object_id;
+  RAY_LOG(INFO) << "ReconstructionPolicy: listening for object " << object_id;
   // Listen for this object.
   ObjectEntry entry;
   entry.object_id = object_id;
@@ -90,7 +90,7 @@ void ReconstructionPolicy::Cancel(const ObjectID &object_id) {
   // Stop listening for the object.
   size_t removed = listening_objects_.erase(object_id);
   if (removed > 0) {
-    RAY_LOG(DEBUG) << "ReconstructionPolicy: canceled object " << object_id;
+    RAY_LOG(INFO) << "ReconstructionPolicy: canceled object " << object_id;
     RAY_CHECK_OK(object_pubsub_.CancelNotifications(JobID::nil(), object_id, client_id_));
   }
 }

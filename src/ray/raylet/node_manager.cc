@@ -617,6 +617,9 @@ void NodeManager::ScheduleTasks() {
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
   TaskID task_id = task.GetTaskSpecification().TaskId();
+  RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task submitted "
+                << task_id;
+
   if (gcs_delay_ms_ == 0) {
     gcs_task_cache_.emplace(task_id, task);
     FlushTask(task_id);
@@ -874,6 +877,8 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
+  RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task forwarded "
+                << task_id;
 
   Lineage uncommitted_lineage;
   // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
