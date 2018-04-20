@@ -1290,6 +1290,7 @@ def start_ray_processes(address_info=None,
             started.
     """
     print("Process STDOUT and STDERR is being redirected to /tmp/raylogs/.")
+    print("Starting Ray processes with GCS delay of {}ms".format(gcs_delay_ms))
 
     if resources is None:
         resources = {}
