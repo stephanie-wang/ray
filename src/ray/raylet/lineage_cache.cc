@@ -185,7 +185,8 @@ void LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   // Add the submitted task to the lineage cache as UNCOMMITTED_WAITING. It
   // should be marked as UNCOMMITTED_READY once the task starts execution.
   LineageEntry task_entry(task, GcsStatus_UNCOMMITTED_WAITING);
-  RAY_CHECK(lineage_.SetEntry(std::move(task_entry)));
+  RAY_CHECK(lineage_.SetEntry(std::move(task_entry)))
+      << "Task status was " << lineage_.GetEntry(task_id)->GetStatus();
 }
 
 void LineageCache::AddReadyTask(const Task &task) {
