@@ -867,6 +867,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   if (gcs_delay_ms_ >= 0) {
     auto task_entry = uncommitted_lineage.PopEntry(task_id);
     RAY_CHECK(task_entry);
+    RAY_CHECK(task_entry->GetStatus() == GcsStatus_UNCOMMITTED_WAITING);
     uncommitted_lineage = Lineage();
     RAY_CHECK(uncommitted_lineage.SetEntry(std::move(*task_entry)));
   }
