@@ -242,6 +242,12 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
 }
 
 ray::Status ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "Pushing object " << object_id << " to client_id " << client_id << " at " << start.count();
+
   if (local_objects_.count(object_id) == 0) {
     // TODO(hme): Do not retry indefinitely...
     main_service_->post(
