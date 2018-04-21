@@ -64,6 +64,12 @@ void ObjectStoreNotificationManager::ProcessStoreNotification(
   if (object_info->is_deletion()) {
     ProcessStoreRemove(object_id);
   } else {
+    std::chrono::milliseconds start =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+    );
+    RAY_LOG(INFO) << "object available at " << start.count();
+
     ObjectInfoT result;
     object_info->UnPackTo(&result);
     ProcessStoreAdd(result);
@@ -72,12 +78,6 @@ void ObjectStoreNotificationManager::ProcessStoreNotification(
 }
 
 void ObjectStoreNotificationManager::ProcessStoreAdd(const ObjectInfoT &object_info) {
-   std::chrono::milliseconds start =
-   std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch()
-  );
-  RAY_LOG(INFO) << "object available at " << start.count();
-
   for (auto handler : add_handlers_) {
     handler(object_info);
   }
