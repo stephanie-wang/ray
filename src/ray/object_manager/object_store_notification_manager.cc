@@ -37,24 +37,43 @@ void ObjectStoreNotificationManager::NotificationWait() {
 
 void ObjectStoreNotificationManager::ProcessStoreLength(
     const boost::system::error_code &error) {
-  notification_.resize(length_);
-  boost::asio::read(
-      socket_, boost::asio::buffer(notification_));
+  RAY_CHECK(!error);
+  int num_notifications = 0;
+  do {
+    notification_.resize(length_);
+    boost::asio::read(
+        socket_, boost::asio::buffer(notification_));
 
-  const auto &object_info = flatbuffers::GetRoot<ObjectInfo>(notification_.data());
-  const auto &object_id = from_flatbuf(*object_info->object_id());
-  if (object_info->is_deletion()) {
-    ProcessStoreRemove(object_id);
-  } else {
+    const auto &object_info = flatbuffers::GetRoot<ObjectInfo>(notification_.data());
+    const auto &object_id = from_flatbuf(*object_info->object_id());
+    if (object_info->is_deletion()) {
+      ProcessStoreRemove(object_id);
+    } else {
+      std::chrono::milliseconds start =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+      );
+      RAY_LOG(INFO) << "object " << object_id << " available at " << start.count();
+
+      ObjectInfoT result;
+      object_info->UnPackTo(&result);
+      ProcessStoreAdd(result);
+    }
+    num_notifications++;
+
+    if (socket_.available() > 0) {
+      RAY_CHECK(boost::asio::read(socket_, boost::asio::buffer(&length_, sizeof(length_))) > 0);
+    } else {
+      length_ = -1;
+    }
+  } while (length_ > 0);
+
+  if (num_notifications > 1) {
     std::chrono::milliseconds start =
     std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()
     );
-    RAY_LOG(INFO) << "object " << object_id << " available at " << start.count();
-
-    ObjectInfoT result;
-    object_info->UnPackTo(&result);
-    ProcessStoreAdd(result);
+    RAY_LOG(INFO) << "processed " << num_notifications << " object num_notifications at " << start.count();
   }
   NotificationWait();
 }
