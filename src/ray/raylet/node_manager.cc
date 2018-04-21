@@ -356,7 +356,8 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     // The task's uncommitted lineage was already added to the local lineage
     // cache upon the initial submission, so it's okay to resubmit it with an
     // empty lineage this time.
-    SubmitTask(method, Lineage());
+    // Skip the write to the GCS.
+    _SubmitTask(method, Lineage());
   }
 }
 
@@ -560,7 +561,8 @@ void NodeManager::ProcessNodeManagerMessage(
     std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now().time_since_epoch());
 
-    SubmitTask(task, uncommitted_lineage);
+    // Skip the write to the GCS.
+    _SubmitTask(task, uncommitted_lineage);
   } break;
   case protocol::MessageType_DisconnectClient: {
     // TODO(swang): Handle this error.
@@ -878,14 +880,16 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
   auto lookup_callback = [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
                                 const protocol::TaskT &task_data) {
     const Task task(task_data);
-    SubmitTask(task, Lineage());
+    // Skip the write to the GCS.
+    _SubmitTask(task, Lineage());
   };
   auto failure_callback = [this](ray::gcs::AsyncGcsClient *client,
                                  const TaskID &task_id) {
     Lineage lineage = lineage_cache_.GetUncommittedLineage(task_id);
     auto task_entry = lineage.GetEntry(task_id);
     RAY_CHECK(task_entry) << "Entry not found in GCS or lineage cache!";
-    SubmitTask(task_entry->TaskData(), lineage);
+    // Skip the write to the GCS.
+    _SubmitTask(task_entry->TaskData(), lineage);
   };
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id, lookup_callback, failure_callback));
