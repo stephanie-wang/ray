@@ -38,10 +38,19 @@ void ObjectStoreNotificationManager::NotificationWait() {
 void ObjectStoreNotificationManager::ProcessStoreLength(
     const boost::system::error_code &error) {
   notification_.resize(length_);
-  boost::asio::async_read(
-      socket_, boost::asio::buffer(notification_),
-      boost::bind(&ObjectStoreNotificationManager::ProcessStoreNotification, this,
-                  boost::asio::placeholders::error));
+  boost::asio::read(
+      socket_, boost::asio::buffer(notification_));
+
+  const auto &object_info = flatbuffers::GetRoot<ObjectInfo>(notification_.data());
+  const auto &object_id = from_flatbuf(*object_info->object_id());
+  if (object_info->is_deletion()) {
+    ProcessStoreRemove(object_id);
+  } else {
+    ObjectInfoT result;
+    object_info->UnPackTo(&result);
+    ProcessStoreAdd(result);
+  }
+  NotificationWait();
 }
 
 void ObjectStoreNotificationManager::ProcessStoreNotification(
