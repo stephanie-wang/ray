@@ -53,7 +53,7 @@ if [[ ! -d $TP_DIR/../python/ray/pyarrow_files/pyarrow ]]; then
     ## introduces the issue in https://issues.apache.org/jira/browse/ARROW-2448.
     #git revert --no-commit cf396867df6f1f93948c69ce10ceb0f95e399242
     git fetch origin
-    git checkout 63f25d606839a19a439b81b23f61889a7b725777
+    git checkout bddb3486e094e3d5c7d5e27803955637b4496c0e
 
     cd cpp
     if [ ! -d "build" ]; then
