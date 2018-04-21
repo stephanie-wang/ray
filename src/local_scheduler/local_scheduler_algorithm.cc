@@ -1025,8 +1025,8 @@ std::list<TaskExecutionSpec>::iterator queue_task(
   task_queue->push_front(std::move(copy));
   /* Since we just queued the task, we can get a reference to it by going to
    * the last element in the queue. */
-  auto it = task_queue->front();
-  --it;
+  auto it = task_queue->begin();
+  ++it;
 
   return it;
 }
