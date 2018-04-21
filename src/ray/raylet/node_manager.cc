@@ -184,6 +184,10 @@ ray::Status NodeManager::RegisterGcs() {
 }
 
 void NodeManager::PendingObjectsHeartbeat() {
+  auto start = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  RAY_LOG(INFO) << "Heartbeat at " << start.count();
+
   auto &object_table = gcs_client_->object_table();
   // TODO(swang): Send notifications about puts.
   SendTaskQueueHeartbeats(object_table, local_queues_.GetWaitingTasks());
