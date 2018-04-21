@@ -346,6 +346,12 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
       connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn));
   RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
                  << config_.max_sends;
+
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "Sent object data " << object_id << " at " << start.count();
   return status;
 }
 
@@ -453,6 +459,12 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, conn);
   });
+
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "Received object push " << object_id << " at " << start.count();
 }
 
 void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
