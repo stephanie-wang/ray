@@ -21,6 +21,7 @@
 #include <netinet/in.h>
 
 /* C++ includes. */
+#include <chrono>
 #include <list>
 #include <unordered_map>
 #include <unordered_set>
@@ -1406,6 +1407,12 @@ void process_object_notification(event_loop *loop,
   if (object_info->is_deletion()) {
     process_delete_object_notification(state, object_id);
   } else {
+    std::chrono::milliseconds start =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+    );
+    RAY_LOG(INFO) << object_id << " available at " << start.count();
+
     process_add_object_notification(
         state, object_id, object_info->data_size(),
         object_info->metadata_size(),

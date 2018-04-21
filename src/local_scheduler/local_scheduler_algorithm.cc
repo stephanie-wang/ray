@@ -1022,10 +1022,10 @@ std::list<TaskExecutionSpec>::iterator queue_task(
   /* Copy the spec and add it to the task queue. The allocated spec will be
    * freed when it is assigned to a worker. */
   TaskExecutionSpec copy = TaskExecutionSpec(&task_entry);
-  task_queue->push_back(std::move(copy));
+  task_queue->push_front(std::move(copy));
   /* Since we just queued the task, we can get a reference to it by going to
    * the last element in the queue. */
-  auto it = task_queue->end();
+  auto it = task_queue->front();
   --it;
 
   return it;
