@@ -68,7 +68,7 @@ void ObjectStoreNotificationManager::ProcessStoreNotification(
     std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()
     );
-    RAY_LOG(INFO) << "object available at " << start.count();
+    RAY_LOG(INFO) << "object " << object_id << " available at " << start.count();
 
     ObjectInfoT result;
     object_info->UnPackTo(&result);
