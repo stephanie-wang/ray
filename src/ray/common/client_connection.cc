@@ -92,7 +92,12 @@ void ClientConnection<T>::SetClientID(const ClientID &client_id) {
 template <class T>
 void ClientConnection<T>::ProcessMessages(bool sync) {
   if (num_sync_messages_ >= 10) {
+    // Cap the number of sync calls.
     sync = false;
+  }
+
+  if (!sync) {
+    // An async call was requested. Reset the number of sync calls.
     num_sync_messages_ = 0;
   }
 
