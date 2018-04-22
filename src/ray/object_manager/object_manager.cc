@@ -506,17 +506,17 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
 
-  auto transfer_request = transfer_requests_.find(object_id);
-  if (transfer_request == transfer_requests_.end()) {
-    auto it = transfer_requests_.emplace(object_id, ObjectTransfer(object_id));
-    transfer_request = it.first;
-  }
-  transfer_request->second.AddClient(conn->GetClientID());
-  transfer_request->second.StartTransfer();
+  //auto transfer_request = transfer_requests_.find(object_id);
+  //if (transfer_request == transfer_requests_.end()) {
+  //  auto it = transfer_requests_.emplace(object_id, ObjectTransfer(object_id));
+  //  transfer_request = it.first;
+  //}
+  //transfer_request->second.AddClient(conn->GetClientID());
+  //transfer_request->second.StartTransfer();
 
-  if (pull_timers_.count(object_id) == 0) {
-    ScheduleTransferRequest(object_id);
-  }
+  //if (pull_timers_.count(object_id) == 0) {
+  //  ScheduleTransferRequest(object_id);
+  //}
 
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
