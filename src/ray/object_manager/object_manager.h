@@ -26,6 +26,7 @@
 #include "ray/object_manager/object_directory.h"
 #include "ray/object_manager/object_manager_client_connection.h"
 #include "ray/object_manager/object_store_notification_manager.h"
+#include "ray/object_manager/ObjectTransfer.h"
 
 namespace ray {
 
@@ -179,9 +180,11 @@ class ObjectManager {
   ConnectionPool connection_pool_;
 
   /// Timeout for failed pull requests.
-  std::unordered_map<ObjectID, std::shared_ptr<boost::asio::deadline_timer>,
+  std::unordered_map<ObjectID, std::unique_ptr<boost::asio::deadline_timer>,
                      UniqueIDHasher>
-      pull_requests_;
+      pull_timers_;
+
+  std::unordered_map<ObjectID, ObjectTransfer, UniqueIDHasher> transfer_requests_;
 
   /// Cache of locally available objects.
   std::unordered_map<ObjectID, ObjectInfoT, UniqueIDHasher> local_objects_;
@@ -202,6 +205,8 @@ class ObjectManager {
   /// This is invoked when a pull fails. Only point of failure currently considered
   /// is GetLocationsFailed.
   void SchedulePull(const ObjectID &object_id, int wait_ms);
+
+  void ScheduleTransferRequest(const ObjectID &object_id);
 
   /// Part of an asynchronous sequence of Pull methods.
   /// Gets the location of an object before invoking PullEstablishConnection.

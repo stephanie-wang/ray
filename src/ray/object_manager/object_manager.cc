@@ -87,6 +87,8 @@ void ObjectManager::NotifyDirectoryObjectAdd(const ObjectInfoT &object_info) {
   ray::Status status =
       object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
 
+  Cancel(object_id);
+
   // std::chrono::microseconds start =
   // std::chrono::duration_cast<std::chrono::microseconds>(
   //    std::chrono::system_clock::now().time_since_epoch()
@@ -113,6 +115,11 @@ ray::Status ObjectManager::SubscribeObjDeleted(
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id) {
+  if (transfer_requests_.count(object_id) == 1) {
+    return ray::Status::OK();
+  }
+
+  transfer_requests_.emplace(object_id, ObjectTransfer(object_id));
   // std::chrono::microseconds start =
   // std::chrono::duration_cast<std::chrono::microseconds>(
   //    std::chrono::system_clock::now().time_since_epoch()
@@ -132,6 +139,23 @@ void ObjectManager::SchedulePull(const ObjectID &object_id, int wait_ms) {
   //      pull_requests_.erase(object_id);
   //      RAY_CHECK_OK(PullGetLocations(object_id));
   //    });
+}
+
+void ObjectManager::ScheduleTransferRequest(const ObjectID &object_id) {
+  auto timer = std::unique_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(*main_service_));
+  auto timer_it = pull_timers_.emplace(object_id, std::move(timer));
+  RAY_CHECK(timer_it.second);
+  auto period = boost::posix_time::milliseconds(1000);
+  timer_it.first->second->expires_from_now(period);
+  timer_it.first->second->async_wait(
+    [this, object_id](const boost::system::error_code &error) {
+      if (!error) {
+        auto entry = transfer_requests_.find(object_id);
+        RAY_CHECK(entry != transfer_requests_.end());
+        auto client_id = entry->second.RequestNextClient();
+        RAY_CHECK_OK(PullEstablishConnection(object_id, client_id));
+      }
+    });
 }
 
 ray::Status ObjectManager::PullGetLocations(const ObjectID &object_id) {
@@ -163,17 +187,34 @@ void ObjectManager::GetLocationsSuccess(const std::vector<ray::ClientID> &client
 }
 
 void ObjectManager::GetLocationsFailed(const ObjectID &object_id) {
-  SchedulePull(object_id, config_.pull_timeout_ms);
+  auto it = transfer_requests_.find(object_id);
+  RAY_CHECK(it != transfer_requests_.end());
+  if (!it->second.TransferRequested()) {
+    transfer_requests_.erase(it);
+  }
+  //SchedulePull(object_id, config_.pull_timeout_ms);
 }
 
 ray::Status ObjectManager::Pull(const ObjectID &object_id, const ClientID &client_id) {
+  auto entry = transfer_requests_.find(object_id);
+  if (entry == transfer_requests_.end()) {
+    auto it = transfer_requests_.emplace(object_id, ObjectTransfer(object_id));
+    entry = it.first;
+  }
+
+  entry->second.AddClient(client_id);
+
   std::chrono::microseconds start = std::chrono::duration_cast<std::chrono::microseconds>(
       std::chrono::system_clock::now().time_since_epoch());
   RAY_LOG(INFO) << object_id << " Pull from a client " << client_id_ << " at "
                 << start.count() / 1000;
 
-  return PullEstablishConnection(object_id, client_id);
-};
+  if (!entry->second.TransferRequested()) {
+    entry->second.StartTransfer();
+    return PullEstablishConnection(object_id, client_id);
+  }
+  return ray::Status::OK();
+}
 
 ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                                    const ClientID &client_id) {
@@ -187,6 +228,11 @@ ray::Status ObjectManager::PullEstablishConnection(const ObjectID &object_id,
   // Check if object is already local, and client_id is not itself.
   if (local_objects_.count(object_id) != 0 || client_id == client_id_) {
     return ray::Status::OK();
+  }
+
+  // After 1s, try the next client.
+  if (pull_timers_.count(object_id) == 0) {
+    ScheduleTransferRequest(object_id);
   }
 
   // Acquire a message connection and send pull request.
@@ -358,6 +404,9 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
 ray::Status ObjectManager::Cancel(const ObjectID &object_id) {
   // TODO(hme): Account for pull timers.
   ray::Status status = object_directory_->Cancel(object_id);
+
+  pull_timers_.erase(object_id);
+  transfer_requests_.erase(object_id);
   return ray::Status::OK();
 }
 
@@ -456,6 +505,19 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
+
+  auto transfer_request = transfer_requests_.find(object_id);
+  if (transfer_request == transfer_requests_.end()) {
+    auto it = transfer_requests_.emplace(object_id, ObjectTransfer(object_id));
+    transfer_request = it.first;
+  }
+  transfer_request->second.AddClient(conn->GetClientID());
+  transfer_request->second.StartTransfer();
+
+  if (pull_timers_.count(object_id) == 0) {
+    ScheduleTransferRequest(object_id);
+  }
+
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, conn);
