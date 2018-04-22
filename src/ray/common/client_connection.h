@@ -121,7 +121,6 @@ class ClientConnection : public ServerConnection<T>,
   uint64_t read_length_;
   std::vector<uint8_t> read_message_;
   int num_sync_messages_;
-  std::chrono::milliseconds process_messages_start_;
 };
 
 using LocalServerConnection = ServerConnection<boost::asio::local::stream_protocol>;
