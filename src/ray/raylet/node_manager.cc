@@ -561,6 +561,13 @@ void NodeManager::ProcessNodeManagerMessage(
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpecReadonly().NumForwards();
 
+    std::chrono::milliseconds start =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+    );
+    RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task received "
+                  << task.GetTaskSpecification().TaskId() << " at " << start.count();
+
     std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now().time_since_epoch());
 
