@@ -70,6 +70,11 @@ std::shared_ptr<ClientConnection<T>> ClientConnection<T>::Create(
 }
 
 template <class T>
+size_t ClientConnection<T>::Available() {
+  return ServerConnection<T>::socket_.available();
+}
+
+template <class T>
 ClientConnection<T>::ClientConnection(MessageHandler<T> &message_handler,
                                       boost::asio::basic_stream_socket<T> &&socket)
     : ServerConnection<T>(std::move(socket)), message_handler_(message_handler) {}
@@ -85,21 +90,28 @@ void ClientConnection<T>::SetClientID(const ClientID &client_id) {
 }
 
 template <class T>
-void ClientConnection<T>::ProcessMessages() {
+void ClientConnection<T>::ProcessMessages(bool sync) {
   // Wait for a message header from the client. The message header includes the
   // protocol version, the message type, and the length of the message.
   std::vector<boost::asio::mutable_buffer> header;
   header.push_back(boost::asio::buffer(&read_version_, sizeof(read_version_)));
   header.push_back(boost::asio::buffer(&read_type_, sizeof(read_type_)));
   header.push_back(boost::asio::buffer(&read_length_, sizeof(read_length_)));
-  boost::asio::async_read(
-      ServerConnection<T>::socket_, header,
-      boost::bind(&ClientConnection<T>::ProcessMessageHeader, this->shared_from_this(),
-                  boost::asio::placeholders::error));
+  if (sync) {
+    boost::system::error_code error;
+    boost::asio::read(
+        ServerConnection<T>::socket_, header, error);
+    ProcessMessageHeader(error, sync);
+  } else {
+    boost::asio::async_read(
+        ServerConnection<T>::socket_, header,
+        boost::bind(&ClientConnection<T>::ProcessMessageHeader, this->shared_from_this(),
+                    boost::asio::placeholders::error, sync));
+  }
 }
 
 template <class T>
-void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &error) {
+void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &error, bool sync) {
   if (error) {
     // If there was an error, disconnect the client.
     read_type_ = protocol::MessageType_DisconnectClient;
@@ -113,10 +125,17 @@ void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &
   // Resize the message buffer to match the received length.
   read_message_.resize(read_length_);
   // Wait for the message to be read.
-  boost::asio::async_read(
-      ServerConnection<T>::socket_, boost::asio::buffer(read_message_),
-      boost::bind(&ClientConnection<T>::ProcessMessage, this->shared_from_this(),
-                  boost::asio::placeholders::error));
+  if (sync) {
+    boost::system::error_code error;
+    boost::asio::read(
+        ServerConnection<T>::socket_, boost::asio::buffer(read_message_), error);
+    ProcessMessage(error);
+  } else {
+    boost::asio::async_read(
+        ServerConnection<T>::socket_, boost::asio::buffer(read_message_),
+        boost::bind(&ClientConnection<T>::ProcessMessage, this->shared_from_this(),
+                    boost::asio::placeholders::error));
+  }
 }
 
 template <class T>

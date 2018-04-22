@@ -86,6 +86,8 @@ class ClientConnection : public ServerConnection<T>,
       ClientHandler<T> &new_client_handler, MessageHandler<T> &message_handler,
       boost::asio::basic_stream_socket<T> &&socket);
 
+  size_t Available();
+
   /// \return The ClientID of the remote client.
   const ClientID &GetClientID();
 
@@ -95,7 +97,7 @@ class ClientConnection : public ServerConnection<T>,
   /// Listen for and process messages from the client connection. Once a
   /// message has been fully received, the client manager's
   /// ProcessClientMessage handler will be called.
-  void ProcessMessages();
+  void ProcessMessages(bool sync=false);
 
  private:
   /// A private constructor for a node client connection.
@@ -103,7 +105,7 @@ class ClientConnection : public ServerConnection<T>,
                    boost::asio::basic_stream_socket<T> &&socket);
   /// Process an error from the last operation, then process the  message
   /// header from the client.
-  void ProcessMessageHeader(const boost::system::error_code &error);
+  void ProcessMessageHeader(const boost::system::error_code &error, bool sync);
   /// Process an error from reading the message header, then process the
   /// message from the client.
   void ProcessMessage(const boost::system::error_code &error);
