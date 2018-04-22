@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <deque>
+#include <list>
 #include <map>
 #include <memory>
 #include <thread>
@@ -91,10 +92,10 @@ class ConnectionPool {
  private:
   /// A container type that maps ClientID to a connection type.
   using SenderMapType =
-      std::unordered_map<ray::ClientID, std::vector<std::shared_ptr<SenderConnection>>,
+      std::unordered_map<ray::ClientID, std::list<std::shared_ptr<SenderConnection>>,
                          ray::UniqueIDHasher>;
   using ReceiverMapType =
-      std::unordered_map<ray::ClientID, std::vector<std::shared_ptr<TcpClientConnection>>,
+      std::unordered_map<ray::ClientID, std::list<std::shared_ptr<TcpClientConnection>>,
                          ray::UniqueIDHasher>;
 
   /// Adds a receiver for ClientID to the given map.

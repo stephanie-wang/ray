@@ -77,13 +77,11 @@ void ConnectionPool::Remove(ReceiverMapType &conn_map, const ClientID &client_id
   if (conn_map.count(client_id) == 0) {
     return;
   }
-  std::vector<std::shared_ptr<TcpClientConnection>> &connections = conn_map[client_id];
-  int64_t pos =
-      std::find(connections.begin(), connections.end(), conn) - connections.begin();
-  if (pos >= (int64_t)connections.size()) {
-    return;
+  std::list<std::shared_ptr<TcpClientConnection>> &connections = conn_map[client_id];
+  auto it = std::find(connections.begin(), connections.end(), conn);
+  if (it != connections.end()) {
+    connections.erase(it);
   }
-  connections.erase(connections.begin() + pos);
 }
 
 uint64_t ConnectionPool::Count(SenderMapType &conn_map, const ClientID &client_id) {
@@ -95,8 +93,8 @@ uint64_t ConnectionPool::Count(SenderMapType &conn_map, const ClientID &client_i
 
 std::shared_ptr<SenderConnection> ConnectionPool::Borrow(SenderMapType &conn_map,
                                                          const ClientID &client_id) {
-  std::shared_ptr<SenderConnection> conn = conn_map[client_id].back();
-  conn_map[client_id].pop_back();
+  std::shared_ptr<SenderConnection> conn = conn_map[client_id].front();
+  conn_map[client_id].pop_front();
   RAY_LOG(DEBUG) << "Borrow " << client_id << " " << conn_map[client_id].size();
   return conn;
 }
