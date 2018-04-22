@@ -56,7 +56,7 @@ class ObjectStoreNotificationManager {
   void ProcessStoreAdd(const ObjectInfoT &object_info);
   void ProcessStoreRemove(const ObjectID &object_id);
 
-  std::vector<std::function<void(const ObjectInfoT &)>> add_handlers_;
+  std::list<std::function<void(const ObjectInfoT &)>> add_handlers_;
   std::vector<std::function<void(const ray::ObjectID &)>> rem_handlers_;
 
   plasma::PlasmaClient store_client_;
