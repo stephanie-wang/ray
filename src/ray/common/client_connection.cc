@@ -79,10 +79,7 @@ ClientConnection<T>::ClientConnection(MessageHandler<T> &message_handler,
                                       boost::asio::basic_stream_socket<T> &&socket)
     : ServerConnection<T>(std::move(socket)),
       message_handler_(message_handler),
-      num_sync_messages_(0),
-      process_messages_start_(std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-      )) {}
+      num_sync_messages_(0) {}
 
 template <class T>
 const ClientID &ClientConnection<T>::GetClientID() {
@@ -97,18 +94,15 @@ void ClientConnection<T>::SetClientID(const ClientID &client_id) {
 template <class T>
 void ClientConnection<T>::ProcessMessages(bool sync) {
   if (!sync) {
-    // An async call was requested. Calculate the total latency of the
-    // synchronous ProcessMessages() calls.
-    std::chrono::milliseconds now =
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch()
-    );
-    auto latency = (now - process_messages_start_).count();
-    if (latency > 10) {
-      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took " << latency << "ms at " << process_messages_start_.count();
+    // An async call was requested.
+    if (num_sync_messages_ > 0) {
+      // If any synchronous calls were made, then log it.
+      std::chrono::milliseconds now =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+      );
+      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took at " << now.count();
     }
-
-    process_messages_start_ = now;
 
     // Reset the number of sync calls.
     num_sync_messages_ = 0;
