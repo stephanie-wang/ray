@@ -492,8 +492,9 @@ void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> &con
   ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
   ClientID client_id = ClientID::from_binary(pr->client_id()->str());
   ray::Status push_status = Push(object_id, client_id);
-  bool available = conn->Available();
-  conn->ProcessMessages(/*sync=*/available);
+  //bool available = conn->Available();
+  //conn->ProcessMessages(/*sync=*/available);
+  conn->ProcessMessages();
 }
 
 void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn,
