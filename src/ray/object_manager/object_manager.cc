@@ -492,9 +492,8 @@ void ObjectManager::ReceivePullRequest(std::shared_ptr<TcpClientConnection> &con
   ObjectID object_id = ObjectID::from_binary(pr->object_id()->str());
   ClientID client_id = ClientID::from_binary(pr->client_id()->str());
   ray::Status push_status = Push(object_id, client_id);
-  //bool available = conn->Available();
-  //conn->ProcessMessages(/*sync=*/available);
-  conn->ProcessMessages();
+  size_t available = conn->Available();
+  conn->ProcessMessages(/*sync=*/(available > 100));
 }
 
 void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> conn,
@@ -568,7 +567,9 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     }
     // TODO(hme): If the object isn't local, create a pull request for this chunk.
   }
-  conn->ProcessMessages();
+  size_t available = conn->Available();
+  conn->ProcessMessages(/*sync=*/(available > 100));
+
   RAY_LOG(DEBUG) << "ReceiveCompleted " << client_id_ << " " << object_id << " "
                  << "/" << config_.max_receives;
 }

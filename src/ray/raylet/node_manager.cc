@@ -573,6 +573,9 @@ void NodeManager::ProcessNodeManagerMessage(
 
     // Skip the write to the GCS.
     _SubmitTask(task, uncommitted_lineage);
+
+    size_t available = node_manager_client->Available();
+    node_manager_client->ProcessMessages(/*sync=*/(available > 100));
   } break;
   case protocol::MessageType_DisconnectClient: {
     // TODO(swang): Handle this error.
@@ -582,7 +585,6 @@ void NodeManager::ProcessNodeManagerMessage(
   default:
     RAY_LOG(FATAL) << "Received unexpected message type " << message_type;
   }
-  node_manager_client->ProcessMessages();
 }
 
 void NodeManager::HandleWaitingTaskReady(const TaskID &task_id) {

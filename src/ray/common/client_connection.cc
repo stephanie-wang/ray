@@ -77,7 +77,7 @@ size_t ClientConnection<T>::Available() {
 template <class T>
 ClientConnection<T>::ClientConnection(MessageHandler<T> &message_handler,
                                       boost::asio::basic_stream_socket<T> &&socket)
-    : ServerConnection<T>(std::move(socket)), message_handler_(message_handler) {}
+    : ServerConnection<T>(std::move(socket)), message_handler_(message_handler), num_sync_messages_(0) {}
 
 template <class T>
 const ClientID &ClientConnection<T>::GetClientID() {
@@ -91,6 +91,11 @@ void ClientConnection<T>::SetClientID(const ClientID &client_id) {
 
 template <class T>
 void ClientConnection<T>::ProcessMessages(bool sync) {
+  if (num_sync_messages_ >= 10) {
+    sync = false;
+    num_sync_messages_ = 0;
+  }
+
   // Wait for a message header from the client. The message header includes the
   // protocol version, the message type, and the length of the message.
   std::vector<boost::asio::mutable_buffer> header;
@@ -102,6 +107,7 @@ void ClientConnection<T>::ProcessMessages(bool sync) {
     boost::asio::read(
         ServerConnection<T>::socket_, header, error);
     ProcessMessageHeader(error, sync);
+    num_sync_messages_++;
   } else {
     boost::asio::async_read(
         ServerConnection<T>::socket_, header,

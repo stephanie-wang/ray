@@ -119,6 +119,7 @@ class ClientConnection : public ServerConnection<T>,
   int64_t read_type_;
   uint64_t read_length_;
   std::vector<uint8_t> read_message_;
+  int num_sync_messages_;
 };
 
 using LocalServerConnection = ServerConnection<boost::asio::local::stream_protocol>;
