@@ -140,6 +140,7 @@ class NodeManager {
       gcs_task_timers_;
   std::unordered_map<TaskID, Task, UniqueIDHasher> gcs_task_cache_;
   std::chrono::milliseconds last_heartbeat_at_;
+  int ticks_until_object_heartbeat_;
 };
 
 }  // namespace raylet
