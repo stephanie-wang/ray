@@ -92,7 +92,10 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           },
           [this](const ObjectID &object_id) {
             io_service_.post(
-                [this, object_id]() { reconstruction_policy_.Cancel(object_id); });
+                [this, object_id]() {
+                RAY_CHECK_OK(object_manager_.Cancel(object_id));
+                reconstruction_policy_.Cancel(object_id);
+                });
           },
           [this](const TaskID &task_id) {
             io_service_.post([this, task_id]() { HandleWaitingTaskReady(task_id); });
@@ -867,6 +870,7 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
   if (task.GetTaskSpecification().IsActorCreationTask() ||
       task.GetTaskSpecification().IsActorTask()) {
     auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
+    RAY_CHECK_OK(object_manager_.Cancel(dummy_object));
     reconstruction_policy_.Cancel(dummy_object);
     task_dependency_manager_.HandleObjectLocal(dummy_object);
   }
