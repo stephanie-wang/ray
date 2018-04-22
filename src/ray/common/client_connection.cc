@@ -94,6 +94,28 @@ void ClientConnection<T>::SetClientID(const ClientID &client_id) {
 
 template <class T>
 void ClientConnection<T>::ProcessMessages(bool sync) {
+  // Wait for a message header from the client. The message header includes the
+  // protocol version, the message type, and the length of the message.
+  std::vector<boost::asio::mutable_buffer> header;
+  header.push_back(boost::asio::buffer(&read_version_, sizeof(read_version_)));
+  header.push_back(boost::asio::buffer(&read_type_, sizeof(read_type_)));
+  header.push_back(boost::asio::buffer(&read_length_, sizeof(read_length_)));
+  if (sync) {
+    num_sync_messages_++;
+    boost::system::error_code error;
+    boost::asio::read(
+        ServerConnection<T>::socket_, header, error);
+    ProcessMessageHeader(error, sync);
+  } else {
+    boost::asio::async_read(
+        ServerConnection<T>::socket_, header,
+        boost::bind(&ClientConnection<T>::ProcessMessageHeader, this->shared_from_this(),
+                    boost::asio::placeholders::error, sync));
+  }
+}
+
+template <class T>
+void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &error, bool sync) {
   std::chrono::milliseconds now =
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
@@ -105,37 +127,12 @@ void ClientConnection<T>::ProcessMessages(bool sync) {
       RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took "
         << (now - process_messages_at_).count() + " at " << now.count();
     }
+    process_messages_at_ = now;
 
     // Reset the number of sync calls.
     num_sync_messages_ = 0;
-  } else {
-    if (num_sync_messages_ == 0) {
-      process_messages_at_ = now;
-    }
   }
 
-  // Wait for a message header from the client. The message header includes the
-  // protocol version, the message type, and the length of the message.
-  std::vector<boost::asio::mutable_buffer> header;
-  header.push_back(boost::asio::buffer(&read_version_, sizeof(read_version_)));
-  header.push_back(boost::asio::buffer(&read_type_, sizeof(read_type_)));
-  header.push_back(boost::asio::buffer(&read_length_, sizeof(read_length_)));
-  if (sync) {
-    boost::system::error_code error;
-    boost::asio::read(
-        ServerConnection<T>::socket_, header, error);
-    ProcessMessageHeader(error, sync);
-    num_sync_messages_++;
-  } else {
-    boost::asio::async_read(
-        ServerConnection<T>::socket_, header,
-        boost::bind(&ClientConnection<T>::ProcessMessageHeader, this->shared_from_this(),
-                    boost::asio::placeholders::error, sync));
-  }
-}
-
-template <class T>
-void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &error, bool sync) {
   if (error) {
     // If there was an error, disconnect the client.
     read_type_ = protocol::MessageType_DisconnectClient;
