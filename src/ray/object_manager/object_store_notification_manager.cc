@@ -110,7 +110,7 @@ void ObjectStoreNotificationManager::ProcessStoreRemove(const ObjectID &object_i
 
 void ObjectStoreNotificationManager::SubscribeObjAdded(
     std::function<void(const ObjectInfoT &)> callback) {
-  add_handlers_.push_back(callback);
+  add_handlers_.push_front(callback);
 }
 
 void ObjectStoreNotificationManager::SubscribeObjDeleted(
