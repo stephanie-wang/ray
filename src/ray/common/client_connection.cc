@@ -79,7 +79,8 @@ ClientConnection<T>::ClientConnection(MessageHandler<T> &message_handler,
                                       boost::asio::basic_stream_socket<T> &&socket)
     : ServerConnection<T>(std::move(socket)),
       message_handler_(message_handler),
-      num_sync_messages_(0) {}
+      num_sync_messages_(0),
+      process_messages_at_(0) {}
 
 template <class T>
 const ClientID &ClientConnection<T>::GetClientID() {
@@ -107,10 +108,10 @@ void ClientConnection<T>::ProcessMessages(bool sync) {
 
     // Reset the number of sync calls.
     num_sync_messages_ = 0;
-  }
-
-  if (num_sync_messages_ == 1) {
-    process_messages_at_ = now;
+  } else {
+    if (num_sync_messages_ == 0) {
+      process_messages_at_ = now;
+    }
   }
 
   // Wait for a message header from the client. The message header includes the
