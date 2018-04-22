@@ -61,7 +61,7 @@ void ObjectStoreNotificationManager::ProcessStoreLength(
     }
     num_notifications++;
 
-    if (socket_.available() > 0) {
+    if (socket_.available() >= length_) {
       RAY_CHECK(boost::asio::read(socket_, boost::asio::buffer(&length_, sizeof(length_))) > 0);
     } else {
       length_ = -1;
