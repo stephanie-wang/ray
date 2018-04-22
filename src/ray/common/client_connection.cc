@@ -93,19 +93,24 @@ void ClientConnection<T>::SetClientID(const ClientID &client_id) {
 
 template <class T>
 void ClientConnection<T>::ProcessMessages(bool sync) {
+  std::chrono::milliseconds now =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
   if (!sync) {
     // An async call was requested.
-    if (num_sync_messages_ > 0) {
-      // If any synchronous calls were made, then log it.
-      std::chrono::milliseconds now =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-      );
-      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took at " << now.count();
+    if (num_sync_messages_ > 1) {
+      // If multiple synchronous calls were made, then log it.
+      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took "
+        << (now - process_messages_at_).count() + " at " << now.count();
     }
 
     // Reset the number of sync calls.
     num_sync_messages_ = 0;
+  }
+
+  if (num_sync_messages_ == 1) {
+    process_messages_at_ = now;
   }
 
   // Wait for a message header from the client. The message header includes the

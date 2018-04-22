@@ -575,7 +575,7 @@ void NodeManager::ProcessNodeManagerMessage(
     _SubmitTask(task, uncommitted_lineage);
 
     size_t available = node_manager_client->Available();
-    node_manager_client->ProcessMessages(/*sync=*/(available > 100));
+    node_manager_client->ProcessMessages(/*sync=*/(available > 0));
   } break;
   case protocol::MessageType_DisconnectClient: {
     // TODO(swang): Handle this error.
