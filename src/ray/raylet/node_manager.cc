@@ -187,10 +187,14 @@ ray::Status NodeManager::RegisterGcs() {
 }
 
 void NodeManager::PendingObjectsHeartbeat() {
-  if (ticks_until_object_heartbeat_ == 0) {
-    auto start = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch());
-    RAY_LOG(INFO) << "Heartbeat at " << start.count();
+  auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  if ((now - last_heartbeat_at_).count() >
+      400) {
+    if ((now - last_heartbeat_at_).count() > 1000) {
+      RAY_LOG(FATAL) << "Fell behind on heartbeats";
+    }
+    RAY_LOG(INFO) << "Heartbeat at " << now.count();
 
     auto &object_table = gcs_client_->object_table();
     // TODO(swang): Send notifications about puts.
@@ -200,18 +204,8 @@ void NodeManager::PendingObjectsHeartbeat() {
     SendTaskQueueHeartbeats(object_table, local_queues_.GetRunningTasks());
     SendTaskQueueHeartbeats(object_table, local_queues_.GetBlockedTasks());
 
-    auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch());
-    if ((now - last_heartbeat_at_).count() >
-        1000) {
-      RAY_LOG(FATAL) << "Fell behind on heartbeats";
-    }
     last_heartbeat_at_ = now;
   }
-
-  // Every 5 heartbeats, send the object heartbeats.
-  ticks_until_object_heartbeat_++;
-  ticks_until_object_heartbeat_ = (ticks_until_object_heartbeat_ % 5);
 }
 
 void NodeManager::Heartbeat() {
