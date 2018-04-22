@@ -132,8 +132,8 @@ class RayConfig {
         // be addressed. This timeout is often on the critical path for object
         // transfers.
         object_manager_pull_timeout_ms_(20),
-        object_manager_max_sends_(8),
-        object_manager_max_receives_(8),
+        object_manager_max_sends_(2),
+        object_manager_max_receives_(2),
         object_manager_default_chunk_size_(100000000) {}
 
   ~RayConfig() {}
