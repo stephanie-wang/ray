@@ -124,8 +124,8 @@ void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &
     // An async call was requested.
     if (num_sync_messages_ > 1) {
       // If multiple synchronous calls were made, then log it.
-      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took "
-        << (now - process_messages_at_).count() + " at " << now.count();
+      //RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took "
+      //  << (now - process_messages_at_).count() + " at " << now.count();
     }
     process_messages_at_ = now;
 
