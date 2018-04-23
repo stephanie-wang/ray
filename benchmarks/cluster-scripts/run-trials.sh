@@ -1,6 +1,6 @@
 #!/bin/bash
 
-NUM_REDIS_SHARDS=$1
+NUM_REDIS_SHARDS="${NUM_REDIS_SHARDS:-"1"}"
 
 for NUM_NODES in "$@";
 do

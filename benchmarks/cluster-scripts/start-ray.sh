@@ -3,10 +3,11 @@
 
 export PATH=/home/ubuntu/anaconda3/bin/:$PATH
 
-NUM_REDIS_SHARDS=$1
-GCS_DELAY_MS="${2:-"-1"}"
+NUM_NODES=$1
+NUM_REDIS_SHARDS=$2
+GCS_DELAY_MS=$3
 HEAD=`head -n 1 workers.txt`
-NUM_NODES="${NUM_NODES:-$(tail -n +2 workers.txt | wc -l)}"
+#NUM_NODES="${NUM_NODES:-$(tail -n +2 workers.txt | wc -l)}"
 
 
 rm /tmp/raylogs/*
