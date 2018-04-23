@@ -75,6 +75,7 @@ class RedisContext {
 
   Status SubscribeAsync(const ClientID &client_id, const TablePubsub pubsub_channel,
                         int64_t callback_index);
+  redisContext *sync_context() { return context_; }
   redisAsyncContext *async_context() { return async_context_; }
   redisAsyncContext *subscribe_context() { return subscribe_context_; };
 

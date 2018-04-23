@@ -39,7 +39,8 @@ struct UniqueIDHasher {
   // ID hashing function.
   size_t operator()(const UniqueID &id) const {
     size_t result;
-    std::memcpy(&result, id.data(), sizeof(size_t));
+    // Skip the bytes for the object prefix.
+    std::memcpy(&result, id.data() + (kObjectIdIndexSize / 8), sizeof(size_t));
     return result;
   }
 };

@@ -40,14 +40,15 @@ Status Log<ID, Data>::Append(const JobID &job_id, const ID &id,
     flatbuffers::FlatBufferBuilder fbb;
     fbb.ForceDefaults(true);
     fbb.Finish(Data::Pack(fbb, data.get()));
-    return context_->RunAsync("RAY.TABLE_APPEND", id, fbb.GetBufferPointer(),
-                              fbb.GetSize(), prefix_, pubsub_channel_, callback_index);
+    return GetRedisContext(id)->RunAsync("RAY.TABLE_APPEND", id, fbb.GetBufferPointer(),
+                                         fbb.GetSize(), prefix_, pubsub_channel_,
+                                         callback_index);
   } else {
     // If no data was provided, then send a nil TABLE_APPEND, which acts as a
     // heartbeat.
     std::vector<uint8_t> nil;
-    return context_->RunAsync("RAY.TABLE_APPEND", id, nil.data(), nil.size(), prefix_,
-                              pubsub_channel_, callback_index);
+    return GetRedisContext(id)->RunAsync("RAY.TABLE_APPEND", id, nil.data(), nil.size(),
+                                         prefix_, pubsub_channel_, callback_index);
   }
 }
 
@@ -73,8 +74,9 @@ Status Log<ID, Data>::AppendAt(const JobID &job_id, const ID &id,
   flatbuffers::FlatBufferBuilder fbb;
   fbb.ForceDefaults(true);
   fbb.Finish(Data::Pack(fbb, data.get()));
-  return context_->RunAsync("RAY.TABLE_APPEND", id, fbb.GetBufferPointer(), fbb.GetSize(),
-                            prefix_, pubsub_channel_, callback_index, log_length);
+  return GetRedisContext(id)->RunAsync("RAY.TABLE_APPEND", id, fbb.GetBufferPointer(),
+                                       fbb.GetSize(), prefix_, pubsub_channel_,
+                                       callback_index, log_length);
 }
 
 template <typename ID, typename Data>
@@ -101,8 +103,8 @@ Status Log<ID, Data>::Lookup(const JobID &job_id, const ID &id, const Callback &
         return true;
       });
   std::vector<uint8_t> nil;
-  return context_->RunAsync("RAY.TABLE_LOOKUP", id, nil.data(), nil.size(), prefix_,
-                            pubsub_channel_, callback_index);
+  return GetRedisContext(id)->RunAsync("RAY.TABLE_LOOKUP", id, nil.data(), nil.size(),
+                                       prefix_, pubsub_channel_, callback_index);
 }
 
 template <typename ID, typename Data>
@@ -146,7 +148,11 @@ Status Log<ID, Data>::Subscribe(const JobID &job_id, const ClientID &client_id,
         return false;
       });
   subscribe_callback_index_ = callback_index;
-  return context_->SubscribeAsync(client_id, pubsub_channel_, callback_index);
+  for (const auto &context : contexts_) {
+    RAY_RETURN_NOT_OK(
+        context->SubscribeAsync(client_id, pubsub_channel_, callback_index));
+  }
+  return ray::Status::OK();
 }
 
 template <typename ID, typename Data>
@@ -154,9 +160,10 @@ Status Log<ID, Data>::RequestNotifications(const JobID &job_id, const ID &id,
                                            const ClientID &client_id) {
   RAY_CHECK(subscribe_callback_index_ >= 0)
       << "Client requested notifications on a key before Subscribe completed";
-  return context_->RunAsync("RAY.TABLE_REQUEST_NOTIFICATIONS", id, client_id.data(),
-                            client_id.size(), prefix_, pubsub_channel_,
-                            /*callback_index=*/-1);
+  return GetRedisContext(id)->RunAsync("RAY.TABLE_REQUEST_NOTIFICATIONS", id,
+                                       client_id.data(), client_id.size(), prefix_,
+                                       pubsub_channel_,
+                                       /*callback_index=*/-1);
 }
 
 template <typename ID, typename Data>
@@ -164,9 +171,10 @@ Status Log<ID, Data>::CancelNotifications(const JobID &job_id, const ID &id,
                                           const ClientID &client_id) {
   RAY_CHECK(subscribe_callback_index_ >= 0)
       << "Client canceled notifications on a key before Subscribe completed";
-  return context_->RunAsync("RAY.TABLE_CANCEL_NOTIFICATIONS", id, client_id.data(),
-                            client_id.size(), prefix_, pubsub_channel_,
-                            /*callback_index=*/-1);
+  return GetRedisContext(id)->RunAsync("RAY.TABLE_CANCEL_NOTIFICATIONS", id,
+                                       client_id.data(), client_id.size(), prefix_,
+                                       pubsub_channel_,
+                                       /*callback_index=*/-1);
 }
 
 template <typename ID, typename Data>
@@ -184,8 +192,9 @@ Status Table<ID, Data>::Add(const JobID &job_id, const ID &id,
   flatbuffers::FlatBufferBuilder fbb;
   fbb.ForceDefaults(true);
   fbb.Finish(Data::Pack(fbb, data.get()));
-  return context_->RunAsync("RAY.TABLE_ADD", id, fbb.GetBufferPointer(), fbb.GetSize(),
-                            prefix_, pubsub_channel_, callback_index);
+  return GetRedisContext(id)->RunAsync("RAY.TABLE_ADD", id, fbb.GetBufferPointer(),
+                                       fbb.GetSize(), prefix_, pubsub_channel_,
+                                       callback_index);
 }
 
 template <typename ID, typename Data>

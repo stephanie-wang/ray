@@ -86,8 +86,8 @@ class Log : public LogInterface<ID, Data>, virtual public PubsubInterface<ID> {
     AsyncGcsClient *client;
   };
 
-  Log(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : context_(context),
+  Log(const std::vector<std::shared_ptr<RedisContext>> &contexts, AsyncGcsClient *client)
+      : contexts_(contexts),
         client_(client),
         pubsub_channel_(TablePubsub_NO_PUBLISH),
         prefix_(TablePrefix_UNUSED),
@@ -178,8 +178,13 @@ class Log : public LogInterface<ID, Data>, virtual public PubsubInterface<ID> {
                              const ClientID &client_id);
 
  protected:
+  std::shared_ptr<RedisContext> GetRedisContext(const ID &id) {
+    static UniqueIDHasher index;
+    return contexts_[index(id) % contexts_.size()];
+  }
+
   /// The connection to the GCS.
-  std::shared_ptr<RedisContext> context_;
+  std::vector<std::shared_ptr<RedisContext>> contexts_;
   /// The GCS client.
   AsyncGcsClient *client_;
   /// The pubsub channel to subscribe to for notifications about keys in this
@@ -235,8 +240,9 @@ class Table : private Log<ID, Data>,
     AsyncGcsClient *client;
   };
 
-  Table(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Log<ID, Data>(context, client) {}
+  Table(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+        AsyncGcsClient *client)
+      : Log<ID, Data>(contexts, client) {}
 
   using Log<ID, Data>::RequestNotifications;
   using Log<ID, Data>::CancelNotifications;
@@ -268,16 +274,18 @@ class Table : private Log<ID, Data>,
                    const Callback &subscribe, const SubscriptionCallback &done);
 
  protected:
-  using Log<ID, Data>::context_;
+  using Log<ID, Data>::contexts_;
   using Log<ID, Data>::client_;
   using Log<ID, Data>::pubsub_channel_;
   using Log<ID, Data>::prefix_;
+  using Log<ID, Data>::GetRedisContext;
 };
 
 class ObjectTable : public Log<ObjectID, ObjectTableData> {
  public:
-  ObjectTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Log(context, client) {
+  ObjectTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+              AsyncGcsClient *client)
+      : Log(contexts, client) {
     pubsub_channel_ = TablePubsub_OBJECT;
     prefix_ = TablePrefix_OBJECT;
   };
@@ -286,8 +294,9 @@ class ObjectTable : public Log<ObjectID, ObjectTableData> {
 
 class HeartbeatTable : public Table<ClientID, HeartbeatTableData> {
  public:
-  HeartbeatTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Table(context, client) {
+  HeartbeatTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+                 AsyncGcsClient *client)
+      : Table(contexts, client) {
     pubsub_channel_ = TablePubsub_HEARTBEAT;
     prefix_ = TablePrefix_HEARTBEAT;
   }
@@ -296,8 +305,9 @@ class HeartbeatTable : public Table<ClientID, HeartbeatTableData> {
 
 class FunctionTable : public Table<ObjectID, FunctionTableData> {
  public:
-  FunctionTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Table(context, client) {
+  FunctionTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+                AsyncGcsClient *client)
+      : Table(contexts, client) {
     pubsub_channel_ = TablePubsub_NO_PUBLISH;
     prefix_ = TablePrefix_FUNCTION;
   };
@@ -308,8 +318,9 @@ using ClassTable = Table<ClassID, ClassTableData>;
 // TODO(swang): Set the pubsub channel for the actor table.
 class ActorTable : public Log<ActorID, ActorTableData> {
  public:
-  ActorTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Log(context, client) {
+  ActorTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+             AsyncGcsClient *client)
+      : Log(contexts, client) {
     pubsub_channel_ = TablePubsub_ACTOR;
     prefix_ = TablePrefix_TASK_RECONSTRUCTION;
   }
@@ -317,9 +328,9 @@ class ActorTable : public Log<ActorID, ActorTableData> {
 
 class TaskReconstructionLog : public Log<TaskID, TaskReconstructionData> {
  public:
-  TaskReconstructionLog(const std::shared_ptr<RedisContext> &context,
+  TaskReconstructionLog(const std::vector<std::shared_ptr<RedisContext>> &contexts,
                         AsyncGcsClient *client)
-      : Log(context, client) {
+      : Log(contexts, client) {
     pubsub_channel_ = TablePubsub_ACTOR;
     prefix_ = TablePrefix_ACTOR;
   }
@@ -329,8 +340,9 @@ namespace raylet {
 
 class TaskTable : public Table<TaskID, ray::protocol::Task> {
  public:
-  TaskTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Table(context, client) {
+  TaskTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+            AsyncGcsClient *client)
+      : Table(contexts, client) {
     pubsub_channel_ = TablePubsub_RAYLET_TASK;
     prefix_ = TablePrefix_RAYLET_TASK;
   }
@@ -340,8 +352,9 @@ class TaskTable : public Table<TaskID, ray::protocol::Task> {
 
 class TaskTable : public Table<TaskID, TaskTableData> {
  public:
-  TaskTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
-      : Table(context, client) {
+  TaskTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+            AsyncGcsClient *client)
+      : Table(contexts, client) {
     pubsub_channel_ = TablePubsub_TASK;
     prefix_ = TablePrefix_TASK;
   };
@@ -380,9 +393,9 @@ class TaskTable : public Table<TaskID, TaskTableData> {
         });
     flatbuffers::FlatBufferBuilder fbb;
     fbb.Finish(TaskTableTestAndUpdate::Pack(fbb, data.get()));
-    RAY_RETURN_NOT_OK(context_->RunAsync("RAY.TABLE_TEST_AND_UPDATE", id,
-                                         fbb.GetBufferPointer(), fbb.GetSize(), prefix_,
-                                         pubsub_channel_, callback_index));
+    RAY_RETURN_NOT_OK(contexts_[0]->RunAsync("RAY.TABLE_TEST_AND_UPDATE", id,
+                                             fbb.GetBufferPointer(), fbb.GetSize(),
+                                             prefix_, pubsub_channel_, callback_index));
     return Status::OK();
   }
 
@@ -436,9 +449,9 @@ class ClientTable : private Log<UniqueID, ClientTableData> {
  public:
   using ClientTableCallback = std::function<void(
       AsyncGcsClient *client, const ClientID &id, const ClientTableDataT &data)>;
-  ClientTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client,
-              const ClientID &client_id)
-      : Log(context, client),
+  ClientTable(const std::vector<std::shared_ptr<RedisContext>> &contexts,
+              AsyncGcsClient *client, const ClientID &client_id)
+      : Log(contexts, client),
         // We set the client log's key equal to nil so that all instances of
         // ClientTable have the same key.
         client_log_key_(UniqueID::nil()),

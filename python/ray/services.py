@@ -906,6 +906,7 @@ def start_local_scheduler(redis_address,
 
 
 def start_raylet(redis_address,
+                 num_redis_shards,
                  node_ip_address,
                  plasma_store_name,
                  worker_path,
@@ -914,7 +915,8 @@ def start_raylet(redis_address,
                  stdout_file=None,
                  stderr_file=None,
                  cleanup=True,
-                 gcs_delay_ms=-1):
+                 gcs_delay_ms=-1,
+                 use_task_shard=False):
     """Start a raylet, which is a combined local scheduler and object manager.
 
     Args:
@@ -958,10 +960,22 @@ def start_raylet(redis_address,
                                 plasma_store_name, raylet_name, redis_address))
 
     command = [
-        RAYLET_EXECUTABLE, raylet_name, plasma_store_name, node_ip_address,
-        gcs_ip_address, gcs_port, str(num_workers), start_worker_command,
-        resource_argument, str(gcs_delay_ms),
+        RAYLET_EXECUTABLE,
+        raylet_name,
+        plasma_store_name,
+        node_ip_address,
+        gcs_ip_address,
+        gcs_port,
+        str(num_workers),
+        start_worker_command,
+        resource_argument,
+        str(num_redis_shards),
+        str(gcs_delay_ms),
     ]
+    # Pass in a flag for using the task shard.
+    if use_task_shard:
+        command.append("true")
+
     if RUN_RAYLET_PROFILER:
         pid = subprocess.Popen(["valgrind", "--tool=callgrind"] + command,
                                stdout=stdout_file, stderr=stderr_file)
@@ -1229,7 +1243,8 @@ def start_ray_processes(address_info=None,
                         huge_pages=False,
                         autoscaling_config=None,
                         use_raylet=False,
-                        gcs_delay_ms=-1):
+                        gcs_delay_ms=-1,
+                        use_task_shard=False):
     """Helper method to start Ray processes.
 
     Args:
@@ -1322,6 +1337,11 @@ def start_ray_processes(address_info=None,
     redis_address = address_info.get("redis_address")
     redis_shards = address_info.get("redis_shards", [])
     if redis_address is None:
+        # Start a separate Redis instance for the task shard if necessary.
+        if use_task_shard:
+            assert use_raylet
+            num_redis_shards += 1
+
         redis_address, redis_shards = start_redis(
             node_ip_address,
             port=redis_port,
@@ -1478,6 +1498,7 @@ def start_ray_processes(address_info=None,
             address_info["raylet_socket_names"].append(
                 start_raylet(
                     redis_address,
+                    num_redis_shards,
                     node_ip_address,
                     object_store_addresses[i].name,
                     worker_path,
@@ -1486,7 +1507,8 @@ def start_ray_processes(address_info=None,
                     stdout_file=raylet_stdout_file,
                     stderr_file=raylet_stderr_file,
                     cleanup=cleanup,
-                    gcs_delay_ms=gcs_delay_ms))
+                    gcs_delay_ms=gcs_delay_ms,
+                    use_task_shard=use_task_shard))
 
     if not use_raylet:
         # Start any workers that the local scheduler has not already started.
@@ -1541,7 +1563,8 @@ def start_ray_node(node_ip_address,
                    plasma_directory=None,
                    huge_pages=False,
                    use_raylet=False,
-                   gcs_delay_ms=-1):
+                   gcs_delay_ms=-1,
+                   use_task_shard=False):
     """Start the Ray processes for a single node.
 
     This assumes that the Ray processes on some master node have already been
@@ -1600,7 +1623,8 @@ def start_ray_node(node_ip_address,
         plasma_directory=plasma_directory,
         huge_pages=huge_pages,
         use_raylet=use_raylet,
-        gcs_delay_ms=gcs_delay_ms)
+        gcs_delay_ms=gcs_delay_ms,
+        use_task_shard=use_task_shard)
 
 
 def start_ray_head(address_info=None,
@@ -1623,7 +1647,8 @@ def start_ray_head(address_info=None,
                    huge_pages=False,
                    autoscaling_config=None,
                    use_raylet=False,
-                   gcs_delay_ms=-1):
+                   gcs_delay_ms=-1,
+                   use_task_shard=False):
     """Start Ray in local mode.
 
     Args:
@@ -1701,7 +1726,8 @@ def start_ray_head(address_info=None,
         huge_pages=huge_pages,
         autoscaling_config=autoscaling_config,
         use_raylet=use_raylet,
-        gcs_delay_ms=gcs_delay_ms)
+        gcs_delay_ms=gcs_delay_ms,
+        use_task_shard=use_task_shard)
 
 
 def try_to_create_directory(directory_path):
