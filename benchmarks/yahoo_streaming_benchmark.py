@@ -163,7 +163,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    ray.init(use_raylet=args.use_raylet)
+    ray.init(use_raylet=args.use_raylet, redirect_output=False)
 
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /
@@ -211,9 +211,16 @@ if __name__ == '__main__':
     time.sleep(1)
 
     # Start the event generators.
-    [generator.start.remote() for generator in generators]
+    [generator.start.remote(generator) for generator in generators]
     start = time.time()
 
-    time.sleep(SLEEP_TIME)
+    # Ping the event generators every second to make sure they're still alive.
+    for _ in range(SLEEP_TIME):
+        ray.get([generator.ready.remote() for generator in generators])
+        time.sleep(1)
+
+    # Stop generating the events.
+    ray.get([generator.stop.remote() for generator in generators])
+
     if args.test_throughput:
         results = ray.get([reducer.last.remote() for reducer in reducers])

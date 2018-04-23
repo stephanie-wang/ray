@@ -56,16 +56,25 @@ class ProcessingStream(Stream):
 
 
 class SourceStream(Stream):
-    def start(self):
-        while True:
-            now = time.time()
+    def start(self, self_handle):
+        self.handle = self_handle
+        self.generate()
 
-            elements = self.generate_elements()
-            put_latency = self._push(elements)
+    def stop(self):
+        self.handle = None
 
-            latency = time.time() - now
-            log.debug("latency: %s %f s put; %f s total",
-                      self.__class__.__name__, put_latency, latency)
+    def generate(self):
+        now = time.time()
+
+        elements = self.generate_elements()
+        put_latency = self._push(elements)
+
+        latency = time.time() - now
+        log.debug("latency: %s %f s put; %f s total",
+                  self.__class__.__name__, put_latency, latency)
+
+        if self.handle is not None:
+            self.handle.generate.remote()
 
     def generate_elements(self, elements):
         raise NotImplementedError()
