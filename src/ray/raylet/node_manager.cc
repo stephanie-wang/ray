@@ -189,7 +189,7 @@ void NodeManager::PendingObjectsHeartbeat() {
     if ((now - last_heartbeat_at_).count() > 1000) {
       RAY_LOG(FATAL) << "Fell behind on heartbeats";
     }
-    RAY_LOG(INFO) << "Heartbeat at " << now.count();
+    //RAY_LOG(INFO) << "Heartbeat at " << now.count();
 
     auto &object_table = gcs_client_->object_table();
     // TODO(swang): Send notifications about puts.
@@ -558,12 +558,12 @@ void NodeManager::ProcessNodeManagerMessage(
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpecReadonly().NumForwards();
 
-    std::chrono::milliseconds start =
-    std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch()
-    );
-    RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task received "
-                  << task.GetTaskSpecification().TaskId() << " at " << start.count();
+    //std::chrono::milliseconds start =
+    //std::chrono::duration_cast<std::chrono::milliseconds>(
+    //  std::chrono::system_clock::now().time_since_epoch()
+    //);
+    //RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task received "
+    //              << task.GetTaskSpecification().TaskId() << " at " << start.count();
 
     std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
         std::chrono::system_clock::now().time_since_epoch());
@@ -634,12 +634,12 @@ void NodeManager::ScheduleTasks() {
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage) {
   TaskID task_id = task.GetTaskSpecification().TaskId();
-  std::chrono::milliseconds start =
-  std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::system_clock::now().time_since_epoch()
-  );
-  RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task submitted "
-                << task_id << " at " << start.count();
+  //std::chrono::milliseconds start =
+  //std::chrono::duration_cast<std::chrono::milliseconds>(
+  //  std::chrono::system_clock::now().time_since_epoch()
+  //);
+  //RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task submitted "
+  //              << task_id << " at " << start.count();
 
   if (gcs_delay_ms_ == 0) {
     gcs_task_cache_.emplace(task_id, task);
@@ -768,11 +768,11 @@ void NodeManager::AssignTask(Task &task) {
     return;
   }
 
-  std::chrono::milliseconds start =
-  std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::system_clock::now().time_since_epoch()
-  );
-  RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " at " << start.count();
+  //std::chrono::milliseconds start =
+  //std::chrono::duration_cast<std::chrono::milliseconds>(
+  //  std::chrono::system_clock::now().time_since_epoch()
+  //);
+  //RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " at " << start.count();
 
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
@@ -832,11 +832,11 @@ void NodeManager::AssignTask(Task &task) {
 
 void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
   TaskID task_id = worker->GetAssignedTaskId();
-   std::chrono::milliseconds start =
-   std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch()
-  );
-  RAY_LOG(INFO) << "Finished task " << task_id << " at " << start.count();
+  // std::chrono::milliseconds start =
+  // std::chrono::duration_cast<std::chrono::milliseconds>(
+  //    std::chrono::system_clock::now().time_since_epoch()
+  //);
+  //RAY_LOG(INFO) << "Finished task " << task_id << " at " << start.count();
 
   auto tasks = local_queues_.RemoveTasks({task_id});
   auto task = *tasks.begin();
@@ -908,12 +908,12 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
-  std::chrono::milliseconds start =
-  std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::system_clock::now().time_since_epoch()
-  );
-  RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task " << task_id  << " forwarded to "
-                << node_id << " at " << start.count();
+  //std::chrono::milliseconds start =
+  //std::chrono::duration_cast<std::chrono::milliseconds>(
+  //  std::chrono::system_clock::now().time_since_epoch()
+  //);
+  //RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task " << task_id  << " forwarded to "
+  //              << node_id << " at " << start.count();
 
   // Get and serialize the task's uncommitted lineage.
   auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
