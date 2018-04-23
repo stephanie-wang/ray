@@ -156,6 +156,7 @@ if __name__ == '__main__':
     parser.add_argument('--target-throughput', type=int, default=1e5)
 
     parser.add_argument('--use-raylet', action='store_true')
+    parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--test-throughput', action='store_true')
     parser.add_argument('--num-mappers', type=int, required=False, default=1)
     parser.add_argument('--num-generators', type=int, default=1)
@@ -163,7 +164,16 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    ray.init(use_raylet=args.use_raylet, redirect_output=False)
+    huge_pages = not args.no_hugepages
+    if huge_pages:
+        plasma_directory = "/mnt/hugepages"
+    else:
+        plasma_directory = None
+    ray.init(
+            use_raylet=args.use_raylet,
+            redirect_output=False,
+            huge_pages=huge_pages,
+            plasma_directory=plasma_directory)
 
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /
