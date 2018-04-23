@@ -262,9 +262,9 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
         if redis_address is None:
             raise Exception("If --head is not passed in, --redis-address must "
                             "be provided.")
-        if num_redis_shards is not None:
-            raise Exception("If --head is not passed in, --num-redis-shards "
-                            "must not be provided.")
+        #if num_redis_shards is not None:
+        #    raise Exception("If --head is not passed in, --num-redis-shards "
+        #                    "must not be provided.")
         if redis_max_clients is not None:
             raise Exception("If --head is not passed in, --redis-max-clients "
                             "must not be provided.")
@@ -306,7 +306,8 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
             huge_pages=huge_pages,
             use_raylet=use_raylet,
             gcs_delay_ms=gcs_delay_ms,
-            use_task_shard=use_task_shard)
+            use_task_shard=use_task_shard,
+            num_redis_shards=num_redis_shards)
         print(address_info)
         print("\nStarted Ray on this node. If you wish to terminate the "
               "processes that have been started, run\n\n"

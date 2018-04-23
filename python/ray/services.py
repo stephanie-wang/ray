@@ -1334,14 +1334,14 @@ def start_ray_processes(address_info=None,
     # suppressing the output of Redis because on Linux it prints a bunch of
     # warning messages when it starts up. Instead of suppressing the output, we
     # should address the warnings.
+    if use_task_shard:
+        assert use_raylet
+        num_redis_shards += 1
+
     redis_address = address_info.get("redis_address")
     redis_shards = address_info.get("redis_shards", [])
     if redis_address is None:
         # Start a separate Redis instance for the task shard if necessary.
-        if use_task_shard:
-            assert use_raylet
-            num_redis_shards += 1
-
         redis_address, redis_shards = start_redis(
             node_ip_address,
             port=redis_port,
@@ -1564,7 +1564,8 @@ def start_ray_node(node_ip_address,
                    huge_pages=False,
                    use_raylet=False,
                    gcs_delay_ms=-1,
-                   use_task_shard=False):
+                   use_task_shard=False,
+                   num_redis_shards=None):
     """Start the Ray processes for a single node.
 
     This assumes that the Ray processes on some master node have already been
@@ -1624,7 +1625,8 @@ def start_ray_node(node_ip_address,
         huge_pages=huge_pages,
         use_raylet=use_raylet,
         gcs_delay_ms=gcs_delay_ms,
-        use_task_shard=use_task_shard)
+        use_task_shard=use_task_shard,
+        num_redis_shards=num_redis_shards)
 
 
 def start_ray_head(address_info=None,
