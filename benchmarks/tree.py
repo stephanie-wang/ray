@@ -58,7 +58,8 @@ if __name__ == '__main__':
                 num_workers=num_initial_workers,
                 gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1,
                 huge_pages=huge_pages,
-                plasma_directory=plasma_directory
+                plasma_directory=plasma_directory,
+                use_task_shard=True
                 )
     else:
         ray.init(
