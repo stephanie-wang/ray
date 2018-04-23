@@ -326,19 +326,21 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
 
   // Register the new actor.
   ActorRegistration actor_registration(data.back());
+  ClientID node_manager_id = actor_registration.GetNodeManagerId();
   // Extend the frontier to include the actor creation task. NOTE(swang): The
   // creator of the actor is always assigned nil as the actor handle ID.
   actor_registration.ExtendFrontier(ActorHandleID::nil(),
                                     actor_registration.GetActorCreationDependency());
+  RAY_LOG(INFO) << "Actor " << actor_id << " created on "
+                << actor_registration.GetNodeManagerId();
   auto inserted = actor_registry_.emplace(actor_id, std::move(actor_registration));
   if (!inserted.second) {
     // If we weren't able to insert the actor's location, check that the
     // existing entry is the same as the new one.
     // TODO(swang): This is not true in the case of failures.
-    RAY_CHECK(actor_registration.GetNodeManagerId() ==
-              inserted.first->second.GetNodeManagerId())
+    RAY_CHECK(node_manager_id == inserted.first->second.GetNodeManagerId())
         << "Actor scheduled on " << inserted.first->second.GetNodeManagerId()
-        << ", but received notification for " << actor_registration.GetNodeManagerId();
+        << ", but received notification for " << node_manager_id;
     return;
   }
 
