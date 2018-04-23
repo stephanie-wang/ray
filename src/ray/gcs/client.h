@@ -19,6 +19,8 @@ class RedisContext;
 
 class RAY_EXPORT AsyncGcsClient {
  public:
+  AsyncGcsClient(const ClientID &client_id, int num_shards, bool use_task_shard = false);
+
   /// Start a GCS client with the given client ID. To read from the GCS tables,
   /// Connect and then Attach must be called. To read and write from the GCS
   /// tables requires a further call to Connect to the client table.
@@ -67,6 +69,8 @@ class RAY_EXPORT AsyncGcsClient {
   std::shared_ptr<RedisContext> context() { return context_; }
 
  private:
+  int num_shards_;
+  bool use_task_shard_;
   std::unique_ptr<FunctionTable> function_table_;
   std::unique_ptr<ClassTable> class_table_;
   std::unique_ptr<ObjectTable> object_table_;
@@ -79,6 +83,15 @@ class RAY_EXPORT AsyncGcsClient {
   std::shared_ptr<RedisContext> context_;
   std::unique_ptr<RedisAsioClient> asio_async_client_;
   std::unique_ptr<RedisAsioClient> asio_subscribe_client_;
+
+  std::vector<std::shared_ptr<RedisContext>> shard_contexts_;
+  std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_async_clients_;
+  std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_subscribe_clients_;
+  // If use_task_shard is false, then these are the same as shard_contexts_.
+  std::vector<std::shared_ptr<RedisContext>> task_table_contexts_;
+  // These are only set if use_task_shard is true.
+  std::unique_ptr<RedisAsioClient> task_table_asio_async_client_;
+  std::unique_ptr<RedisAsioClient> task_table_asio_subscribe_client_;
 };
 
 class SyncGcsClient {

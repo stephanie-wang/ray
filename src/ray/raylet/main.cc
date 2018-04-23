@@ -6,7 +6,7 @@
 
 #ifndef RAYLET_TEST
 int main(int argc, char *argv[]) {
-  RAY_CHECK(argc >= 9);
+  RAY_CHECK(argc >= 11);
 
   const std::string raylet_socket_name = std::string(argv[1]);
   const std::string store_socket_name = std::string(argv[2]);
@@ -16,9 +16,12 @@ int main(int argc, char *argv[]) {
   int num_initial_workers = std::stoi(argv[6]);
   const std::string worker_command = std::string(argv[7]);
   const std::string static_resource_list = std::string(argv[8]);
-  int gcs_delay_ms = -1;
-  if (argc == 10) {
-    gcs_delay_ms = std::stoi(argv[9]);
+  int num_redis_shards = std::stoi(argv[9]);
+  int gcs_delay_ms = std::stoi(argv[10]);
+  bool use_task_shard = false;
+  if (argc == 12) {
+    use_task_shard = true;
+    RAY_CHECK(std::string(argv[11]) == "true");
   }
 
   // Configuration for the node manager.
@@ -63,7 +66,9 @@ int main(int argc, char *argv[]) {
       RayConfig::instance().object_manager_default_chunk_size();
 
   //  initialize mock gcs & object directory
-  auto gcs_client = std::make_shared<ray::gcs::AsyncGcsClient>();
+  ClientID client_id = ClientID::from_random();
+  auto gcs_client = std::make_shared<ray::gcs::AsyncGcsClient>(
+      client_id, num_redis_shards, use_task_shard);
   RAY_LOG(INFO) << "Initializing GCS client "
                 << gcs_client->client_table().GetLocalClientId();
 
