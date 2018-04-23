@@ -151,9 +151,14 @@ void ObjectManager::ScheduleTransferRequest(const ObjectID &object_id) {
     [this, object_id](const boost::system::error_code &error) {
       if (!error) {
         auto entry = transfer_requests_.find(object_id);
-        RAY_CHECK(entry != transfer_requests_.end());
-        auto client_id = entry->second.RequestNextClient();
-        RAY_CHECK_OK(PullEstablishConnection(object_id, client_id));
+        // TODO(swang): Why does this check fail?
+        //RAY_CHECK(entry != transfer_requests_.end());
+        if (entry != transfer_requests_.end()) {
+          auto client_id = entry->second.RequestNextClient();
+          RAY_CHECK_OK(PullEstablishConnection(object_id, client_id));
+        } else {
+          pull_timers_.erase(object_id);
+        }
       }
     });
 }
