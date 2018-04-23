@@ -10,9 +10,9 @@ NUM_NODES="${NUM_NODES:-$(tail -n +2 workers.txt | wc -l)}"
 
 rm /tmp/raylogs/*
 if [ -z "$GCS_DELAY_MS" ]; then
-    ray start --head --huge-pages --plasma-directory /mnt/hugepages --redis-port=6379 --use-raylet
+    ray start --head --huge-pages --plasma-directory /mnt/hugepages --redis-port=6379 --use-raylet --use-task-shard
 else
-    ray start --head --huge-pages --plasma-directory /mnt/hugepages --redis-port=6379 --use-raylet --gcs-delay-ms $GCS_DELAY_MS
+    ray start --head --huge-pages --plasma-directory /mnt/hugepages --redis-port=6379 --use-raylet --use-task-shard --gcs-delay-ms $GCS_DELAY_MS
 fi
 
 parallel-ssh -i -h <(tail -n +2 workers.txt) -x "-A -o StrictHostKeyChecking=no" -P "rm /tmp/raylogs/* || true"
