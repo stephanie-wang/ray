@@ -40,6 +40,12 @@ std::unordered_map<TaskID, ClientID, UniqueIDHasher> SchedulingPolicy::Schedule(
       decision[task_id] = local_client_id;
       continue;
     }
+    // Actor tasks were forwarded to us because we broadcasted the actor's
+    // location as this node manager.
+    if (t.GetTaskSpecification().IsActorTask()) {
+      decision[task_id] = local_client_id;
+      continue;
+    }
     // Construct a set of viable node candidates and randomly pick between them.
     // Get all the client id keys and randomly pick.
     std::vector<ClientID> client_keys;
