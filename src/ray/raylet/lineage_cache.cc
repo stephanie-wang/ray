@@ -423,30 +423,35 @@ bool LineageCache::FlushTask(const TaskID &task_id) {
   return all_arguments_committed;
 }
 
-void PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
+int64_t PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
+  int64_t popped = 0;
   auto entry = lineage.PopEntry(task_id);
   if (!entry) {
-    return;
+    return popped;
   }
+  popped++;
   RAY_LOG(DEBUG) << "task removed: " << task_id;
   auto status = entry->GetStatus();
   RAY_CHECK(status == GcsStatus_UNCOMMITTED_REMOTE || status == GcsStatus_COMMITTED);
   for (const auto &parent_id : entry->GetParentTaskIds()) {
-    PopAncestorTasks(parent_id, lineage);
+    popped = popped + PopAncestorTasks(parent_id, lineage);
   }
+  return popped;
 }
 
 void LineageCache::HandleEntryCommitted(const UniqueID &task_id) {
-  std::chrono::milliseconds start = std::chrono::duration_cast<std::chrono::milliseconds>(
-      std::chrono::system_clock::now().time_since_epoch());
-  RAY_LOG(INFO) << "task committed " << task_id << " at " << start.count();
-
   RAY_LOG(DEBUG) << "task committed: " << task_id;
   auto entry = lineage_.PopEntry(task_id);
   RAY_CHECK(entry);
+  int64_t popped = 0;
   for (const auto &parent_id : entry->GetParentTaskIds()) {
-    PopAncestorTasks(parent_id, lineage_);
+    popped = popped + PopAncestorTasks(parent_id, lineage_);
   }
+
+  std::chrono::milliseconds start = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  RAY_LOG(INFO) << "task committed " << task_id << ", removed " << popped << " at " << start.count();
+
   // Mark this task as COMMITTED. Any tasks that were dependent on it and are
   // ready to be written may now be flushed to the GCS.
   bool committed = entry->SetStatus(GcsStatus_COMMITTED);

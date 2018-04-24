@@ -79,8 +79,7 @@ ClientConnection<T>::ClientConnection(MessageHandler<T> &message_handler,
                                       boost::asio::basic_stream_socket<T> &&socket)
     : ServerConnection<T>(std::move(socket)),
       message_handler_(message_handler),
-      num_sync_messages_(0),
-      process_messages_at_(0) {}
+      num_sync_messages_(0) {}
 
 template <class T>
 const ClientID &ClientConnection<T>::GetClientID() {
@@ -116,18 +115,12 @@ void ClientConnection<T>::ProcessMessages(bool sync) {
 
 template <class T>
 void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &error, bool sync) {
-  std::chrono::milliseconds now =
-  std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::system_clock::now().time_since_epoch()
-  );
   if (!sync) {
     // An async call was requested.
     if (num_sync_messages_ > 1) {
       // If multiple synchronous calls were made, then log it.
-      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages took "
-        << (now - process_messages_at_).count() + " at " << now.count();
+      RAY_LOG(INFO) << num_sync_messages_ << " ProcessMessages";
     }
-    process_messages_at_ = now;
 
     // Reset the number of sync calls.
     num_sync_messages_ = 0;
