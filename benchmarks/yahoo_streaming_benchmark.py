@@ -156,11 +156,14 @@ if __name__ == '__main__':
     parser.add_argument('--target-throughput', type=int, default=1e5)
 
     parser.add_argument('--use-raylet', action='store_true')
+    parser.add_argument('--num-nodes', type=int, default=1)
+    parser.add_argument('--redis-address', type=str)
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--test-throughput', action='store_true')
     parser.add_argument('--num-mappers', type=int, required=False, default=1)
     parser.add_argument('--num-generators', type=int, default=1)
     parser.add_argument('--num-reducers', type=int, default=1)
+    parser.add_argument('--gcs-delay-ms', type=int)
 
     args = parser.parse_args()
 
@@ -169,11 +172,21 @@ if __name__ == '__main__':
         plasma_directory = "/mnt/hugepages"
     else:
         plasma_directory = None
-    ray.init(
-            use_raylet=args.use_raylet,
-            redirect_output=False,
-            huge_pages=huge_pages,
-            plasma_directory=plasma_directory)
+    if args.redis_address is None:
+        ray.worker._init(
+                start_ray_local=True,
+                redirect_output=False,
+                use_raylet=args.use_raylet,
+                num_local_schedulers=args.num_nodes,
+                gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1,
+                huge_pages=huge_pages,
+                plasma_directory=plasma_directory,
+                use_task_shard=True
+                )
+    else:
+        ray.init(
+                redis_address=args.redis_address,
+                use_raylet=args.use_raylet)
 
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /
@@ -181,7 +194,7 @@ if __name__ == '__main__':
     time_slice_num_events /= args.num_generators
     time_slice_num_events = int(time_slice_num_events)
     # Round up the starting time to the nearest time_slice_ms.
-    time_slice_start_ms = (time.time() + 2) * 1000
+    time_slice_start_ms = (time.time() + 3) * 1000
     time_slice_start_ms = (-(-time_slice_start_ms // args.time_slice_ms) *
                            args.time_slice_ms)
 
@@ -213,11 +226,17 @@ if __name__ == '__main__':
                                      filters)
 
     # Create the event generator source.
-    ray.get([mapper.ready.remote() for mapper in mappers])
     generator_args = [ad_to_campaign_map, time_slice_start_ms,
                       args.time_slice_ms, time_slice_num_events]
     generators = stream_push.map_stream(args.num_generators, EventGenerator,
                                         generator_args, mappers)
+
+    ray.get([reducer.ready.remote() for reducer in reducers])
+    ray.get([projector.ready.remote() for projector in projectors])
+    ray.get([f.ready.remote() for f in filters])
+    ray.get([mapper.ready.remote() for mapper in mappers])
+    ray.get([generator.ready.remote() for generator in generators])
+
     time.sleep(1)
 
     # Start the event generators.
