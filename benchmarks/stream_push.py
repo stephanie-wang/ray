@@ -130,10 +130,7 @@ def group_by_stream(num_upstream_actors, node_resources, upstream_cls, args, dow
     downstream nodes. Each upstream node is connected to all downstream nodes.
     """
     num_partitions = len(downstream_actors)
-    args.append(lambda element: int(
-        hashlib.md5(
-            partition_key_func(element).encode("ascii")
-        ).hexdigest(), 16) % num_partitions)
+    args.append(lambda element: partition_key_func(element) % num_partitions)
     args += downstream_actors
 
     upstream_actors = []
