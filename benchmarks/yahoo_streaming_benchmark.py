@@ -45,7 +45,7 @@ class ThroughputLogger(stream_push.ProcessingStream):
             log.setLevel(logging.INFO)
             log.info("Achieved throughput was %d", throughput)
             log.info("Latency: %f", latency)
-        return latency, throughput
+        return len(self.events), self.latencies
 
 
 class ParseJson(stream_push.ProcessingStream):
@@ -266,11 +266,19 @@ if __name__ == '__main__':
     # Stop generating the events.
     ray.get([generator.stop.remote() for generator in generators])
 
+    all_latencies = []
     if args.test_throughput:
         results = ray.get([reducer.last.remote() for reducer in reducers])
-        for latency, throughput in results:
-            log.info("latency: %d, throughput: %d", latency, throughput)
-        throughputs = sum(throughput for _, throughput in results)
-        log.info("Total throughput: %d", throughputs)
-        latencies = sum(latency * throughput for latency, throughput in results) / throughputs
-        log.info("Average latency: %d", latencies)
+        for num_events, latencies in results:
+            throughput = num_events / SLEEP_TIME
+            total_latency = 0
+            num_windows = 0
+            for window, latency in latencies.items():
+                if latency > 0:
+                    all_latencies.append((window[1], latency))
+                    total_latency += latency
+                    num_windows += 1
+            log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
+        all_latencies.sort(lambda key: key[0])
+        for window, latency in all_latencies:
+            print(window, latency)
