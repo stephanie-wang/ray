@@ -41,11 +41,11 @@ void ReconstructionPolicy::Listen(const ObjectID &object_id) {
   if (listening_objects_.count(object_id) == 1) {
     return;
   }
-  //std::chrono::milliseconds start =
-  //std::chrono::duration_cast<std::chrono::milliseconds>(
-  //   std::chrono::system_clock::now().time_since_epoch()
-  //);
-  //RAY_LOG(INFO) << "ReconstructionPolicy: listening for object " << object_id << " at " << start.count();
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+     std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "ReconstructionPolicy: listening for object " << object_id << " at " << start.count();
   // Listen for this object.
   ObjectEntry entry;
   entry.object_id = object_id;
@@ -94,18 +94,18 @@ void ReconstructionPolicy::Cancel(const ObjectID &object_id) {
   // Stop listening for the object.
   size_t removed = listening_objects_.erase(object_id);
   if (removed > 0) {
-    //RAY_LOG(INFO) << "ReconstructionPolicy: canceled object " << object_id;
+    RAY_LOG(INFO) << "ReconstructionPolicy: canceled object " << object_id;
     RAY_CHECK_OK(object_pubsub_.CancelNotifications(JobID::nil(), object_id, client_id_));
   }
 }
 
 void ReconstructionPolicy::HandleNotification(
     const ObjectID &object_id, const std::vector<ObjectTableDataT> new_location_entries) {
-   //std::chrono::milliseconds start =
-   //std::chrono::duration_cast<std::chrono::milliseconds>(
-   //  std::chrono::system_clock::now().time_since_epoch()
-   //);
-   //RAY_LOG(INFO) << object_id << " notification at " << start.count();
+   std::chrono::milliseconds start =
+   std::chrono::duration_cast<std::chrono::milliseconds>(
+     std::chrono::system_clock::now().time_since_epoch()
+   );
+   RAY_LOG(INFO) << object_id << " notification at " << start.count();
 
   auto entry = listening_objects_.find(object_id);
   // Do nothing for objects we are not listening for.

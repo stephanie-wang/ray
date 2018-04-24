@@ -49,11 +49,11 @@ void ObjectStoreNotificationManager::ProcessStoreLength(
     if (object_info->is_deletion()) {
       ProcessStoreRemove(object_id);
     } else {
-      //std::chrono::milliseconds start =
-      //std::chrono::duration_cast<std::chrono::milliseconds>(
-      //  std::chrono::system_clock::now().time_since_epoch()
-      //);
-      //RAY_LOG(INFO) << "object " << object_id << " available at " << start.count();
+      std::chrono::milliseconds start =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+      );
+      RAY_LOG(INFO) << "object " << object_id << " available at " << start.count();
 
       ObjectInfoT result;
       object_info->UnPackTo(&result);
@@ -69,11 +69,11 @@ void ObjectStoreNotificationManager::ProcessStoreLength(
   } while (length_ > 0);
 
   if (num_notifications > 1) {
-    //std::chrono::milliseconds start =
-    //std::chrono::duration_cast<std::chrono::milliseconds>(
-    //  std::chrono::system_clock::now().time_since_epoch()
-    //);
-    //RAY_LOG(INFO) << "processed " << num_notifications << " object num_notifications at " << start.count();
+    std::chrono::milliseconds start =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+    );
+    RAY_LOG(INFO) << "processed " << num_notifications << " object num_notifications at " << start.count();
   }
   NotificationWait();
 }
