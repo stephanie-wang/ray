@@ -425,9 +425,12 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     if (worker) {
       // TODO(swang): Handle the case where the worker is killed while
       // executing a task. Clean up the assigned task's resources, return an
-      // error to the driver.
-      // RAY_CHECK(worker->GetAssignedTaskId().is_nil())
-      //    << "Worker died while executing task: " << worker->GetAssignedTaskId();
+      if (!worker->GetAssignedTaskId().is_nil()) {
+        auto tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
+        auto task = tasks.front();
+        RAY_CHECK(this->cluster_resource_map_[gcs_client_->client_table().GetLocalClientId()]
+                      .Release(task.GetTaskSpecification().GetRequiredResources()));
+      }
       worker_pool_.DisconnectWorker(worker);
     }
     return;
