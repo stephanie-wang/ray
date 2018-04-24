@@ -214,7 +214,7 @@ void LineageCache::RemoveWaitingTask(const TaskID &task_id) {
   RAY_CHECK(lineage_.SetEntry(std::move(*entry)));
 }
 
-Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) const {
+Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) {
   std::chrono::milliseconds start =
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
@@ -227,11 +227,35 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) const {
     // committed to the GCS.
     return status == GcsStatus_COMMITTED;
   });
+
+  size_t uncommitted_lineage_size = uncommitted_lineage.GetEntries().size();
+  if (uncommitted_lineage_size % 100 && uncommitted_lineage_size > 100) {
+    auto task = uncommitted_lineage.GetEntry(task_id);
+    RAY_CHECK(task);
+    for (const auto &parent_id : task->GetParentTaskIds()) {
+      auto parent = lineage_.GetEntry(parent_id);
+      if (parent && parent->GetStatus() == GcsStatus_UNCOMMITTED_REMOTE) {
+        // Request notifications about the parent entry's commit in the GCS.
+        // Once we receive a notification about the task's commit via
+        // HandleEntryCommitted, then this task will be ready to write on the
+        // next call to Flush().
+        auto inserted = subscribed_tasks_.insert(parent_id);
+        if (inserted.second) {
+          RAY_LOG(INFO) << "uncommitted lineage for task " << task_id << " has size "
+                        << uncommitted_lineage_size;
+          RAY_CHECK_OK(
+              task_pubsub_.RequestNotifications(JobID::nil(), parent_id, client_id_));
+        }
+      }
+    }
+  }
+
   std::chrono::milliseconds end =
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
   RAY_LOG(INFO) << "GetUncommittedLineage for " << task_id << " took " << (end - start).count();
+
   return uncommitted_lineage;
 }
 

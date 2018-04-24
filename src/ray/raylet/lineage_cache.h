@@ -196,7 +196,7 @@ class LineageCache {
   /// \param entry_id The ID of the task to get the uncommitted lineage for.
   /// \return The uncommitted lineage of the task. The returned lineage
   /// includes the entry for the requested entry_id.
-  Lineage GetUncommittedLineage(const TaskID &entry_id) const;
+  Lineage GetUncommittedLineage(const TaskID &entry_id);
 
   /// Asynchronously write any tasks that have been added since the last flush
   /// to the GCS. When each write is acknowledged, its entry will be marked as
