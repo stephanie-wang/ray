@@ -241,7 +241,8 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) {
         // next call to Flush().
         auto inserted = subscribed_tasks_.insert(parent_id);
         if (inserted.second) {
-          RAY_LOG(INFO) << "uncommitted lineage for task " << task_id << " has size "
+          RAY_LOG(INFO) << "subscribing to " << parent_id
+                        << " uncommitted lineage for task " << task_id << " has size "
                         << uncommitted_lineage_size;
           RAY_CHECK_OK(
               task_pubsub_.RequestNotifications(JobID::nil(), parent_id, client_id_));
