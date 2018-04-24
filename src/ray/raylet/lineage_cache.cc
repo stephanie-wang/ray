@@ -35,7 +35,11 @@ const std::unordered_set<UniqueID, UniqueIDHasher> LineageEntry::GetParentTaskId
   // A task's parents are the tasks that created its arguments.
   auto dependencies = task_.GetDependencies();
   for (auto &dependency : dependencies) {
-    parent_ids.insert(ComputeTaskId(dependency));
+    auto parent_id = ComputeTaskId(dependency);
+    // TODO(swang): wtf
+    if (!(parent_id == task_.GetTaskSpecification().TaskId())) {
+      parent_ids.insert(parent_id);
+    }
   }
   return parent_ids;
 }
@@ -261,6 +265,10 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) {
 }
 
 Status LineageCache::Flush() {
+  std::chrono::milliseconds start =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::system_clock::now().time_since_epoch());
+  RAY_LOG(INFO) << "Lineage size is " << lineage_.GetEntries().size() << " at " << start.count();
   // Iterate through all tasks that are READY.
   std::vector<TaskID> ready_task_ids;
   for (const auto &task_id : uncommitted_ready_tasks_) {
@@ -296,8 +304,10 @@ Status LineageCache::Flush() {
                 task_pubsub_.RequestNotifications(JobID::nil(), parent_id, client_id_));
           }
         }
+        RAY_LOG(INFO) << "task " << task_id << " has parent " << parent_id;
+        task_children_[parent_id].insert(task_id);
         all_arguments_committed = false;
-        break;
+        //break;
       }
     }
     if (all_arguments_committed) {
@@ -341,6 +351,78 @@ Status LineageCache::Flush() {
   return ray::Status::OK();
 }
 
+bool LineageCache::FlushTask(const TaskID &task_id) {
+  auto entry = lineage_.GetEntry(task_id);
+  RAY_CHECK(entry);
+  RAY_CHECK(entry->GetStatus() == GcsStatus_UNCOMMITTED_READY);
+
+  // Check if all arguments have been committed to the GCS before writing
+  // this task.
+  bool all_arguments_committed = true;
+  for (const auto &parent_id : entry->GetParentTaskIds()) {
+    auto parent = lineage_.GetEntry(parent_id);
+    // If a parent entry exists in the lineage cache but has not been
+    // committed yet, then as far as we know, it's still in flight to the
+    // GCS. Skip this task for now.
+    if (parent && parent->GetStatus() != GcsStatus_COMMITTED) {
+      // Children should not become ready to flush before their parents.
+      RAY_CHECK(parent->GetStatus() != GcsStatus_UNCOMMITTED_WAITING);
+      if (parent->GetStatus() == GcsStatus_UNCOMMITTED_REMOTE) {
+        // Request notifications about the parent entry's commit in the GCS.
+        // Once we receive a notification about the task's commit via
+        // HandleEntryCommitted, then this task will be ready to write on the
+        // next call to Flush().
+        auto inserted = subscribed_tasks_.insert(parent_id);
+        if (inserted.second) {
+          std::chrono::milliseconds start =
+              std::chrono::duration_cast<std::chrono::milliseconds>(
+                  std::chrono::system_clock::now().time_since_epoch());
+          RAY_LOG(INFO) << "subscribing to " << parent_id << " before writing "
+                        << task_id << " at " << start.count();
+
+          RAY_CHECK_OK(
+              task_pubsub_.RequestNotifications(JobID::nil(), parent_id, client_id_));
+        }
+      }
+      all_arguments_committed = false;
+      break;
+    }
+  }
+
+  if (all_arguments_committed) {
+    gcs::raylet::TaskTable::WriteCallback task_callback = [this](
+        ray::gcs::AsyncGcsClient *client, const TaskID &id,
+        const std::shared_ptr<protocol::TaskT> data) { HandleEntryCommitted(id); };
+
+    auto task = lineage_.GetEntry(task_id);
+    // TODO(swang): Make this better...
+    flatbuffers::FlatBufferBuilder fbb;
+    auto message = task->TaskData().ToFlatbuffer(fbb);
+    fbb.Finish(message);
+    auto task_data = std::make_shared<protocol::TaskT>();
+    auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
+    root->UnPackTo(task_data.get());
+    RAY_LOG(DEBUG) << "task committing: " << task_id;
+    RAY_CHECK_OK(task_storage_.Add(task->TaskData().GetTaskSpecification().DriverId(),
+                                   task_id, task_data, task_callback));
+
+    // We successfully wrote the task, so mark it as committing.
+    // TODO(swang): Use a batched interface and write with all object entries.
+    auto entry = lineage_.PopEntry(task_id);
+    RAY_CHECK(entry->SetStatus(GcsStatus_COMMITTING));
+    RAY_CHECK(lineage_.SetEntry(std::move(*entry)));
+    // Erase the task from the cache of uncommitted ready tasks.
+    uncommitted_ready_tasks_.erase(task_id);
+
+    std::chrono::milliseconds start =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch());
+    RAY_LOG(INFO) << "committing individual task " << task_id << " at " << start.count();
+  }
+
+  return all_arguments_committed;
+}
+
 void PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
   auto entry = lineage.PopEntry(task_id);
   if (!entry) {
@@ -382,6 +464,12 @@ void LineageCache::HandleEntryCommitted(const UniqueID &task_id) {
     RAY_CHECK_OK(task_pubsub_.CancelNotifications(JobID::nil(), task_id, client_id_));
     subscribed_tasks_.erase(it);
   }
+
+  for (const auto &child_id : task_children_[task_id]) {
+    RAY_LOG(INFO) << "task " << task_id << " has child " << child_id;
+    FlushTask(child_id);
+  }
+  task_children_.erase(task_id);
 }
 
 }  // namespace raylet
