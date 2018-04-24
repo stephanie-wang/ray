@@ -10,10 +10,10 @@ log.setLevel(logging.INFO)
 
 
 class Stream(object):
-    def __init__(self, *downstream_nodes, partition_func=None):
-        self.downstream_nodes = downstream_nodes
+    def __init__(self, partition_func, *downstream_actors):
+        self.downstream_actors = downstream_actors
         if partition_func is None:
-            self.partition_func = lambda i, _: i % len(self.downstream_nodes)
+            self.partition_func = lambda i, _: i % len(self.downstream_actors)
         else:
             self.partition_func = lambda _, elm: partition_func(elm)
 
@@ -22,9 +22,9 @@ class Stream(object):
 
     def _push(self, elements):
         put_latency = 0
-        if len(self.downstream_nodes) and len(elements):
+        if len(self.downstream_actors) and len(elements):
             partitions = {}
-            for i in range(len(self.downstream_nodes)):
+            for i in range(len(self.downstream_actors)):
                 partitions[i] = []
 
             # Split the elements into equal-sized batches across all downstream
@@ -36,7 +36,7 @@ class Stream(object):
                 start = time.time()
                 x = ray.put(partition)
                 put_latency += (time.time() - start)
-                self.downstream_nodes[partition_index].push.remote(x)
+                self.downstream_actors[partition_index].push.remote(x)
         return put_latency
 
 
@@ -80,7 +80,28 @@ class SourceStream(Stream):
         raise NotImplementedError()
 
 
-def map_stream(num_upstream_nodes, upstream_cls, args, downstream_nodes):
+def get_node(actor_index, num_nodes):
+    return actor_index % num_nodes
+
+def actors_on_node(actors, node_index, num_nodes):
+    return [actor for i, actor in enumerate(actors) if get_node(i, num_nodes) == node_index]
+
+
+def init_actor(node_index, node_resources, actor_cls, args=None):
+    if args is None:
+        args = []
+    actor = ray.remote(resources={
+        node_resources[node_index]: 1,
+        })(actor_cls).remote(*args)
+    actor.node_index = node_index
+    for arg in args:
+        arg_node = getattr(arg, "node_index", None)
+        if arg_node is not None:
+            print("Scheduled", node_index, arg_node)
+    return actor
+
+
+def map_stream(num_upstream_actors, node_resources, upstream_cls, args, downstream_actors):
     """
     Create a set of nodes and connect the stream to a set of existing
     downstream nodes. Nodes are assigned round-robin, so that each upstream
@@ -89,32 +110,40 @@ def map_stream(num_upstream_nodes, upstream_cls, args, downstream_nodes):
     partition.
     """
     # Assign downstream nodes to upstream nodes round-robin.
-    downstream_node_assignment = defaultdict(list)
-    if len(downstream_nodes) > 0:
-        for i in range(max(num_upstream_nodes, len(downstream_nodes))):
-            downstream_node_assignment[
-                i % num_upstream_nodes
-            ].append(downstream_nodes[i % len(downstream_nodes)])
-    upstream_nodes = [upstream_cls.remote(
-                      *args, *downstream_node_assignment[i]) for i in
-                      range(num_upstream_nodes)]
-    ray.get([node.ready.remote() for node in upstream_nodes])
-    return upstream_nodes
+    downstream_assignment = defaultdict(list)
+    if len(downstream_actors) > 0:
+        for i in range(max(num_upstream_actors, len(downstream_actors))):
+            downstream_assignment[
+                i % num_upstream_actors
+            ].append(downstream_actors[i % len(downstream_actors)])
+    upstream_actors = []
+    for i in range(num_upstream_actors):
+        downstream_actors = downstream_assignment[i]
+        node_index = downstream_actors[0].node_index
+        upstream_args = args + downstream_actors
+        actor = init_actor(node_index, node_resources, upstream_cls, upstream_args)
+        upstream_actors.append(actor)
+    ray.get([node.ready.remote() for node in upstream_actors])
+    return upstream_actors
 
 
-def group_by_stream(num_upstream_nodes, upstream_cls, args, downstream_nodes,
+def group_by_stream(num_upstream_actors, node_resources, upstream_cls, args, downstream_actors,
                     partition_key_func):
     """
     Create a set of nodes and connect the stream to a set of existing
     downstream nodes. Each upstream node is connected to all downstream nodes.
     """
-    num_partitions = len(downstream_nodes)
+    num_partitions = len(downstream_actors)
     args.append(lambda element: int(
         hashlib.md5(
             partition_key_func(element).encode("ascii")
         ).hexdigest(), 16) % num_partitions)
+    args += downstream_actors
 
-    upstream_nodes = [upstream_cls.remote(*args, *downstream_nodes) for _ in
-                      range(num_upstream_nodes)]
-    ray.get([node.ready.remote() for node in upstream_nodes])
-    return upstream_nodes
+    upstream_actors = []
+    for i in range(num_upstream_actors):
+        node = get_node(i, len(node_resources))
+        actor = init_actor(node, node_resources, upstream_cls, args)
+        upstream_actors.append(actor)
+    ray.get([node.ready.remote() for node in upstream_actors])
+    return upstream_actors
