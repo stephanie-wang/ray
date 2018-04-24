@@ -21,10 +21,9 @@ WINDOW_SIZE_SEC = 1
 SLEEP_TIME = 10
 
 
-@ray.remote
 class ThroughputLogger(stream_push.ProcessingStream):
     def __init__(self, *downstream_nodes):
-        super().__init__(*downstream_nodes)
+        super().__init__(None, *downstream_nodes)
 
         self.events = []
         self.latencies = defaultdict(float)
@@ -46,10 +45,9 @@ class ThroughputLogger(stream_push.ProcessingStream):
                      len(self.latencies))
 
 
-@ray.remote
 class ParseJson(stream_push.ProcessingStream):
     def __init__(self, *downstream_nodes):
-        super().__init__(*downstream_nodes)
+        super().__init__(None, *downstream_nodes)
 
         self.events = []
 
@@ -59,10 +57,9 @@ class ParseJson(stream_push.ProcessingStream):
         return json.loads('[' + ', '.join(elements) + ']')
 
 
-@ray.remote
 class Filter(stream_push.ProcessingStream):
     def __init__(self, debug_mode, *downstream_nodes):
-        super().__init__(*downstream_nodes)
+        super().__init__(None, *downstream_nodes)
         self.debug_mode = debug_mode
 
     def process_elements(self, elements):
@@ -73,10 +70,9 @@ class Filter(stream_push.ProcessingStream):
                     "view"]
 
 
-@ray.remote
 class Project(stream_push.ProcessingStream):
     def __init__(self, ad_to_campaign_map, partition_func, *downstream_nodes):
-        super().__init__(*downstream_nodes)
+        super().__init__(partition_func, *downstream_nodes)
 
         self.ad_to_campaign_map = ad_to_campaign_map
 
@@ -86,11 +82,9 @@ class Project(stream_push.ProcessingStream):
                   WINDOW_SIZE_SEC)) for element in elements]
 
 
-@ray.remote
 class GroupBy(stream_push.ProcessingStream):
-    # TODO(swang): Shard the reducers.
     def __init__(self, *downstream_nodes):
-        super().__init__(*downstream_nodes)
+        super().__init__(None, *downstream_nodes)
 
         self.windows = defaultdict(Counter)
         self.latencies = defaultdict(lambda: defaultdict(float))
@@ -105,11 +99,10 @@ class GroupBy(stream_push.ProcessingStream):
         return []
 
 
-@ray.remote
 class EventGenerator(stream_push.SourceStream):
     def __init__(self, ad_to_campaign_map, time_slice_start_ms, time_slice_ms,
                  time_slice_num_events, *downstream_nodes):
-        super().__init__(*downstream_nodes)
+        super().__init__(None, *downstream_nodes)
 
         self.ad_ids = list(ad_to_campaign_map.keys())
 
@@ -167,17 +160,29 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
+    node_resources = ["Node{}".format(i) for i in range(args.num_nodes)]
+    num_generators = args.num_generators * args.num_nodes
+    num_mappers = args.num_mappers * args.num_nodes
+    num_reducers = args.num_reducers * args.num_reducers
+
     huge_pages = not args.no_hugepages
     if huge_pages:
         plasma_directory = "/mnt/hugepages"
     else:
         plasma_directory = None
+
     if args.redis_address is None:
         ray.worker._init(
                 start_ray_local=True,
                 redirect_output=False,
                 use_raylet=args.use_raylet,
                 num_local_schedulers=args.num_nodes,
+                # Start each node with enough resources for all of the actors.
+                resources=[
+                    dict([(node_resource, num_generators + num_mappers * 3 +
+                           num_reducers)]) for node_resource in
+                    node_resources
+                    ],
                 gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1,
                 huge_pages=huge_pages,
                 plasma_directory=plasma_directory,
@@ -191,12 +196,8 @@ if __name__ == '__main__':
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /
                              args.time_slice_ms))
-    time_slice_num_events /= args.num_generators
+    time_slice_num_events /= num_generators
     time_slice_num_events = int(time_slice_num_events)
-    # Round up the starting time to the nearest time_slice_ms.
-    time_slice_start_ms = (time.time() + 3) * 1000
-    time_slice_start_ms = (-(-time_slice_start_ms // args.time_slice_ms) *
-                           args.time_slice_ms)
 
     # Generate the ad campaigns.
     campaign_ids = [str(uuid.uuid4()) for _ in range(NUM_CAMPAIGNS)]
@@ -208,27 +209,33 @@ if __name__ == '__main__':
         for ad_id in campaign_to_ad_map[campaign_id]:
             ad_to_campaign_map[ad_id] = campaign_id
 
+    actor_placement = {}
+
     # Construct the streams.
+    actor_placement = defaultdict(list)
     if args.test_throughput:
-        reducers = [ThroughputLogger.remote() for _ in
-                    range(args.num_reducers)]
+        reducers = [stream_push.init_actor(stream_push.get_node(i, len(node_resources)), node_resources, ThroughputLogger) for i in range(num_reducers)]
     else:
-        reducers = [GroupBy.remote() for _ in range(args.num_reducers)]
+        reducers = [stream_push.init_actor(stream_push.get_node(i, len(node_resources)), node_resources, GroupBy) for i in range(num_reducers)]
 
     def ad_id_key_func(event):
-        return event["ad_id"]
-    projectors = stream_push.group_by_stream(args.num_mappers, Project,
+        return event[0]
+    projectors = stream_push.group_by_stream(num_mappers, node_resources, Project,
                                              [ad_to_campaign_map], reducers,
                                              ad_id_key_func)
-    filters = stream_push.map_stream(args.num_mappers, Filter,
+    filters = stream_push.map_stream(num_mappers, node_resources, Filter,
                                      [args.test_throughput], projectors)
-    mappers = stream_push.map_stream(args.num_mappers, ParseJson, [],
+    mappers = stream_push.map_stream(num_mappers, node_resources, ParseJson, [],
                                      filters)
 
+    # Round up the starting time to the nearest time_slice_ms.
+    time_slice_start_ms = (time.time() + 2) * 1000
+    time_slice_start_ms = (-(-time_slice_start_ms // args.time_slice_ms) *
+                           args.time_slice_ms)
     # Create the event generator source.
     generator_args = [ad_to_campaign_map, time_slice_start_ms,
                       args.time_slice_ms, time_slice_num_events]
-    generators = stream_push.map_stream(args.num_generators, EventGenerator,
+    generators = stream_push.map_stream(num_generators, node_resources, EventGenerator,
                                         generator_args, mappers)
 
     ray.get([reducer.ready.remote() for reducer in reducers])
