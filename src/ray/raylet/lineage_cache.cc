@@ -442,7 +442,11 @@ int64_t PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
 void LineageCache::HandleEntryCommitted(const UniqueID &task_id) {
   RAY_LOG(DEBUG) << "task committed: " << task_id;
   auto entry = lineage_.PopEntry(task_id);
-  RAY_CHECK(entry);
+  if (!entry) {
+    // TODO(swang): Is this safe?
+    return;
+  }
+
   int64_t popped = 0;
   for (const auto &parent_id : entry->GetParentTaskIds()) {
     popped = popped + PopAncestorTasks(parent_id, lineage_);
