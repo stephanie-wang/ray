@@ -14,7 +14,7 @@ log.setLevel(logging.INFO)
 
 NUM_PAGE_IDS = 100
 NUM_USER_IDS = 100
-NUM_CAMPAIGNS = 10
+NUM_CAMPAIGNS = 10000
 NUM_ADS_PER_CAMPAIGN = 10
 WINDOW_SIZE_SEC = 1
 
@@ -37,12 +37,15 @@ class ThroughputLogger(stream_push.ProcessingStream):
 
     def last(self):
         """ Helper method to compute the event throughput. """
+        latency = -1
+        throughput = 0
         if len(self.events) > 0:
+            latency = sum(self.latencies.values()) / len(self.latencies)
+            throughput = len(self.events) / SLEEP_TIME
             log.setLevel(logging.INFO)
-            log.info("Achieved throughput was %d", len(self.events) /
-                     SLEEP_TIME)
-            log.info("Latency: %f", sum(self.latencies.values()) /
-                     len(self.latencies))
+            log.info("Achieved throughput was %d", throughput)
+            log.info("Latency: %f", latency)
+        return latency, throughput
 
 
 class ParseJson(stream_push.ProcessingStream):
@@ -149,7 +152,7 @@ if __name__ == '__main__':
     parser.add_argument('--target-throughput', type=int, default=1e5)
 
     parser.add_argument('--use-raylet', action='store_true')
-    parser.add_argument('--num-nodes', type=int, default=1)
+    parser.add_argument('--num-nodes', type=int, required=True)
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--test-throughput', action='store_true')
@@ -220,7 +223,10 @@ if __name__ == '__main__':
         reducers = [stream_push.init_actor(stream_push.get_node(i, len(node_resources)), node_resources, GroupBy) for i in range(num_reducers)]
 
     def ad_id_key_func(event):
-        return event[0]
+        campaign_id = event[0]
+        campaign_id = campaign_id.encode('ascii')
+        return sum(campaign_id)
+    print(len(reducers), "reducers")
     projectors = stream_push.group_by_stream(num_mappers, node_resources, Project,
                                              [ad_to_campaign_map], reducers,
                                              ad_id_key_func)
@@ -238,6 +244,7 @@ if __name__ == '__main__':
                       args.time_slice_ms, time_slice_num_events]
     generators = stream_push.map_stream(num_generators, node_resources, EventGenerator,
                                         generator_args, mappers)
+    print(len(generators), "generators")
 
     ray.get([reducer.ready.remote() for reducer in reducers])
     ray.get([projector.ready.remote() for projector in projectors])
@@ -261,3 +268,9 @@ if __name__ == '__main__':
 
     if args.test_throughput:
         results = ray.get([reducer.last.remote() for reducer in reducers])
+        for latency, throughput in results:
+            log.info("latency: %d, throughput: %d", latency, throughput)
+        throughputs = sum(throughput for _, throughput in results)
+        log.info("Total throughput: %d", throughputs)
+        latencies = sum(latency * throughput for latency, throughput in results) / throughputs
+        log.info("Average latency: %d", latencies)
