@@ -1,5 +1,7 @@
 #include "lineage_cache.h"
 
+#include <chrono>
+
 namespace ray {
 
 namespace raylet {
@@ -213,6 +215,10 @@ void LineageCache::RemoveWaitingTask(const TaskID &task_id) {
 }
 
 Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) const {
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
   Lineage uncommitted_lineage;
   // Add all uncommitted ancestors from the lineage cache to the uncommitted
   // lineage of the requested task.
@@ -221,6 +227,11 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) const {
     // committed to the GCS.
     return status == GcsStatus_COMMITTED;
   });
+  std::chrono::milliseconds end =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+  RAY_LOG(INFO) << "GetUncommittedLineage for " << task_id << " took " << (end - start).count();
   return uncommitted_lineage;
 }
 
