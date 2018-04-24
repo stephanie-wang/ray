@@ -29,6 +29,8 @@ table TaskInfo {
   parent_task_id: string;
   // A count of the number of tasks submitted by the parent task before this one.
   parent_counter: int;
+  // The call depth of this task.
+  depth: int;
   // The ID of the actor to create if this is an actor creation task.
   actor_creation_id: string;
   // The dummy object ID of the actor creation task if this is an actor method.

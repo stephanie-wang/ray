@@ -108,7 +108,7 @@ static inline Task ExampleTask(const std::vector<ObjectID> &arguments,
     std::vector<ObjectID> references = {argument};
     task_arguments.emplace_back(std::make_shared<TaskArgumentByReference>(references));
   }
-  auto spec = TaskSpecification(UniqueID::nil(), UniqueID::from_random(), 0,
+  auto spec = TaskSpecification(UniqueID::nil(), UniqueID::from_random(), 0, 0,
                                 UniqueID::from_random(), task_arguments, num_returns,
                                 required_resources);
   auto execution_spec = TaskExecutionSpecification(std::vector<ObjectID>());

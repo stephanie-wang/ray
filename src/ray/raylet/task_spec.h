@@ -95,13 +95,15 @@ class TaskSpecification {
   /// \param num_returns The number of values returned by the task.
   /// \param required_resources The task's resource demands.
   TaskSpecification(const UniqueID &driver_id, const TaskID &parent_task_id,
-                    int64_t parent_counter, const FunctionID &function_id,
+                    int64_t parent_counter, int64_t task_depth,
+                    const FunctionID &function_id,
                     const std::vector<std::shared_ptr<TaskArgument>> &arguments,
                     int64_t num_returns,
                     const std::unordered_map<std::string, double> &required_resources);
 
   TaskSpecification(const UniqueID &driver_id, const TaskID &parent_task_id,
-                    int64_t parent_counter, const ActorID &actor_creation_id,
+                    int64_t parent_counter, int64_t task_depth,
+                    const ActorID &actor_creation_id,
                     const ObjectID &actor_creation_dummy_object_id,
                     const ActorID &actor_id, const ActorHandleID &actor_handle_id,
                     int64_t actor_counter, const FunctionID &function_id,
@@ -123,6 +125,7 @@ class TaskSpecification {
   UniqueID DriverId() const;
   TaskID ParentTaskId() const;
   int64_t ParentCounter() const;
+  int64_t Depth() const;
   FunctionID FunctionId() const;
   int64_t NumArgs() const;
   int64_t NumReturns() const;

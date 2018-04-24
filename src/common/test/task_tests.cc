@@ -15,7 +15,7 @@ TEST task_test(void) {
   TaskID parent_task_id = TaskID::from_random();
   FunctionID func_id = FunctionID::from_random();
   TaskBuilder *builder = make_task_builder();
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 2);
 
@@ -55,7 +55,7 @@ TEST deterministic_ids_test(void) {
   uint8_t *arg2 = (uint8_t *) "hello world";
 
   /* Construct a first task. */
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 3);
   TaskSpec_args_add_ref(builder, &arg1, 1);
@@ -64,7 +64,7 @@ TEST deterministic_ids_test(void) {
   TaskSpec *spec1 = TaskSpec_finish_construct(builder, &size1);
 
   /* Construct a second identical task. */
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 3);
   TaskSpec_args_add_ref(builder, &arg1, 1);
@@ -86,7 +86,7 @@ TEST deterministic_ids_test(void) {
 
   /* Construct a task with a different parent task ID. */
   TaskSpec_start_construct(builder, DriverID::nil(), TaskID::from_random(), 0,
-                           ActorID::nil(), ObjectID::nil(), ActorID::nil(),
+                           0, ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 3);
   TaskSpec_args_add_ref(builder, &arg1, 1);
   TaskSpec_args_add_val(builder, arg2, 11);
@@ -94,7 +94,7 @@ TEST deterministic_ids_test(void) {
   TaskSpec *spec3 = TaskSpec_finish_construct(builder, &size3);
 
   /* Construct a task with a different parent counter. */
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 1,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 1, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 3);
   TaskSpec_args_add_ref(builder, &arg1, 1);
@@ -103,7 +103,7 @@ TEST deterministic_ids_test(void) {
   TaskSpec *spec4 = TaskSpec_finish_construct(builder, &size4);
 
   /* Construct a task with a different function ID. */
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, FunctionID::from_random(),
                            3);
@@ -113,7 +113,7 @@ TEST deterministic_ids_test(void) {
   TaskSpec *spec5 = TaskSpec_finish_construct(builder, &size5);
 
   /* Construct a task with a different object ID argument. */
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 3);
   ObjectID object_id = ObjectID::from_random();
@@ -123,7 +123,7 @@ TEST deterministic_ids_test(void) {
   TaskSpec *spec6 = TaskSpec_finish_construct(builder, &size6);
 
   /* Construct a task with a different value argument. */
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 3);
   TaskSpec_args_add_ref(builder, &arg1, 1);
@@ -168,7 +168,7 @@ TEST send_task(void) {
   TaskBuilder *builder = make_task_builder();
   TaskID parent_task_id = TaskID::from_random();
   FunctionID func_id = FunctionID::from_random();
-  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0,
+  TaskSpec_start_construct(builder, DriverID::nil(), parent_task_id, 0, 0,
                            ActorID::nil(), ObjectID::nil(), ActorID::nil(),
                            ActorID::nil(), 0, false, func_id, 2);
   ObjectID object_id = ObjectID::from_random();

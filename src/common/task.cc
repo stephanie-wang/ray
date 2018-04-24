@@ -37,6 +37,7 @@ class TaskBuilder {
   void Start(UniqueID driver_id,
              TaskID parent_task_id,
              int64_t parent_counter,
+             int64_t task_depth,
              ActorID actor_creation_id,
              ObjectID actor_creation_dummy_object_id,
              ActorID actor_id,
@@ -48,6 +49,7 @@ class TaskBuilder {
     driver_id_ = driver_id;
     parent_task_id_ = parent_task_id;
     parent_counter_ = parent_counter;
+    task_depth_ = task_depth;
     actor_creation_id_ = actor_creation_id;
     actor_creation_dummy_object_id_ = actor_creation_dummy_object_id;
     actor_id_ = actor_id;
@@ -109,7 +111,7 @@ class TaskBuilder {
     /* Create TaskInfo. */
     auto message = CreateTaskInfo(
         fbb, to_flatbuf(fbb, driver_id_), to_flatbuf(fbb, task_id),
-        to_flatbuf(fbb, parent_task_id_), parent_counter_,
+        to_flatbuf(fbb, parent_task_id_), parent_counter_, task_depth_,
         to_flatbuf(fbb, actor_creation_id_),
         to_flatbuf(fbb, actor_creation_dummy_object_id_),
         to_flatbuf(fbb, actor_id_), to_flatbuf(fbb, actor_handle_id_),
@@ -136,6 +138,7 @@ class TaskBuilder {
   UniqueID driver_id_;
   TaskID parent_task_id_;
   int64_t parent_counter_;
+  int64_t task_depth_;
   ActorID actor_creation_id_;
   ObjectID actor_creation_dummy_object_id_;
   ActorID actor_id_;
@@ -181,6 +184,7 @@ void TaskSpec_start_construct(TaskBuilder *builder,
                               UniqueID driver_id,
                               TaskID parent_task_id,
                               int64_t parent_counter,
+                              int64_t task_depth,
                               ActorID actor_creation_id,
                               ObjectID actor_creation_dummy_object_id,
                               ActorID actor_id,
@@ -189,10 +193,10 @@ void TaskSpec_start_construct(TaskBuilder *builder,
                               bool is_actor_checkpoint_method,
                               FunctionID function_id,
                               int64_t num_returns) {
-  builder->Start(driver_id, parent_task_id, parent_counter, actor_creation_id,
-                 actor_creation_dummy_object_id, actor_id, actor_handle_id,
-                 actor_counter, is_actor_checkpoint_method, function_id,
-                 num_returns);
+  builder->Start(driver_id, parent_task_id, parent_counter, task_depth,
+                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
+                 actor_handle_id, actor_counter, is_actor_checkpoint_method,
+                 function_id, num_returns);
 }
 
 TaskSpec *TaskSpec_finish_construct(TaskBuilder *builder, int64_t *size) {
@@ -301,6 +305,12 @@ int64_t TaskSpec_parent_counter(TaskSpec *spec) {
   RAY_CHECK(spec);
   auto message = flatbuffers::GetRoot<TaskInfo>(spec);
   return message->parent_counter();
+}
+
+int64_t TaskSpec_task_depth(TaskSpec *spec) {
+  RAY_CHECK(spec);
+  auto message = flatbuffers::GetRoot<TaskInfo>(spec);
+  return message->depth();
 }
 
 int64_t TaskSpec_num_args(TaskSpec *spec) {

@@ -304,6 +304,8 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
   TaskID parent_task_id;
   /* The number of tasks that the parent task has called prior to this one. */
   int parent_counter;
+  /* The task depth, by number of calls in the stack. */
+  int task_depth;
   // The actor creation ID.
   ActorID actor_creation_id = ActorID::nil();
   // The dummy object for the actor creation task (if this is an actor method).
@@ -316,9 +318,9 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
   // True if we should use the raylet code path and false otherwise.
   PyObject *use_raylet_object = nullptr;
   if (!PyArg_ParseTuple(
-          args, "O&O&OiO&i|O&O&O&O&iOOOO", &PyObjectToUniqueID, &driver_id,
+          args, "O&O&OiO&ii|O&O&O&O&iOOOO", &PyObjectToUniqueID, &driver_id,
           &PyObjectToUniqueID, &function_id, &arguments, &num_returns,
-          &PyObjectToUniqueID, &parent_task_id, &parent_counter,
+          &PyObjectToUniqueID, &parent_task_id, &parent_counter, &task_depth,
           &PyObjectToUniqueID, &actor_creation_id, &PyObjectToUniqueID,
           &actor_creation_dummy_object_id, &PyObjectToUniqueID, &actor_id,
           &PyObjectToUniqueID, &actor_handle_id, &actor_counter,
@@ -392,7 +394,7 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
 
     // Construct the task specification.
     TaskSpec_start_construct(
-        g_task_builder, driver_id, parent_task_id, parent_counter,
+        g_task_builder, driver_id, parent_task_id, parent_counter, task_depth,
         actor_creation_id, actor_creation_dummy_object_id, actor_id,
         actor_handle_id, actor_counter, is_actor_checkpoint_method, function_id,
         num_returns);
@@ -446,9 +448,10 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
     }
 
     self->task_spec = new ray::raylet::TaskSpecification(
-        driver_id, parent_task_id, parent_counter, actor_creation_id,
-        actor_creation_dummy_object_id, actor_id, actor_handle_id,
-        actor_counter, function_id, args, num_returns, required_resources);
+        driver_id, parent_task_id, parent_counter, task_depth,
+        actor_creation_id, actor_creation_dummy_object_id, actor_id,
+        actor_handle_id, actor_counter, function_id, args, num_returns,
+        required_resources);
   }
 
   /* Set the task's execution dependencies. */
@@ -488,6 +491,16 @@ static PyObject *PyTask_function_id(PyTask *self) {
     function_id = self->task_spec->FunctionId();
   }
   return PyObjectID_make(function_id);
+}
+
+static PyObject *PyTask_task_depth(PyTask *self) {
+  int64_t task_depth;
+  if (!use_raylet(self)) {
+    task_depth = TaskSpec_task_depth(self->spec);
+  } else {
+    task_depth = self->task_spec->Depth();
+  }
+  return PyLong_FromLongLong(task_depth);
 }
 
 static PyObject *PyTask_actor_id(PyTask *self) {
@@ -700,6 +713,8 @@ static PyMethodDef PyTask_methods[] = {
      "Return the task ID of the parent task."},
     {"parent_counter", (PyCFunction) PyTask_parent_counter, METH_NOARGS,
      "Return the parent counter of this task."},
+    {"task_depth", (PyCFunction) PyTask_task_depth, METH_NOARGS,
+     "Return the call depth of this task."},
     {"actor_id", (PyCFunction) PyTask_actor_id, METH_NOARGS,
      "Return the actor ID for this task."},
     {"actor_counter", (PyCFunction) PyTask_actor_counter, METH_NOARGS,
