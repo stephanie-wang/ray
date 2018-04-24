@@ -213,6 +213,7 @@ void TaskSpec_start_construct(TaskBuilder *B,
                               UniqueID driver_id,
                               TaskID parent_task_id,
                               int64_t parent_counter,
+                              int64_t task_depth,
                               ActorID actor_creation_id,
                               ObjectID actor_creation_dummy_object_id,
                               ActorID actor_id,
@@ -336,6 +337,8 @@ TaskID TaskSpec_parent_task_id(const TaskSpec *spec);
  * @return The task counter of the parent task.
  */
 int64_t TaskSpec_parent_counter(TaskSpec *spec);
+
+int64_t TaskSpec_task_depth(TaskSpec *spec);
 
 /**
  * Return the task ID of the task.

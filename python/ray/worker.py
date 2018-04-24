@@ -616,6 +616,7 @@ class Worker(object):
                 ray.local_scheduler.ObjectID(
                     function_id.id()), args_for_local_scheduler,
                 num_return_vals, self.current_task_id, self.task_index,
+                self.task_depth + 1,
                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
                 actor_handle_id, actor_counter, is_actor_checkpoint_method,
                 execution_dependencies, resources, self.use_raylet)
@@ -802,6 +803,7 @@ class Worker(object):
         print(self.actor_id.hex(), "assigned", self.current_task_id.hex(), "at", time.time())
         self.current_function_id = task.function_id().id()
         self.task_index = 0
+        self.task_depth = task.task_depth()
         self.put_index = 1
         function_id = task.function_id()
         args = task.arguments()
@@ -2090,6 +2092,7 @@ def connect(info,
         np.random.set_state(numpy_state)
         # Set other fields needed for computing task IDs.
         worker.task_index = 0
+        worker.task_depth = 0
         worker.put_index = 1
 
         # Create an entry for the driver task in the task table. This task is
@@ -2104,6 +2107,7 @@ def connect(info,
             worker.task_driver_id,
             ray.local_scheduler.ObjectID(NIL_FUNCTION_ID), [], 0,
             worker.current_task_id, worker.task_index,
+            worker.task_depth,
             ray.local_scheduler.ObjectID(NIL_ACTOR_ID),
             ray.local_scheduler.ObjectID(NIL_ACTOR_ID),
             ray.local_scheduler.ObjectID(NIL_ACTOR_ID),
