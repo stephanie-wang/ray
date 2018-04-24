@@ -621,8 +621,10 @@ void NodeManager::ScheduleTasks() {
       RAY_CHECK(1 == tasks.size());
       Task &task = tasks.front();
       // TODO(swang): Handle forward task failure.
-      // TODO(swang): Unsubscribe this task in the task dependency manager.
       RAY_CHECK_OK(ForwardTask(task, client_id));
+      // Tell the task dependency manager that we no longer need this task's
+      // object dependencies.
+      task_dependency_manager_.UnsubscribeForwardedTask(task.GetTaskSpecification().TaskId());
     }
   }
 
@@ -956,9 +958,6 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     // lineage cache since the receiving node is now responsible for writing
     // the task to the GCS.
     lineage_cache_.RemoveWaitingTask(task_id);
-    // Tell the task dependency manager that we no longer need this task's
-    // object dependencies.
-    task_dependency_manager_.UnsubscribeForwardedTask(task_id);
 
     // Preemptively push any local arguments to the receiving node. For now, we
     // only do this with actor tasks, since actor tasks must be executed by a
@@ -984,6 +983,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     // lost.
     RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
                    << " to node " << node_id;
+
+    // TODO(swang): Subscribe to the task in the task dependency manager again.
   }
 
   std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
