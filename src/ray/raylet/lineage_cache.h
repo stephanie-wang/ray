@@ -212,6 +212,8 @@ class LineageCache {
   void HandleEntryCommitted(const TaskID &task_id);
 
  private:
+  bool FlushTask(const TaskID &task_id);
+
   /// The client ID, used to request notifications for specific tasks.
   /// TODO(swang): Move the ClientID into the generic Table implementation.
   ClientID client_id_;
@@ -233,6 +235,7 @@ class LineageCache {
   /// The tasks that we've subscribed to notifications for from the pubsub
   /// storage system. We will receive a notification for these tasks on commit.
   std::unordered_set<TaskID, UniqueIDHasher> subscribed_tasks_;
+  std::unordered_map<TaskID, std::unordered_set<TaskID, UniqueIDHasher>, UniqueIDHasher> task_children_;
 };
 
 }  // namespace raylet
