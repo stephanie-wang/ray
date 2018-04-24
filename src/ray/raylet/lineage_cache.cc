@@ -285,7 +285,12 @@ Status LineageCache::Flush() {
           // next call to Flush().
           auto inserted = subscribed_tasks_.insert(parent_id);
           if (inserted.second) {
-            RAY_LOG(DEBUG) << "subscribing to: " << parent_id;
+            std::chrono::milliseconds start =
+                std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch());
+            RAY_LOG(INFO) << "subscribing to " << parent_id << " before writing "
+                          << task_id << " at " << start.count();
+
             RAY_CHECK_OK(
                 task_pubsub_.RequestNotifications(JobID::nil(), parent_id, client_id_));
           }
@@ -325,6 +330,11 @@ Status LineageCache::Flush() {
     RAY_CHECK(lineage_.SetEntry(std::move(*entry)));
     // Erase the task from the cache of uncommitted ready tasks.
     uncommitted_ready_tasks_.erase(ready_task_id);
+
+    std::chrono::milliseconds start =
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch());
+    RAY_LOG(INFO) << "committing task " << ready_task_id << " at " << start.count();
   }
 
   return ray::Status::OK();
@@ -344,6 +354,10 @@ void PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
 }
 
 void LineageCache::HandleEntryCommitted(const UniqueID &task_id) {
+  std::chrono::milliseconds start = std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch());
+  RAY_LOG(INFO) << "task committed " << task_id << " at " << start.count();
+
   RAY_LOG(DEBUG) << "task committed: " << task_id;
   auto entry = lineage_.PopEntry(task_id);
   RAY_CHECK(entry);

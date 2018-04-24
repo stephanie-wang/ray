@@ -18,7 +18,7 @@ NUM_CAMPAIGNS = 10000
 NUM_ADS_PER_CAMPAIGN = 10
 WINDOW_SIZE_SEC = 1
 
-SLEEP_TIME = 10
+SLEEP_TIME = 60
 
 
 class ThroughputLogger(stream_push.ProcessingStream):
@@ -279,6 +279,6 @@ if __name__ == '__main__':
                     total_latency += latency
                     num_windows += 1
             log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
-        all_latencies.sort(lambda key: key[0])
+        all_latencies.sort(key=lambda key: key[0])
         for window, latency in all_latencies:
             print(window, latency)
