@@ -163,7 +163,7 @@ if __name__ == '__main__':
     node_resources = ["Node{}".format(i) for i in range(args.num_nodes)]
     num_generators = args.num_generators * args.num_nodes
     num_mappers = args.num_mappers * args.num_nodes
-    num_reducers = args.num_reducers * args.num_reducers
+    num_reducers = args.num_reducers * args.num_nodes
 
     huge_pages = not args.no_hugepages
     if huge_pages:
@@ -174,7 +174,7 @@ if __name__ == '__main__':
     if args.redis_address is None:
         ray.worker._init(
                 start_ray_local=True,
-                redirect_output=False,
+                redirect_output=True,
                 use_raylet=args.use_raylet,
                 num_local_schedulers=args.num_nodes,
                 # Start each node with enough resources for all of the actors.
@@ -192,6 +192,7 @@ if __name__ == '__main__':
         ray.init(
                 redis_address=args.redis_address,
                 use_raylet=args.use_raylet)
+    time.sleep(3)
 
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /

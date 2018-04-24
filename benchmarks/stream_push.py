@@ -94,10 +94,6 @@ def init_actor(node_index, node_resources, actor_cls, args=None):
         node_resources[node_index]: 1,
         })(actor_cls).remote(*args)
     actor.node_index = node_index
-    for arg in args:
-        arg_node = getattr(arg, "node_index", None)
-        if arg_node is not None:
-            print("Scheduled", node_index, arg_node)
     return actor
 
 
