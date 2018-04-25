@@ -37,13 +37,16 @@ bool CheckDuplicateActorTask(
 /// A helper function to send out heartbeats to the given object table about
 /// all tasks in the given queue.
 void SendTaskQueueHeartbeats(ray::gcs::ObjectTable &object_table,
-                             const std::list<ray::raylet::Task> &queue) {
+                             const std::list<ray::raylet::Task> &queue,
+                             int64_t &count) {
+  // TODO(swang): fatal error if over a certain queue size for streaming.
   JobID job_id = JobID::nil();
   for (const auto &task : queue) {
     const auto &spec = task.GetTaskSpecification();
     for (int64_t i = 0; i < spec.NumReturns(); i++) {
       auto object_id = spec.ReturnId(i);
       object_table.Append(job_id, object_id, nullptr, nullptr);
+      count++;
     }
   }
 }
@@ -189,12 +192,14 @@ void NodeManager::PendingObjectsHeartbeat() {
     RAY_LOG(INFO) << "Heartbeat at " << now.count();
 
     auto &object_table = gcs_client_->object_table();
-    // TODO(swang): Send notifications about puts.
-    SendTaskQueueHeartbeats(object_table, local_queues_.GetWaitingTasks());
-    SendTaskQueueHeartbeats(object_table, local_queues_.GetReadyTasks());
-    SendTaskQueueHeartbeats(object_table, local_queues_.GetScheduledTasks());
-    SendTaskQueueHeartbeats(object_table, local_queues_.GetRunningTasks());
-    SendTaskQueueHeartbeats(object_table, local_queues_.GetBlockedTasks());
+    int64_t count = 0;
+    SendTaskQueueHeartbeats(object_table, local_queues_.GetWaitingTasks(), count);
+    SendTaskQueueHeartbeats(object_table, local_queues_.GetReadyTasks(), count);
+    SendTaskQueueHeartbeats(object_table, local_queues_.GetScheduledTasks(), count);
+    SendTaskQueueHeartbeats(object_table, local_queues_.GetRunningTasks(), count);
+    SendTaskQueueHeartbeats(object_table, local_queues_.GetBlockedTasks(), count);
+
+    RAY_LOG(INFO) << "Heartbeat at " << now.count() << " sent " << count << " Appends";
 
     last_heartbeat_at_ = now;
   }
@@ -927,6 +932,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
   // mode, remove the uncommitted entries from the lineage cache.
   if (gcs_delay_ms_ >= 0) {
+    // TODO(swang): Don't get the uncommitted lineage for these tasks.
     auto task_entry = uncommitted_lineage.PopEntry(task_id);
     RAY_CHECK(task_entry);
     RAY_CHECK(task_entry->GetStatus() == GcsStatus_UNCOMMITTED_WAITING);
