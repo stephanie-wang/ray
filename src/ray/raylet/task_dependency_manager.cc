@@ -83,16 +83,23 @@ void TaskDependencyManager::SubscribeTask(const Task &task) {
 
   // Add the task's arguments to the table of subscribed tasks.
   task_entry.arguments = task.GetDependencies();
+  int64_t execution_dependency_index = task_entry.arguments.size() - task.GetTaskExecutionSpecReadonly().ExecutionDependencies().size();
   task_entry.num_missing_arguments = task_entry.arguments.size();
   // Record the task as being dependent on each of its arguments.
+  int64_t i = 0;
   for (const auto &argument_id : task_entry.arguments) {
     auto &argument_entry = local_objects_[argument_id];
     if (argument_entry.status == ObjectAvailability::kRemote) {
-      object_remote_callback_(argument_id);
+      // Hack to prevent us from calling reconstruction on an execution
+      // dependency.
+      if (i < execution_dependency_index) {
+        object_remote_callback_(argument_id);
+      }
     } else if (argument_entry.status == ObjectAvailability::kLocal) {
       task_entry.num_missing_arguments--;
     }
     argument_entry.dependent_tasks.push_back(task_id);
+    i++;
   }
 
   for (int i = 0; i < task.GetTaskSpecification().NumReturns(); i++) {
