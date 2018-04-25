@@ -163,7 +163,7 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    node_resources = ["Node{}".format(i) for i in range(args.num_nodes)]
+    node_resources = ["Node{}".format(i) for i in range(1, args.num_nodes)]
     num_generators = args.num_generators * args.num_nodes
     num_mappers = args.num_mappers * args.num_nodes
     num_reducers = args.num_reducers * args.num_nodes
@@ -236,7 +236,7 @@ if __name__ == '__main__':
                                      filters)
 
     # Round up the starting time to the nearest time_slice_ms.
-    time_slice_start_ms = (time.time() + 2) * 1000
+    time_slice_start_ms = (time.time() + 5) * 1000
     time_slice_start_ms = (-(-time_slice_start_ms // args.time_slice_ms) *
                            args.time_slice_ms)
     # Create the event generator source.
