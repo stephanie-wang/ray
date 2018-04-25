@@ -120,7 +120,13 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
   RAY_CHECK_OK(object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info) {
     ObjectID object_id = ObjectID::from_binary(object_info.object_id);
     reconstruction_policy_.Cancel(object_id);
-    task_dependency_manager_.HandleObjectLocal(object_id);
+    auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(object_id);
+    if (ready_task_ids.size() > 0) {
+      auto ready_tasks = local_queues_.RemoveTasks(ready_task_ids);
+      local_queues_.QueueReadyTasks(std::vector<Task>(ready_tasks));
+      // Schedule the newly ready tasks if possible.
+      ScheduleTasks();
+    }
   }));
   RAY_CHECK_OK(object_manager_.SubscribeObjDeleted([this](const ObjectID &object_id) {
     task_dependency_manager_.HandleObjectMissing(object_id);
@@ -746,11 +752,16 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
 }
 
 void NodeManager::QueueTask(const Task &task) {
-  // Queue the task.
-  local_queues_.QueueWaitingTasks({task});
   // Subscribe to the task's dependencies. The task will be moved to the ready
   // queue depending on the availability of its arguments.
-  task_dependency_manager_.SubscribeTask(task);
+  bool ready = task_dependency_manager_.SubscribeTask(task);
+  // Queue the task.
+  if (ready) {
+    local_queues_.QueueReadyTasks({task});
+    ScheduleTasks();
+  } else {
+    local_queues_.QueueWaitingTasks({task});
+  }
 }
 
 void NodeManager::AssignTask(Task &task) {
@@ -889,7 +900,12 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
     auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
     RAY_CHECK_OK(object_manager_.Cancel(dummy_object));
     reconstruction_policy_.Cancel(dummy_object);
-    task_dependency_manager_.HandleObjectLocal(dummy_object);
+    auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(dummy_object);
+    if (ready_task_ids.size() > 0) {
+      auto ready_tasks = local_queues_.RemoveTasks(ready_task_ids);
+      // TODO(swang): Don't schedule these directly...
+      local_queues_.QueueScheduledTasks(std::vector<Task>(ready_tasks));
+    }
   }
 
   // Unset the worker's assigned task.
