@@ -6,6 +6,7 @@ import logging
 import simplejson as json
 from collections import defaultdict
 from collections import Counter
+import numpy as np
 
 import stream_push
 
@@ -20,6 +21,12 @@ NUM_ADS_PER_CAMPAIGN = 10
 WINDOW_SIZE_SEC = 1
 
 SLEEP_TIME = 60
+
+
+def warmup():
+    x = np.ones(10 ** 8)
+    for _ in range(100):
+        ray.put(x)
 
 
 class ThroughputLogger(stream_push.ProcessingStream):
@@ -87,38 +94,35 @@ class Project(stream_push.ProcessingStream):
 
     def process_elements(self, elements):
         log.info("project: %d at %f", self.pid, time.time())
-        return [(self.ad_to_campaign_map[element["ad_id"]],
+        windows = Counter()
+        for element in elements:
+            windows[(self.ad_to_campaign_map[element["ad_id"]],
                  (int(element["event_time"] // WINDOW_SIZE_SEC) *
-                  WINDOW_SIZE_SEC)) for element in elements]
-
+                  WINDOW_SIZE_SEC))] += 1
+        return list(windows.items())
 
 class GroupBy(stream_push.ProcessingStream):
     def __init__(self, *downstream_nodes):
         super().__init__(None, *downstream_nodes)
 
         self.windows = defaultdict(Counter)
-        self.latencies = defaultdict(lambda: defaultdict(float))
+        self.latencies = defaultdict(float)
         log.setLevel(logging.INFO)
         self.pid = os.getpid()
 
     def process_elements(self, elements):
         log.info("groupby: %d at %f", self.pid, time.time())
-        for campaign_id, window in elements:
-            self.windows[campaign_id][window] += 1
-            new_latency_ms = (time.time() - window - WINDOW_SIZE_SEC) * 1000
-            self.latencies[campaign_id][window] = max(
-                self.latencies[campaign_id][window], new_latency_ms)
+        for window, count in elements:
+            self.windows[window[0]][window[1]] += count
+            new_latency_ms = (time.time() - window[1] - WINDOW_SIZE_SEC) * 1000
+            self.latencies[window] = max(
+                self.latencies[window], new_latency_ms)
 
         return []
 
     def last(self):
         """ Helper method to compute latencies. """
-        latencies = defaultdict(float)
-
-        for campaign_id, campaign_latencies in self.latencies.items():
-            for window, window_latency in campaign_latencies.items():
-                latencies[(campaign_id, window)] = window_latency
-        return 0, latencies
+        return 0, self.latencies
 
 
 class EventGenerator(stream_push.SourceStream):
@@ -133,18 +137,42 @@ class EventGenerator(stream_push.SourceStream):
         self.event_types = ["view", "click", "purchase"]
 
         self.time_slice_start_ms = time_slice_start_ms
-        self.time_slice_ms = time_slice_ms
+        self.time_slice_ms = float(time_slice_ms)
         self.time_slice_num_events = time_slice_num_events
 
-    def generate_elements(self):
-        self.time_slice_start_ms += self.time_slice_ms
+        log.setLevel(logging.INFO)
+        self.pid = os.getpid()
 
-        # Sleep until the start of the next time slice.
-        diff = (self.time_slice_start_ms / 1000) - time.time()
-        if diff > self.time_slice_ms / 1000:
-            time.sleep(diff)
-        elif diff < -0.1:
-            log.warning("Falling behind by %f seconds", -1 * diff)
+    def generate(self):
+        now = time.time()
+
+        log.info("generate: %d at %f", self.pid, time.time())
+        elements = self.generate_elements()
+        put_latency = self._push(elements)
+
+        latency = time.time() - now
+        latency -= self.time_slice_ms / 1000
+        if latency < 0:
+            time.sleep(-1 * latency)
+        elif latency > 0.1:
+            log.warning("Falling behind by %f seconds", latency)
+        log.info("%d finished at %f, put %f", self.pid, time.time(), put_latency)
+
+        log.debug("latency: %s %f s put; %f s total",
+                  self.__class__.__name__, put_latency, latency)
+
+        if self.handle is not None:
+            self.handle.generate.remote()
+
+    def generate_elements(self):
+        #self.time_slice_start_ms += self.time_slice_ms
+
+        ## Sleep until the start of the next time slice.
+        #diff = (self.time_slice_start_ms / 1000) - time.time()
+        #if diff > self.time_slice_ms / 1000:
+        #    time.sleep(diff)
+        #elif diff < -0.1:
+        #    log.warning("Falling behind by %f seconds", -1 * diff)
 
         # Generate the JSON string of events for this time slice.
         events = []
@@ -183,7 +211,8 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    node_resources = ["Node{}".format(i) for i in range(args.num_nodes)]
+    node_resources = ["Node{}".format(i) for i in range(1, args.num_nodes)]
+    args.num_nodes -= 1
     num_generators = args.num_generators * args.num_nodes
     num_parsers = args.num_parsers * args.num_nodes
     num_mappers = args.num_mappers * args.num_nodes
@@ -218,6 +247,11 @@ if __name__ == '__main__':
                 use_raylet=args.use_raylet)
     time.sleep(3)
 
+    warmup_tasks = []
+    for node_resource in node_resources:
+        warmup_tasks.append(ray.remote(resources={node_resource: 1})(warmup).remote())
+    ray.get(warmup_tasks)
+
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /
                              args.time_slice_ms))
@@ -244,7 +278,7 @@ if __name__ == '__main__':
         reducers = [stream_push.init_actor(stream_push.get_node(i, len(node_resources)), node_resources, GroupBy) for i in range(num_reducers)]
 
     def ad_id_key_func(event):
-        campaign_id = event[0]
+        campaign_id = event[0][0]
         campaign_id = campaign_id.encode('ascii')
         return sum(campaign_id)
     print(len(reducers), "reducers")

@@ -51,7 +51,7 @@ class ProcessingStream(Stream):
         latency = time.time() - now
         log.debug("latency: %s %f s put; %f s total", self.__class__.__name__,
                   put_latency, latency)
-        log.info("%d finished at %f", os.getpid(), time.time())
+        log.info("%d finished at %f, put %f", os.getpid(), time.time(), put_latency)
 
     def process_elements(self, elements):
         raise NotImplementedError()
