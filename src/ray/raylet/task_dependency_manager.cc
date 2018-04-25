@@ -23,7 +23,7 @@ TaskDependencyManager::ObjectAvailability TaskDependencyManager::CheckObjectLoca
   return entry->second.status;
 }
 
-void TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {
+std::unordered_set<TaskID, UniqueIDHasher> TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {
   RAY_LOG(DEBUG) << "object ready " << object_id.hex();
 
   // Add the object to the table of locally available objects.
@@ -32,21 +32,18 @@ void TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {
   object_entry.status = ObjectAvailability::kLocal;
 
   // Find any tasks that are dependent on the newly available object.
-  std::vector<TaskID> ready_task_ids;
+  std::unordered_set<TaskID, UniqueIDHasher> ready_task_ids;
   for (auto &dependent_task_id : object_entry.dependent_tasks) {
     auto &task_entry = task_dependencies_[dependent_task_id];
     task_entry.num_missing_arguments--;
     // If the dependent task now has all of its arguments ready, it's ready
     // to run.
     if (task_entry.num_missing_arguments == 0) {
-      ready_task_ids.push_back(dependent_task_id);
+      ready_task_ids.insert(dependent_task_id);
     }
   }
-  // Process callbacks for all of the tasks dependent on the object that are
-  // now ready to run.
-  for (auto &ready_task_id : ready_task_ids) {
-    task_ready_callback_(ready_task_id);
-  }
+
+  return ready_task_ids;
 }
 
 void TaskDependencyManager::HandleObjectMissing(const ray::ObjectID &object_id) {
@@ -77,7 +74,7 @@ void TaskDependencyManager::HandleObjectMissing(const ray::ObjectID &object_id) 
   }
 }
 
-void TaskDependencyManager::SubscribeTask(const Task &task) {
+bool TaskDependencyManager::SubscribeTask(const Task &task) {
   TaskID task_id = task.GetTaskSpecification().TaskId();
   TaskEntry task_entry;
 
@@ -125,11 +122,7 @@ void TaskDependencyManager::SubscribeTask(const Task &task) {
   auto emplaced = task_dependencies_.emplace(task_id, task_entry);
   RAY_CHECK(emplaced.second);
 
-  if (task_entry.num_missing_arguments == 0) {
-    task_ready_callback_(task_id);
-  } else {
-    task_waiting_callback_(task_id);
-  }
+  return (task_entry.num_missing_arguments == 0);
 }
 
 void TaskDependencyManager::UnsubscribeForwardedTask(const TaskID &task_id) {

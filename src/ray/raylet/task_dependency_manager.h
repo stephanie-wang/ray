@@ -71,7 +71,7 @@ class TaskDependencyManager {
   /// when one or more of the task's dependencies is not locally available.
   ///
   /// \param task The locally queued task.
-  void SubscribeTask(const Task &task);
+  bool SubscribeTask(const Task &task);
 
   /// Unsubscribe from a task that was locally queued that has now been
   /// forwarded to a remote node. Its return values are now considered to be
@@ -92,7 +92,7 @@ class TaskDependencyManager {
   ///
   /// \param object_id The object ID of the object to mark as locally
   /// available.
-  void HandleObjectLocal(const ray::ObjectID &object_id);
+  std::unordered_set<TaskID, UniqueIDHasher> HandleObjectLocal(const ray::ObjectID &object_id);
 
   /// Handle an object that is no longer locally available.
   ///
