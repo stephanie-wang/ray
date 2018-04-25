@@ -18,7 +18,7 @@ NUM_CAMPAIGNS = 10000
 NUM_ADS_PER_CAMPAIGN = 10
 WINDOW_SIZE_SEC = 1
 
-SLEEP_TIME = 60
+SLEEP_TIME = 600
 
 
 class ThroughputLogger(stream_push.ProcessingStream):
@@ -66,11 +66,8 @@ class Filter(stream_push.ProcessingStream):
         self.debug_mode = debug_mode
 
     def process_elements(self, elements):
-        if self.debug_mode:
-            return elements
-        else:
-            return [element for element in elements if element["event_type"] ==
-                    "view"]
+        return [element for element in elements if element["event_type"] ==
+                "view"]
 
 
 class Project(stream_push.ProcessingStream):
@@ -100,6 +97,15 @@ class GroupBy(stream_push.ProcessingStream):
                 self.latencies[campaign_id][window], new_latency_ms)
 
         return []
+
+    def last(self):
+        """ Helper method to compute latencies. """
+        latencies = defaultdict(float)
+
+        for campaign_id, campaign_latencies in self.latencies.items():
+            for window, window_latency in campaign_latencies.items():
+                latencies[(campaign_id, window)] = window_latency
+        return 0, latencies
 
 
 class EventGenerator(stream_push.SourceStream):
@@ -157,14 +163,16 @@ if __name__ == '__main__':
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--test-throughput', action='store_true')
     parser.add_argument('--num-mappers', type=int, required=False, default=1)
+    parser.add_argument('--num-parsers', type=int, required=False, default=1)
     parser.add_argument('--num-generators', type=int, default=1)
     parser.add_argument('--num-reducers', type=int, default=1)
     parser.add_argument('--gcs-delay-ms', type=int)
 
     args = parser.parse_args()
 
-    node_resources = ["Node{}".format(i) for i in range(1, args.num_nodes)]
+    node_resources = ["Node{}".format(i) for i in range(args.num_nodes)]
     num_generators = args.num_generators * args.num_nodes
+    num_parsers = args.num_parsers * args.num_nodes
     num_mappers = args.num_mappers * args.num_nodes
     num_reducers = args.num_reducers * args.num_nodes
 
@@ -232,11 +240,11 @@ if __name__ == '__main__':
                                              ad_id_key_func)
     filters = stream_push.map_stream(num_mappers, node_resources, Filter,
                                      [args.test_throughput], projectors)
-    mappers = stream_push.map_stream(num_mappers, node_resources, ParseJson, [],
+    mappers = stream_push.map_stream(num_parsers, node_resources, ParseJson, [],
                                      filters)
 
     # Round up the starting time to the nearest time_slice_ms.
-    time_slice_start_ms = (time.time() + 5) * 1000
+    time_slice_start_ms = (time.time() + 10) * 1000
     time_slice_start_ms = (-(-time_slice_start_ms // args.time_slice_ms) *
                            args.time_slice_ms)
     # Create the event generator source.
@@ -267,18 +275,17 @@ if __name__ == '__main__':
     ray.get([generator.stop.remote() for generator in generators])
 
     all_latencies = []
-    if args.test_throughput:
-        results = ray.get([reducer.last.remote() for reducer in reducers])
-        for num_events, latencies in results:
-            throughput = num_events / SLEEP_TIME
-            total_latency = 0
-            num_windows = 0
-            for window, latency in latencies.items():
-                if latency > 0:
-                    all_latencies.append((window[1], latency))
-                    total_latency += latency
-                    num_windows += 1
-            log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
-        all_latencies.sort(key=lambda key: key[0])
-        for window, latency in all_latencies:
-            print(window, latency)
+    results = ray.get([reducer.last.remote() for reducer in reducers])
+    for num_events, latencies in results:
+        throughput = num_events / SLEEP_TIME
+        total_latency = 0
+        num_windows = 0
+        for window, latency in latencies.items():
+            if latency > 0:
+                all_latencies.append((window[1], latency))
+                total_latency += latency
+                num_windows += 1
+        log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
+    all_latencies.sort(key=lambda key: key[0])
+    for window, latency in all_latencies:
+        print(window, latency)
