@@ -779,7 +779,7 @@ void NodeManager::AssignTask(Task &task) {
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
-  RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " at " << start.count();
+  RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " to worker " << worker->Pid() << " at " << start.count();
 
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
@@ -843,7 +843,7 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
    std::chrono::duration_cast<std::chrono::milliseconds>(
       std::chrono::system_clock::now().time_since_epoch()
   );
-  RAY_LOG(INFO) << "Finished task " << task_id << " at " << start.count();
+  RAY_LOG(INFO) << worker->Pid() << " finished task " << task_id << " at " << start.count();
 
   auto tasks = local_queues_.RemoveTasks({task_id});
   auto task = *tasks.begin();
