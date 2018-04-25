@@ -140,6 +140,9 @@ class EventGenerator(stream_push.SourceStream):
         self.time_slice_ms = float(time_slice_ms)
         self.time_slice_num_events = time_slice_num_events
 
+        self.throughput_at = 0
+        self.num_elements = 0
+
         log.setLevel(logging.INFO)
         self.pid = os.getpid()
 
@@ -149,6 +152,13 @@ class EventGenerator(stream_push.SourceStream):
         log.info("generate: %d at %f", self.pid, time.time())
         elements = self.generate_elements()
         put_latency = self._push(elements)
+
+        after = time.time()
+        self.num_elements += len(elements)
+        if self.num_elements > 10000:
+            log.info("Throughput: %f per second", self.num_elements / (after - self.throughput_at))
+            self.throughput_at = after
+            self.num_elements = 0
 
         latency = time.time() - now
         latency -= self.time_slice_ms / 1000
