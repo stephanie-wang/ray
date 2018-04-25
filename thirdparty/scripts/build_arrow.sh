@@ -39,7 +39,7 @@ if [[ ! -d $TP_DIR/../python/ray/pyarrow_files/pyarrow ]]; then
     echo "building arrow"
 
     if [[ ! -d $TP_DIR/build/arrow ]]; then
-      git clone git@github.com:stephanie-wang/arrow.git "$TP_DIR/build/arrow"
+      git clone https://github.com/stephanie-wang/arrow.git "$TP_DIR/build/arrow"
     fi
 
     pushd $TP_DIR/build/arrow
