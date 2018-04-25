@@ -112,11 +112,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
 
   RAY_CHECK_OK(object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info) {
     ObjectID object_id = ObjectID::from_binary(object_info.object_id);
-    io_service_.post(
-        [this, object_id]() {
-        reconstruction_policy_.Cancel(object_id);
-        task_dependency_manager_.HandleObjectLocal(object_id);
-        });
+    reconstruction_policy_.Cancel(object_id);
+    task_dependency_manager_.HandleObjectLocal(object_id);
   }));
   RAY_CHECK_OK(object_manager_.SubscribeObjDeleted([this](const ObjectID &object_id) {
     task_dependency_manager_.HandleObjectMissing(object_id);
