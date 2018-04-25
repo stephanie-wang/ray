@@ -43,7 +43,11 @@ void SendTaskQueueHeartbeats(ray::gcs::ObjectTable &object_table,
   JobID job_id = JobID::nil();
   for (const auto &task : queue) {
     const auto &spec = task.GetTaskSpecification();
-    for (int64_t i = 0; i < spec.NumReturns(); i++) {
+    int64_t num_returns = spec.NumReturns();
+    if (spec.IsActorTask()) {
+      num_returns--;
+    }
+    for (int64_t i = 0; i < num_returns; i++) {
       auto object_id = spec.ReturnId(i);
       object_table.Append(job_id, object_id, nullptr, nullptr);
       count++;
