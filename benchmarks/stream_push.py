@@ -3,6 +3,7 @@ import time
 from collections import defaultdict
 import logging
 import hashlib
+import os
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -50,6 +51,7 @@ class ProcessingStream(Stream):
         latency = time.time() - now
         log.debug("latency: %s %f s put; %f s total", self.__class__.__name__,
                   put_latency, latency)
+        log.info("%d finished at %f", os.getpid(), time.time())
 
     def process_elements(self, elements):
         raise NotImplementedError()

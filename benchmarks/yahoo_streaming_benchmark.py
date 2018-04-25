@@ -1,4 +1,5 @@
 import ray
+import os
 import time
 import uuid
 import logging
@@ -18,7 +19,7 @@ NUM_CAMPAIGNS = 10000
 NUM_ADS_PER_CAMPAIGN = 10
 WINDOW_SIZE_SEC = 1
 
-SLEEP_TIME = 600
+SLEEP_TIME = 60
 
 
 class ThroughputLogger(stream_push.ProcessingStream):
@@ -53,8 +54,11 @@ class ParseJson(stream_push.ProcessingStream):
         super().__init__(None, *downstream_nodes)
 
         self.events = []
+        log.setLevel(logging.INFO)
+        self.pid = os.getpid()
 
     def process_elements(self, elements):
+        log.info("json: %d at %f", self.pid, time.time())
         # json.loads appears to be faster on a single JSON list rather than a
         # list of JSON elements...
         return json.loads('[' + ', '.join(elements) + ']')
@@ -64,8 +68,11 @@ class Filter(stream_push.ProcessingStream):
     def __init__(self, debug_mode, *downstream_nodes):
         super().__init__(None, *downstream_nodes)
         self.debug_mode = debug_mode
+        log.setLevel(logging.INFO)
+        self.pid = os.getpid()
 
     def process_elements(self, elements):
+        log.info("filter: %d at %f", self.pid, time.time())
         return [element for element in elements if element["event_type"] ==
                 "view"]
 
@@ -75,8 +82,11 @@ class Project(stream_push.ProcessingStream):
         super().__init__(partition_func, *downstream_nodes)
 
         self.ad_to_campaign_map = ad_to_campaign_map
+        log.setLevel(logging.INFO)
+        self.pid = os.getpid()
 
     def process_elements(self, elements):
+        log.info("project: %d at %f", self.pid, time.time())
         return [(self.ad_to_campaign_map[element["ad_id"]],
                  (int(element["event_time"] // WINDOW_SIZE_SEC) *
                   WINDOW_SIZE_SEC)) for element in elements]
@@ -88,8 +98,11 @@ class GroupBy(stream_push.ProcessingStream):
 
         self.windows = defaultdict(Counter)
         self.latencies = defaultdict(lambda: defaultdict(float))
+        log.setLevel(logging.INFO)
+        self.pid = os.getpid()
 
     def process_elements(self, elements):
+        log.info("groupby: %d at %f", self.pid, time.time())
         for campaign_id, window in elements:
             self.windows[campaign_id][window] += 1
             new_latency_ms = (time.time() - window - WINDOW_SIZE_SEC) * 1000
