@@ -23,6 +23,23 @@ WINDOW_SIZE_SEC = 1
 
 SLEEP_TIME = 600
 
+FIELDS = [
+    "user_id",
+    "page_id",
+    "ad_id",
+    "ad_type",
+    "event_type",
+    "event_time",
+    "ip_address",
+    ]
+USER_ID    = 0
+PAGE_ID    = 1
+AD_ID      = 2
+AD_TYPE    = 3
+EVENT_TYPE = 4
+EVENT_TIME = 5
+IP_ADDRESS = 6
+
 
 def warmup():
     x = np.ones(10 ** 8)
@@ -81,10 +98,9 @@ class ParseJson(stream_push.ProcessingStream):
         #   'event_type': elements[i][180:190].tobytes().decode('ascii'),
         #   'event_time': float(elements[i][204:220].tobytes().decode('ascii')),
         #   'ip_address': '1.2.3.4'} for i in range(elements.shape[0])]
-        x = elements[0]
-        element = ujson.loads(x.tobytes().decode('ascii'))
-        log.info("json: latency is %f", time.time() - element["event_time"])
-        return [element for _ in range(len(elements))]
+        elements = [ujson.loads(x.tobytes().decode('ascii')) for x in elements]
+        log.info("json: latency is %f", time.time() - float(elements[0][FIELDS[EVENT_TIME]]))
+        return np.array([[element[field].encode('ascii') for field in FIELDS] for element in elements])
 
 
 class Filter(stream_push.ProcessingStream):
@@ -96,9 +112,8 @@ class Filter(stream_push.ProcessingStream):
 
     def process_elements(self, elements):
         log.info("filter: %d at %f", self.pid, time.time())
-        log.info("filter: latency is %f", time.time() - elements[0]["event_time"])
-        return [element for element in elements if element["event_type"] ==
-                "view"]
+        log.info("filter: latency is %f", time.time() - float(elements[0][EVENT_TIME]))
+        return elements[elements[:, EVENT_TYPE] == b'view']
 
 
 class Project(stream_push.ProcessingStream):
@@ -114,17 +129,17 @@ class Project(stream_push.ProcessingStream):
 
     def process_elements(self, elements):
         log.info("project: %d at %f", self.pid, time.time())
-        log.info("project: latency is %f", time.time() - elements[0]["event_time"])
+        log.info("project: latency is %f", time.time() - float(elements[0][EVENT_TIME]))
         emit = False
         for element in elements:
-            event_time = element["event_time"]
+            event_time = float(element[EVENT_TIME])
             window = (int(event_time // WINDOW_SIZE_SEC) *
                   WINDOW_SIZE_SEC)
             if self.earliest_time is None or event_time < self.earliest_time:
                 self.earliest_time = event_time
             if event_time % WINDOW_SIZE_SEC > 0.8:
                 emit = True
-            self.windows[(self.ad_to_campaign_map[element["ad_id"]], window)] += 1
+            self.windows[(self.ad_to_campaign_map[element[AD_ID]], window)] += 1
 
         if emit or (time.time() - self.earliest_time) > 0.5:
             elements = list(self.windows.items())
@@ -165,8 +180,8 @@ class EventGenerator(stream_push.SourceStream):
 
         self.ad_ids = list(ad_to_campaign_map.keys())
 
-        self.user_ids = [str(uuid.uuid4()) for _ in range(NUM_USER_IDS)]
-        self.page_ids = [str(uuid.uuid4()) for _ in range(NUM_PAGE_IDS)]
+        self.user_ids = [str(uuid.uuid4()).encode('ascii') for _ in range(NUM_USER_IDS)]
+        self.page_ids = [str(uuid.uuid4()).encode('ascii') for _ in range(NUM_PAGE_IDS)]
         self.event_types = ["view", "click", "purchase"]
 
         self.time_slice_start_ms = time_slice_start_ms
@@ -180,7 +195,7 @@ class EventGenerator(stream_push.SourceStream):
         self.pid = os.getpid()
 
         # For speeding up JSON generation.
-        self.ad_ids_array = np.array([np.array(memoryview(x.encode('ascii'))) for x in list(ad_to_campaign_map.keys())])
+        self.ad_ids_array = np.array([np.array(memoryview(x)) for x in list(ad_to_campaign_map.keys())])
         self.user_ids_array = np.array([np.array(memoryview(str(uuid.uuid4()).encode('ascii')), np.uint8) for _ in range(NUM_USER_IDS)])
         self.page_ids_array = np.array([np.array(memoryview(str(uuid.uuid4()).encode('ascii')), np.uint8) for _ in range(NUM_PAGE_IDS)])
         self.event_types_array = np.array([np.array(memoryview(b'"view"    ')),
@@ -194,8 +209,8 @@ class EventGenerator(stream_push.SourceStream):
         self.part2 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","page_id":"'), np.uint8)])
         self.part3 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","ad_id":"'), np.uint8)])
         self.part4 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","ad_type":"banner78","event_type":'), np.uint8)])
-        self.part5 = np.array(self.time_slice_num_events * [np.array(memoryview(b',"event_time":'), np.uint8)])
-        self.part6 = np.array(self.time_slice_num_events * [np.array(memoryview(b',"ip_address":"1.2.3.4"}'), np.uint8)])
+        self.part5 = np.array(self.time_slice_num_events * [np.array(memoryview(b',"event_time":"'), np.uint8)])
+        self.part6 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","ip_address":"1.2.3.4"}'), np.uint8)])
         self.indices = np.arange(self.time_slice_num_events)
         self.template = np.hstack([self.part1,
                                    id_array,
@@ -285,10 +300,22 @@ class EventGenerator(stream_push.SourceStream):
         timestamp = (str(time.time())).encode('ascii')[:16]
         if len(timestamp) < 16:
             timestamp += b'0' * (16 - len(timestamp))
-        self.template[:, 204:220] = np.tile(np.array(memoryview(timestamp), dtype=np.uint8),
+        self.template[:, 205:221] = np.tile(np.array(memoryview(timestamp), dtype=np.uint8),
                                             (self.time_slice_num_events, 1))
 
         return timestamp, self.template
+
+
+def generate_ads():
+    campaign_ids = [str(uuid.uuid4()).encode('ascii') for _ in range(NUM_CAMPAIGNS)]
+    campaign_to_ad_map = {}
+    ad_to_campaign_map = {}
+    for campaign_id in campaign_ids:
+        campaign_to_ad_map[campaign_id] = [str(uuid.uuid4()).encode('ascii') for _ in
+                                           range(NUM_ADS_PER_CAMPAIGN)]
+        for ad_id in campaign_to_ad_map[campaign_id]:
+            ad_to_campaign_map[ad_id] = campaign_id
+    return ad_to_campaign_map
 
 
 if __name__ == '__main__':
@@ -302,7 +329,8 @@ if __name__ == '__main__':
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--test-throughput', action='store_true')
-    parser.add_argument('--num-mappers', type=int, required=False, default=1)
+    parser.add_argument('--num-projectors', type=int, required=False, default=1)
+    parser.add_argument('--num-filters', type=int, required=False, default=1)
     parser.add_argument('--num-parsers', type=int, required=False, default=1)
     parser.add_argument('--num-generators', type=int, default=1)
     parser.add_argument('--num-reducers', type=int, default=1)
@@ -314,7 +342,8 @@ if __name__ == '__main__':
     args.num_nodes -= 1
     num_generators = args.num_generators * args.num_nodes
     num_parsers = args.num_parsers * args.num_nodes
-    num_mappers = args.num_mappers * args.num_nodes
+    num_filters = args.num_filters * args.num_nodes
+    num_projectors = args.num_projectors * args.num_nodes
     num_reducers = args.num_reducers * args.num_nodes
 
     huge_pages = not args.no_hugepages
@@ -331,7 +360,7 @@ if __name__ == '__main__':
                 num_local_schedulers=args.num_nodes,
                 # Start each node with enough resources for all of the actors.
                 resources=[
-                    dict([(node_resource, num_generators + num_mappers * 3 +
+                    dict([(node_resource, num_generators + num_projectors * 3 +
                            num_reducers)]) for node_resource in
                     node_resources
                     ],
@@ -358,14 +387,7 @@ if __name__ == '__main__':
     time_slice_num_events = int(time_slice_num_events)
 
     # Generate the ad campaigns.
-    campaign_ids = [str(uuid.uuid4()) for _ in range(NUM_CAMPAIGNS)]
-    campaign_to_ad_map = {}
-    ad_to_campaign_map = {}
-    for campaign_id in campaign_ids:
-        campaign_to_ad_map[campaign_id] = [str(uuid.uuid4()) for _ in
-                                           range(NUM_ADS_PER_CAMPAIGN)]
-        for ad_id in campaign_to_ad_map[campaign_id]:
-            ad_to_campaign_map[ad_id] = campaign_id
+    ad_to_campaign_map = generate_ads()
 
     actor_placement = {}
 
@@ -378,13 +400,13 @@ if __name__ == '__main__':
 
     def ad_id_key_func(event):
         campaign_id = event[0][0]
-        campaign_id = campaign_id.encode('ascii')
+        campaign_id = campaign_id
         return sum(campaign_id)
     print(len(reducers), "reducers")
-    projectors = stream_push.group_by_stream(num_mappers, node_resources, Project,
+    projectors = stream_push.group_by_stream(num_projectors, node_resources, Project,
                                              [ad_to_campaign_map], reducers,
                                              ad_id_key_func)
-    filters = stream_push.map_stream(num_mappers, node_resources, Filter,
+    filters = stream_push.map_stream(num_filters, node_resources, Filter,
                                      [args.test_throughput], projectors)
     mappers = stream_push.map_stream(num_parsers, node_resources, ParseJson, [],
                                      filters)

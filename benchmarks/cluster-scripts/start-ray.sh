@@ -10,6 +10,8 @@ HEAD=`head -n 1 workers.txt`
 #NUM_NODES="${NUM_NODES:-$(tail -n +2 workers.txt | wc -l)}"
 
 
+./stop-ray.sh
+
 rm /tmp/raylogs/*
 if [ -z "$GCS_DELAY_MS" ]; then
     ray start --head --huge-pages --plasma-directory /mnt/hugepages --redis-port=6379 --resources='{"Node0": 1000}' --num-cpus 100 --use-raylet --num-redis-shards $NUM_REDIS_SHARDS --use-task-shard
