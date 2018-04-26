@@ -65,13 +65,13 @@ class ParseJson(stream_push.ProcessingStream):
         log.setLevel(logging.INFO)
         self.pid = os.getpid()
 
-    def process_elements(self, elements):
+    def process_elements2(self, elements):
         log.info("json: %d at %f", self.pid, time.time())
         # json.loads appears to be faster on a single JSON list rather than a
         # list of JSON elements...
         return json.loads('[' + ', '.join(elements) + ']')
 
-    def process_elements2(self, elements):
+    def process_elements(self, elements):
         log.info("json: %d at %f", self.pid, time.time())
         # This could probably be made faster by writing the following in C++.
         # [{'user_id': elements[i][12:48].tobytes().decode('ascii'),
@@ -81,7 +81,10 @@ class ParseJson(stream_push.ProcessingStream):
         #   'event_type': elements[i][180:190].tobytes().decode('ascii'),
         #   'event_time': float(elements[i][204:220].tobytes().decode('ascii')),
         #   'ip_address': '1.2.3.4'} for i in range(elements.shape[0])]
-        return [ujson.loads(x.tobytes().decode('ascii')) for x in elements]
+        x = elements[0]
+        element = ujson.loads(x.tobytes().decode('ascii'))
+        log.info("json: latency is %f", time.time() - element["event_time"])
+        return [element for _ in range(len(elements))]
 
 
 class Filter(stream_push.ProcessingStream):
@@ -93,6 +96,7 @@ class Filter(stream_push.ProcessingStream):
 
     def process_elements(self, elements):
         log.info("filter: %d at %f", self.pid, time.time())
+        log.info("filter: latency is %f", time.time() - elements[0]["event_time"])
         return [element for element in elements if element["event_type"] ==
                 "view"]
 
@@ -110,6 +114,7 @@ class Project(stream_push.ProcessingStream):
 
     def process_elements(self, elements):
         log.info("project: %d at %f", self.pid, time.time())
+        log.info("project: latency is %f", time.time() - elements[0]["event_time"])
         emit = False
         for element in elements:
             event_time = element["event_time"]
@@ -175,6 +180,13 @@ class EventGenerator(stream_push.SourceStream):
         self.pid = os.getpid()
 
         # For speeding up JSON generation.
+        self.ad_ids_array = np.array([np.array(memoryview(x.encode('ascii'))) for x in list(ad_to_campaign_map.keys())])
+        self.user_ids_array = np.array([np.array(memoryview(str(uuid.uuid4()).encode('ascii')), np.uint8) for _ in range(NUM_USER_IDS)])
+        self.page_ids_array = np.array([np.array(memoryview(str(uuid.uuid4()).encode('ascii')), np.uint8) for _ in range(NUM_PAGE_IDS)])
+        self.event_types_array = np.array([np.array(memoryview(b'"view"    ')),
+                                           np.array(memoryview(b'"click"   ')),
+                                           np.array(memoryview(b'"purchase"'))])
+
         id_array = np.empty(shape=(self.time_slice_num_events, 36), dtype=np.uint8)
         type_array = np.empty(shape=(self.time_slice_num_events, 10), dtype=np.uint8)
         time_array = np.empty(shape=(self.time_slice_num_events, 16), dtype=np.uint8)
@@ -201,7 +213,7 @@ class EventGenerator(stream_push.SourceStream):
         now = time.time()
 
         log.info("generate: %d at %f", self.pid, time.time())
-        elements = self.generate_elements()
+        event_timestamp, elements = self.generate_elements2()
         put_latency = self._push(elements)
 
         after = time.time()
@@ -218,6 +230,7 @@ class EventGenerator(stream_push.SourceStream):
         elif latency > 0.1:
             log.warning("Falling behind by %f seconds", latency)
         log.info("%d finished at %f, put %f", self.pid, time.time(), put_latency)
+        log.info("generate: latency is %f", time.time() - float(event_timestamp))
 
         log.debug("latency: %s %f s put; %f s total",
                   self.__class__.__name__, put_latency, latency)
@@ -269,10 +282,13 @@ class EventGenerator(stream_push.SourceStream):
         self.template[:, 61:97] = self.page_ids_array[self.indices % NUM_PAGE_IDS]
         self.template[:, 108:144] = self.ad_ids_array[self.indices % len(self.ad_ids)]
         self.template[:, 180:190] = self.event_types_array[self.indices % 3]
-        self.template[:, 204:220] = np.tile(np.array(memoryview((str(time.time())).encode('ascii')[:16]), dtype=np.uint8),
+        timestamp = (str(time.time())).encode('ascii')[:16]
+        if len(timestamp) < 16:
+            timestamp += b'0' * (16 - len(timestamp))
+        self.template[:, 204:220] = np.tile(np.array(memoryview(timestamp), dtype=np.uint8),
                                             (self.time_slice_num_events, 1))
 
-        return self.template
+        return timestamp, self.template
 
 
 if __name__ == '__main__':
@@ -398,7 +414,7 @@ if __name__ == '__main__':
 
     # Ping the event generators every second to make sure they're still alive.
     for _ in range(SLEEP_TIME):
-        ray.get([generator.ready.remote() for generator in generators])
+        #ray.get([generator.ready.remote() for generator in generators])
         time.sleep(1)
 
     # Stop generating the events.
@@ -415,7 +431,8 @@ if __name__ == '__main__':
                 all_latencies.append((window[1], latency))
                 total_latency += latency
                 num_windows += 1
-        log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
+        if num_windows > 0:
+            log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
     all_latencies.sort(key=lambda key: key[0])
     for window, latency in all_latencies:
         print(window, latency)

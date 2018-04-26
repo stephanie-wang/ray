@@ -13,10 +13,10 @@ log.setLevel(logging.INFO)
 class Stream(object):
     def __init__(self, partition_func, *downstream_actors):
         self.downstream_actors = downstream_actors
-        if partition_func is None:
-            self.partition_func = lambda i, _: i % len(self.downstream_actors)
-        else:
+        if partition_func is not None:
             self.partition_func = lambda _, elm: partition_func(elm)
+        else:
+            self.partition_func = None
 
     def ready(self):
         return
@@ -25,19 +25,31 @@ class Stream(object):
         put_latency = 0
         if len(self.downstream_actors) and len(elements):
             partitions = {}
-            for i in range(len(self.downstream_actors)):
-                partitions[i] = []
-
             # Split the elements into equal-sized batches across all downstream
             # nodes.
-            for i, element in enumerate(elements):
-                partition_index = self.partition_func(i, element)
-                partitions[partition_index].append(element)
-            for partition_index, partition in partitions.items():
-                start = time.time()
-                x = ray.put(partition)
-                put_latency += (time.time() - start)
-                self.downstream_actors[partition_index].push.remote(x)
+            if self.partition_func is None:
+                batch_size = len(elements) // len(self.downstream_actors)
+                if len(elements) % len(self.downstream_actors) > 0:
+                    batch_size += 1
+                for i, downstream_actor in enumerate(self.downstream_actors):
+                    partition = elements[i * batch_size : (i + 1) * batch_size]
+                    start = time.time()
+                    x = ray.put(partition)
+                    put_latency += (time.time() - start)
+                    downstream_actor.push.remote(x)
+
+            else:
+                for i in range(len(self.downstream_actors)):
+                    partitions[i] = []
+                for i, element in enumerate(elements):
+                    partition_index = self.partition_func(i, element)
+                    partitions[partition_index].append(element)
+
+                for partition_index, partition in partitions.items():
+                    start = time.time()
+                    x = ray.put(partition)
+                    put_latency += (time.time() - start)
+                    self.downstream_actors[partition_index].push.remote(x)
         return put_latency
 
 
