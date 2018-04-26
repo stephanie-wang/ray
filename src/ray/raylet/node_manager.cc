@@ -942,23 +942,22 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task " << task_id  << " forwarded to "
                 << node_id << " at " << start.count();
 
-  // Get and serialize the task's uncommitted lineage.
-  auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
-  Task &lineage_cache_entry_task =
-      uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
-  // Increment forward count for the forwarded task.
-  lineage_cache_entry_task.GetTaskExecutionSpec().IncrementNumForwards();
-
+  Lineage uncommitted_lineage;
   // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
   // mode, remove the uncommitted entries from the lineage cache.
   if (gcs_delay_ms_ >= 0) {
     // TODO(swang): Don't get the uncommitted lineage for these tasks.
-    auto task_entry = uncommitted_lineage.PopEntry(task_id);
-    RAY_CHECK(task_entry);
-    RAY_CHECK(task_entry->GetStatus() == GcsStatus_UNCOMMITTED_WAITING);
-    uncommitted_lineage = Lineage();
-    RAY_CHECK(uncommitted_lineage.SetEntry(std::move(*task_entry)));
+    LineageEntry task_entry(task, GcsStatus_UNCOMMITTED_WAITING);
+    RAY_CHECK(uncommitted_lineage.SetEntry(std::move(task_entry)));
+  } else {
+    // Get and serialize the task's uncommitted lineage.
+    uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id);
   }
+
+  Task &lineage_cache_entry_task =
+      uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
+  // Increment forward count for the forwarded task.
+  lineage_cache_entry_task.GetTaskExecutionSpec().IncrementNumForwards();
 
   flatbuffers::FlatBufferBuilder fbb;
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
