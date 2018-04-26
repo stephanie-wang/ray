@@ -7,6 +7,7 @@ import simplejson as json
 from collections import defaultdict
 from collections import Counter
 import numpy as np
+import ujson
 
 import stream_push
 
@@ -69,6 +70,18 @@ class ParseJson(stream_push.ProcessingStream):
         # json.loads appears to be faster on a single JSON list rather than a
         # list of JSON elements...
         return json.loads('[' + ', '.join(elements) + ']')
+
+    def process_elements2(self, elements):
+        log.info("json: %d at %f", self.pid, time.time())
+        # This could probably be made faster by writing the following in C++.
+        # [{'user_id': elements[i][12:48].tobytes().decode('ascii'),
+        #   'page_id': elements[i][61:97].tobytes().decode('ascii'),
+        #   'ad_id': elements[i][108:144].tobytes().decode('ascii'),
+        #   'ad_type': 'banner78',
+        #   'event_type': elements[i][180:190].tobytes().decode('ascii'),
+        #   'event_time': float(elements[i][204:220].tobytes().decode('ascii')),
+        #   'ip_address': '1.2.3.4'} for i in range(elements.shape[0])]
+        return [ujson.loads(x.tobytes().decode('ascii')) for x in elements]
 
 
 class Filter(stream_push.ProcessingStream):
@@ -161,6 +174,29 @@ class EventGenerator(stream_push.SourceStream):
         log.setLevel(logging.INFO)
         self.pid = os.getpid()
 
+        # For speeding up JSON generation.
+        id_array = np.empty(shape=(self.time_slice_num_events, 36), dtype=np.uint8)
+        type_array = np.empty(shape=(self.time_slice_num_events, 10), dtype=np.uint8)
+        time_array = np.empty(shape=(self.time_slice_num_events, 16), dtype=np.uint8)
+        self.part1 = np.array(self.time_slice_num_events * [np.array(memoryview(b'{"user_id":"'), np.uint8)])
+        self.part2 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","page_id":"'), np.uint8)])
+        self.part3 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","ad_id":"'), np.uint8)])
+        self.part4 = np.array(self.time_slice_num_events * [np.array(memoryview(b'","ad_type":"banner78","event_type":'), np.uint8)])
+        self.part5 = np.array(self.time_slice_num_events * [np.array(memoryview(b',"event_time":'), np.uint8)])
+        self.part6 = np.array(self.time_slice_num_events * [np.array(memoryview(b',"ip_address":"1.2.3.4"}'), np.uint8)])
+        self.indices = np.arange(self.time_slice_num_events)
+        self.template = np.hstack([self.part1,
+                                   id_array,
+                                   self.part2,
+                                   id_array,
+                                   self.part3,
+                                   id_array,
+                                   self.part4,
+                                   type_array,
+                                   self.part5,
+                                   time_array,
+                                   self.part6])
+
     def generate(self):
         now = time.time()
 
@@ -227,6 +263,16 @@ class EventGenerator(stream_push.SourceStream):
         events = [event for _ in range(self.time_slice_num_events)]
 
         return events
+
+    def generate_elements2(self):
+        self.template[:, 12:48] = self.user_ids_array[self.indices % NUM_USER_IDS]
+        self.template[:, 61:97] = self.page_ids_array[self.indices % NUM_PAGE_IDS]
+        self.template[:, 108:144] = self.ad_ids_array[self.indices % len(self.ad_ids)]
+        self.template[:, 180:190] = self.event_types_array[self.indices % 3]
+        self.template[:, 204:220] = np.tile(np.array(memoryview((str(time.time())).encode('ascii')[:16]), dtype=np.uint8),
+                                            (self.time_slice_num_events, 1))
+
+        return self.template
 
 
 if __name__ == '__main__':
