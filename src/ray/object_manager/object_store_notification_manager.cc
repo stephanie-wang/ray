@@ -46,13 +46,14 @@ void ObjectStoreNotificationManager::ProcessStoreLength(
 
     const auto &object_info = flatbuffers::GetRoot<ObjectInfo>(notification_.data());
     const auto &object_id = from_flatbuf(*object_info->object_id());
+    std::chrono::milliseconds start =
+    std::chrono::duration_cast<std::chrono::milliseconds>(
+      std::chrono::system_clock::now().time_since_epoch()
+    );
     if (object_info->is_deletion()) {
+      RAY_LOG(INFO) << "object " << object_id << "  at " << start.count();
       ProcessStoreRemove(object_id);
     } else {
-      std::chrono::milliseconds start =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-        std::chrono::system_clock::now().time_since_epoch()
-      );
       RAY_LOG(INFO) << "object " << object_id << " available at " << start.count();
 
       ObjectInfoT result;
