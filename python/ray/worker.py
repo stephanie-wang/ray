@@ -615,6 +615,7 @@ class Worker(object):
                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
                 actor_handle_id, actor_counter, is_actor_checkpoint_method,
                 execution_dependencies, resources, self.use_raylet)
+            print(self.actor_id.hex(), "submitted", task.task_id().hex(), "at", time.time())
             # Increment the worker's task index to track how many tasks have
             # been submitted by the current task so far.
             self.task_index += 1
@@ -794,6 +795,7 @@ class Worker(object):
         # message to the correct driver.
         self.task_driver_id = task.driver_id()
         self.current_task_id = task.task_id()
+        print(self.actor_id.hex(), "assigned", self.current_task_id.hex(), "at", time.time())
         self.current_function_id = task.function_id().id()
         self.task_index = 0
         self.put_index = 1
