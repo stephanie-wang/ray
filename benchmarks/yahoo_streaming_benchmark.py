@@ -20,7 +20,7 @@ NUM_CAMPAIGNS = 10000
 NUM_ADS_PER_CAMPAIGN = 10
 WINDOW_SIZE_SEC = 1
 
-SLEEP_TIME = 60
+SLEEP_TIME = 600
 
 
 def warmup():
@@ -92,14 +92,29 @@ class Project(stream_push.ProcessingStream):
         log.setLevel(logging.INFO)
         self.pid = os.getpid()
 
+        self.windows = Counter()
+        self.earliest_time = None
+
     def process_elements(self, elements):
         log.info("project: %d at %f", self.pid, time.time())
-        windows = Counter()
+        emit = False
         for element in elements:
-            windows[(self.ad_to_campaign_map[element["ad_id"]],
-                 (int(element["event_time"] // WINDOW_SIZE_SEC) *
-                  WINDOW_SIZE_SEC))] += 1
-        return list(windows.items())
+            event_time = element["event_time"]
+            window = (int(event_time // WINDOW_SIZE_SEC) *
+                  WINDOW_SIZE_SEC)
+            if self.earliest_time is None or event_time < self.earliest_time:
+                self.earliest_time = event_time
+            if event_time % WINDOW_SIZE_SEC > 0.8:
+                emit = True
+            self.windows[(self.ad_to_campaign_map[element["ad_id"]], window)] += 1
+
+        if emit or (time.time() - self.earliest_time) > 0.5:
+            elements = list(self.windows.items())
+            self.windows.clear()
+            self.earliest_time = None
+            return elements
+        else:
+            return []
 
 class GroupBy(stream_push.ProcessingStream):
     def __init__(self, *downstream_nodes):
@@ -185,9 +200,21 @@ class EventGenerator(stream_push.SourceStream):
         #    log.warning("Falling behind by %f seconds", -1 * diff)
 
         # Generate the JSON string of events for this time slice.
-        events = []
-        for i in range(self.time_slice_num_events):
-            event = (
+        #events = []
+        #for i in range(self.time_slice_num_events):
+        #    event = (
+        #        '{'
+        #        '"user_id": "' + self.user_ids[i % len(self.user_ids)] + '",'
+        #        '"page_id": "' + self.page_ids[i % len(self.page_ids)] + '",'
+        #        '"ad_id": "' + self.ad_ids[i % len(self.ad_ids)] + '",'
+        #        '"ad_type": "banner78",'
+        #        '"event_type": "' + self.event_types[i % len(self.event_types)] + '",'
+        #        '"event_time": ' + str(time.time()) + ','
+        #        '"ip_address": "1.2.3.4"'
+        #        '}')
+        #    events.append(event)
+        i = np.random.randint(1000000)
+        event = (
                 '{'
                 '"user_id": "' + self.user_ids[i % len(self.user_ids)] + '",'
                 '"page_id": "' + self.page_ids[i % len(self.page_ids)] + '",'
@@ -197,7 +224,7 @@ class EventGenerator(stream_push.SourceStream):
                 '"event_time": ' + str(time.time()) + ','
                 '"ip_address": "1.2.3.4"'
                 '}')
-            events.append(event)
+        events = [event for _ in range(self.time_slice_num_events)]
 
         return events
 
