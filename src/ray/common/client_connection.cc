@@ -41,6 +41,10 @@ void ServerConnection<T>::ReadBuffer(
 template <class T>
 ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
                                               const uint8_t *message) {
+  std::chrono::milliseconds start =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
   std::vector<boost::asio::const_buffer> message_buffers;
   auto write_version = RayConfig::instance().ray_protocol_version();
   message_buffers.push_back(boost::asio::buffer(&write_version, sizeof(write_version)));
@@ -51,6 +55,15 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
   // TODO(swang): Does this need to be an async write?
   boost::system::error_code error;
   boost::asio::write(socket_, message_buffers, error);
+
+
+  std::chrono::milliseconds end =
+  std::chrono::duration_cast<std::chrono::milliseconds>(
+    std::chrono::system_clock::now().time_since_epoch()
+  );
+  if ((end - start).count() > 10) {
+    RAY_LOG(WARNING) << "WriteMessage took " << (end - start).count() << " at " << start.count();
+  }
   if (error) {
     return ray::Status::IOError(error.message());
   } else {
