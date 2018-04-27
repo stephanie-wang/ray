@@ -23,7 +23,8 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 
 template <class T>
 ServerConnection<T>::ServerConnection(boost::asio::basic_stream_socket<T> &&socket)
-    : socket_(std::move(socket)) {}
+    : socket_(std::move(socket)),
+      write_version_(RayConfig::instance().ray_protocol_version()) {}
 
 template <class T>
 void ServerConnection<T>::WriteBuffer(
@@ -69,6 +70,23 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
   } else {
     return ray::Status::OK();
   }
+}
+
+template <class T>
+void ServerConnection<T>::WriteMessageAsync(int64_t type, int64_t length, const uint8_t *message, const std::function<void(const boost::system::error_code&, size_t)> &handler) {
+  write_type_ = type;
+  write_length_ = length;
+  write_message_.resize(length);
+  write_message_.assign(message, message + length);
+
+  std::vector<boost::asio::const_buffer> message_buffers;
+  message_buffers.push_back(boost::asio::buffer(&write_version_, sizeof(write_version_)));
+  message_buffers.push_back(boost::asio::buffer(&write_type_, sizeof(write_type_)));
+  message_buffers.push_back(boost::asio::buffer(&write_length_, sizeof(write_length_)));
+  message_buffers.push_back(boost::asio::buffer(write_message_));
+  boost::asio::async_write(ServerConnection<T>::socket_, message_buffers, [handler](const boost::system::error_code &error, size_t bytes_transferred){
+      handler(error, bytes_transferred);
+      });
 }
 
 template <class T>
