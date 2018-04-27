@@ -40,6 +40,9 @@ class ServerConnection {
   /// \return Status.
   ray::Status WriteMessage(int64_t type, int64_t length, const uint8_t *message);
 
+  void WriteMessageAsync(int64_t type, int64_t length, const uint8_t *message,
+      const std::function<void(const boost::system::error_code&, size_t)> &handler);
+
   /// Write a buffer to this connection.
   ///
   /// \param buffer The buffer.
@@ -57,6 +60,11 @@ class ServerConnection {
  protected:
   /// The socket connection to the server.
   boost::asio::basic_stream_socket<T> socket_;
+
+  int64_t write_version_;
+  int64_t write_type_;
+  uint64_t write_length_;
+  std::vector<uint8_t> write_message_;
 };
 
 template <typename T>
