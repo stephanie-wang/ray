@@ -3,6 +3,7 @@
 
 #include <chrono>
 #include <memory>
+#include <list>
 
 #include <boost/asio.hpp>
 #include <boost/asio/error.hpp>
@@ -29,6 +30,14 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 template <typename T>
 class ServerConnection {
  public:
+  struct WriteBufferData {
+    int64_t write_version;
+    int64_t write_type;
+    uint64_t write_length;
+    std::vector<uint8_t> write_message;
+    std::function<void(const boost::system::error_code&, size_t)> handler;
+  };
+
   /// Create a connection to the server.
   ServerConnection(boost::asio::basic_stream_socket<T> &&socket);
 
@@ -60,11 +69,11 @@ class ServerConnection {
  protected:
   /// The socket connection to the server.
   boost::asio::basic_stream_socket<T> socket_;
+  std::list<std::shared_ptr<WriteBufferData>> write_queue_;
+  bool writing_;
 
-  int64_t write_version_;
-  int64_t write_type_;
-  uint64_t write_length_;
-  std::vector<uint8_t> write_message_;
+ private:
+  void WriteSome();
 };
 
 template <typename T>
