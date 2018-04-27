@@ -1004,12 +1004,15 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
       }
     }
   } else {
-    // TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
-    // lost.
-    RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
-                   << " to node " << node_id;
+    RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
+    //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
+    //// lost.
+    //RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
+    //               << " to node " << node_id;
 
     // TODO(swang): Subscribe to the task in the task dependency manager again.
+
+    reconstruction_policy_.Listen(spec.ActorCreationDummyObjectId());
   }
 
   std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
