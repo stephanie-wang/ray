@@ -546,7 +546,8 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
   }
 
   // Listen for more messages.
-  client->ProcessMessages();
+  size_t available = client->Available();
+  client->ProcessMessages(/*sync=*/(available > 0));
 }
 
 void NodeManager::ProcessNewNodeManager(
