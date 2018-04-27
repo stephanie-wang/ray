@@ -24,7 +24,8 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 template <class T>
 ServerConnection<T>::ServerConnection(boost::asio::basic_stream_socket<T> &&socket)
     : socket_(std::move(socket)),
-      write_version_(RayConfig::instance().ray_protocol_version()) {}
+      write_queue_(),
+      writing_(false) {}
 
 template <class T>
 void ServerConnection<T>::WriteBuffer(
@@ -46,6 +47,7 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
+
   std::vector<boost::asio::const_buffer> message_buffers;
   auto write_version = RayConfig::instance().ray_protocol_version();
   message_buffers.push_back(boost::asio::buffer(&write_version, sizeof(write_version)));
@@ -73,20 +75,46 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
 }
 
 template <class T>
-void ServerConnection<T>::WriteMessageAsync(int64_t type, int64_t length, const uint8_t *message, const std::function<void(const boost::system::error_code&, size_t)> &handler) {
-  write_type_ = type;
-  write_length_ = length;
-  write_message_.resize(length);
-  write_message_.assign(message, message + length);
-
+void ServerConnection<T>::WriteSome() {
   std::vector<boost::asio::const_buffer> message_buffers;
-  message_buffers.push_back(boost::asio::buffer(&write_version_, sizeof(write_version_)));
-  message_buffers.push_back(boost::asio::buffer(&write_type_, sizeof(write_type_)));
-  message_buffers.push_back(boost::asio::buffer(&write_length_, sizeof(write_length_)));
-  message_buffers.push_back(boost::asio::buffer(write_message_));
-  boost::asio::async_write(ServerConnection<T>::socket_, message_buffers, [handler](const boost::system::error_code &error, size_t bytes_transferred){
-      handler(error, bytes_transferred);
-      });
+  for (const auto write_buffer : write_queue_) {
+    message_buffers.push_back(boost::asio::buffer(&write_buffer->write_version, sizeof(write_buffer->write_version)));
+    message_buffers.push_back(boost::asio::buffer(&write_buffer->write_type, sizeof(write_buffer->write_type)));
+    message_buffers.push_back(boost::asio::buffer(&write_buffer->write_length, sizeof(write_buffer->write_length)));
+    message_buffers.push_back(boost::asio::buffer(write_buffer->write_message));
+  }
+  size_t num_messages = write_queue_.size();
+  boost::asio::async_write(ServerConnection<T>::socket_, message_buffers, [this, num_messages](const boost::system::error_code &error, size_t bytes_transferred){
+    for (size_t i = 0; i < num_messages; i++) {
+      auto write_buffer = std::move(write_queue_.front());
+      write_buffer->handler(error, bytes_transferred);
+      write_queue_.pop_front();
+    }
+    if (!write_queue_.empty()) {
+      ServerConnection<T>::socket_.async_write_some(boost::asio::null_buffers(), [this](const boost::system::error_code &error, size_t bytes_transferred){
+          RAY_CHECK(!error);
+          WriteSome();
+          });
+    } else {
+      writing_ = false;
+    }
+  });
+  writing_ = true;
+}
+
+template <class T>
+void ServerConnection<T>::WriteMessageAsync(int64_t type, int64_t length, const uint8_t *message, const std::function<void(const boost::system::error_code&, size_t)> &handler) {
+  auto write_buffer = std::make_shared<WriteBufferData>();
+  write_buffer->write_type = type;
+  write_buffer->write_length = length;
+  write_buffer->write_message.resize(length);
+  write_buffer->write_message.assign(message, message + length);
+  write_buffer->handler = handler;
+  write_queue_.push_back(write_buffer);
+
+  if (!writing_) {
+    WriteSome();
+  }
 }
 
 template <class T>
