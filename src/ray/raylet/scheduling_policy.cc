@@ -62,12 +62,6 @@ std::unordered_map<TaskID, ClientID, UniqueIDHasher> SchedulingPolicy::Schedule(
     }
     RAY_CHECK(!client_keys.empty());
 
-    // NOTE(swang): Hack to schedule tasks locally for streaming workload.
-    if (client_keys.size() > 1) {
-      decision[task_id] = local_client_id;
-      continue;
-    }
-
     // Weight the local client higher. It should be chosen ~50% of the time.
     size_t num_clients = client_keys.size();
     if (num_clients > 2) {
