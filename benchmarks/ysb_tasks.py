@@ -163,8 +163,8 @@ class GroupBy(stream_push_tasks.ProcessingStream):
         self.pid = os.getpid()
 
     def process_elements(self, batches):
+        log.warn("groupby: %d at %f", self.pid, time.time())
         for elements in batches:
-            log.warn("groupby: %d at %f", self.pid, time.time())
             for window, count in elements:
                 self.windows[window[0]][window[1]] += count
                 new_latency_ms = (time.time() - window[1] - WINDOW_SIZE_SEC) * 1000
@@ -201,8 +201,9 @@ def filter_json(*batches):
 
 @ray.remote
 def project_json(ad_to_campaign_map, num_reducers, *batches):
+    start = time.time()
     log.warn("project: %d at %f", os.getpid(), time.time())
-    log.warn("project: latency is %f", time.time() - float(batches[0][0][EVENT_TIME]))
+    log.warn("project: latency is %f", start - float(batches[0][0][EVENT_TIME]))
     window_partitions = [Counter() for _ in range(num_reducers)]
 
     for batch in batches:
@@ -213,6 +214,7 @@ def project_json(ad_to_campaign_map, num_reducers, *batches):
             key = ad_to_campaign_map[element[AD_ID]]
             partition = sum(key) % num_reducers
             window_partitions[partition][(key, window)] += 1
+    log.warn("project: took %f", time.time() - start)
     return [list(windows.items()) for windows in window_partitions]
 
 
@@ -273,6 +275,8 @@ class EventGenerator(stream_push_tasks.SourceStream):
                                    time_array,
                                    self.part6])
 
+        self.projected = []
+
     def _push(self, elements):
         put_latency = 0
         if len(self.downstream_actors) and len(elements):
@@ -282,6 +286,7 @@ class EventGenerator(stream_push_tasks.SourceStream):
             x = ray.put(elements)
             put_latency += (time.time() - start)
 
+            print("Parse tasks")
             parsed = []
             batch_size = len(elements) // self.num_parsers
             start = 0
@@ -290,7 +295,9 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 if i < (len(elements) % self.num_parsers):
                     end += 1
                 parsed.append(parse_json._submit(args=[x, start, end], resources={self.node_resource: 1}))
+                start = end
 
+            print("Filter tasks")
             filtered = []
             batch_size = self.num_parsers // self.num_filters
             start = 0
@@ -299,8 +306,9 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 if i < (self.num_parsers % self.num_filters):
                     end += 1
                 filtered.append(filter_json._submit(args=parsed[start:end], resources={self.node_resource: 1}))
+                start = end
 
-            projected = []
+            print("Project tasks")
             batch_size = self.num_filters // self.num_projectors
             start = 0
             for i in range(self.num_projectors):
@@ -308,11 +316,15 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 if i < (self.num_filters % self.num_projectors):
                     end += 1
                 args = [self.ad_to_campaign_map_id, len(self.downstream_actors)] + filtered[start:end]
-                projected.append(project_json._submit(args=args, num_return_vals=len(self.downstream_actors), resources={self.node_resource: 1}))
+                self.projected.append(project_json._submit(args=args, num_return_vals=len(self.downstream_actors), resources={self.node_resource: 1}))
+                start = end
 
-            for i, reducer in enumerate(self.downstream_actors):
-                reducer_batch = [batch[i] for batch in projected]
-                reducer.push.remote(*reducer_batch)
+            print("Reduce tasks")
+            if time.time() % WINDOW_SIZE_SEC > 0.8:
+                for i, reducer in enumerate(self.downstream_actors):
+                    reducer_batch = [batch[i] for batch in self.projected]
+                    reducer.push.remote(*reducer_batch)
+                self.projected = []
 
         return put_latency
 
