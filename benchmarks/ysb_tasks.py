@@ -69,8 +69,8 @@ class ThroughputLogger(stream_push_tasks.ProcessingStream):
             latency = sum(self.latencies.values()) / len(self.latencies)
             throughput = len(self.events) / SLEEP_TIME
             log.setLevel(logging.INFO)
-            log.info("Achieved throughput was %d", throughput)
-            log.info("Latency: %f", latency)
+            log.warn("Achieved throughput was %d", throughput)
+            log.warn("Latency: %f", latency)
         return len(self.events), self.latencies
 
 
@@ -83,13 +83,13 @@ class ParseJson(stream_push_tasks.ProcessingStream):
         self.pid = os.getpid()
 
     def process_elements2(self, elements):
-        log.info("json: %d at %f", self.pid, time.time())
+        log.warn("json: %d at %f", self.pid, time.time())
         # json.loads appears to be faster on a single JSON list rather than a
         # list of JSON elements...
         return json.loads('[' + ', '.join(elements) + ']')
 
     def process_elements(self, elements):
-        log.info("json: %d at %f", self.pid, time.time())
+        log.warn("json: %d at %f", self.pid, time.time())
         # This could probably be made faster by writing the following in C++.
         # [{'user_id': elements[i][12:48].tobytes().decode('ascii'),
         #   'page_id': elements[i][61:97].tobytes().decode('ascii'),
@@ -99,7 +99,7 @@ class ParseJson(stream_push_tasks.ProcessingStream):
         #   'event_time': float(elements[i][204:220].tobytes().decode('ascii')),
         #   'ip_address': '1.2.3.4'} for i in range(elements.shape[0])]
         elements = [ujson.loads(x.tobytes().decode('ascii')) for x in elements]
-        log.info("json: latency is %f", time.time() - float(elements[0][FIELDS[EVENT_TIME]]))
+        log.warn("json: latency is %f", time.time() - float(elements[0][FIELDS[EVENT_TIME]]))
         return np.array([[element[field].encode('ascii') for field in FIELDS] for element in elements])
 
 
@@ -111,8 +111,8 @@ class Filter(stream_push_tasks.ProcessingStream):
         self.pid = os.getpid()
 
     def process_elements(self, elements):
-        log.info("filter: %d at %f", self.pid, time.time())
-        log.info("filter: latency is %f", time.time() - float(elements[0][EVENT_TIME]))
+        log.warn("filter: %d at %f", self.pid, time.time())
+        log.warn("filter: latency is %f", time.time() - float(elements[0][EVENT_TIME]))
         return elements[elements[:, EVENT_TYPE] == b'view']
 
 
@@ -129,8 +129,8 @@ class Project(stream_push_tasks.ProcessingStream):
         self.index = 0
 
     def process_elements(self, elements):
-        log.info("project: %d at %f", self.pid, time.time())
-        log.info("project: latency is %f", time.time() - float(elements[0][EVENT_TIME]))
+        log.warn("project: %d at %f", self.pid, time.time())
+        log.warn("project: latency is %f", time.time() - float(elements[0][EVENT_TIME]))
         emit = False
         for element in elements:
             event_time = float(element[EVENT_TIME])
@@ -148,7 +148,7 @@ class Project(stream_push_tasks.ProcessingStream):
             elements = list(self.windows.items())
             self.windows.clear()
             self.earliest_time = None
-            log.info("project: emitting %d at %f", len(elements), time.time())
+            log.warn("project: emitting %d at %f", len(elements), time.time())
             return elements
         else:
             return []
@@ -164,7 +164,7 @@ class GroupBy(stream_push_tasks.ProcessingStream):
 
     def process_elements(self, batches):
         for elements in batches:
-            log.info("groupby: %d at %f", self.pid, time.time())
+            log.warn("groupby: %d at %f", self.pid, time.time())
             for window, count in elements:
                 self.windows[window[0]][window[1]] += count
                 new_latency_ms = (time.time() - window[1] - WINDOW_SIZE_SEC) * 1000
@@ -180,7 +180,7 @@ class GroupBy(stream_push_tasks.ProcessingStream):
 
 @ray.remote
 def parse_json(elements, start, end):
-    log.info("json: %d at %f", os.getpid(), time.time())
+    log.warn("json: %d at %f", os.getpid(), time.time())
     # This could probably be made faster by writing the following in C++.
     # [{'user_id': elements[i][12:48].tobytes().decode('ascii'),
     #   'page_id': elements[i][61:97].tobytes().decode('ascii'),
@@ -189,19 +189,20 @@ def parse_json(elements, start, end):
     #   'event_type': elements[i][180:190].tobytes().decode('ascii'),
     #   'event_time': float(elements[i][204:220].tobytes().decode('ascii')),
     #   'ip_address': '1.2.3.4'} for i in range(elements.shape[0])]
-    elements = [ujson.loads(x.tobytes().decode('ascii')) for x in elements]
-    log.info("json: latency is %f", time.time() - float(elements[0][FIELDS[EVENT_TIME]]))
+    elements = [ujson.loads(x.tobytes().decode('ascii')) for x in elements[start:end]]
+    log.warn("json: latency is %f", time.time() - float(elements[0][FIELDS[EVENT_TIME]]))
     return np.array([[element[field].encode('ascii') for field in FIELDS] for element in elements])
 
 @ray.remote
 def filter_json(*batches):
-    log.info("filter: %d at %f", os.getpid(), time.time())
-    log.info("filter: latency is %f", time.time() - float(batches[0][0][EVENT_TIME]))
+    log.warn("filter: %d at %f", os.getpid(), time.time())
+    log.warn("filter: latency is %f", time.time() - float(batches[0][0][EVENT_TIME]))
     return np.concatenate([elements[elements[:, EVENT_TYPE] == b'view'] for elements in batches])
 
+@ray.remote
 def project_json(ad_to_campaign_map, num_reducers, *batches):
-    log.info("project: %d at %f", os.getpid(), time.time())
-    log.info("project: latency is %f", time.time() - float(batches[0][0][EVENT_TIME]))
+    log.warn("project: %d at %f", os.getpid(), time.time())
+    log.warn("project: latency is %f", time.time() - float(batches[0][0][EVENT_TIME]))
     window_partitions = [Counter() for _ in range(num_reducers)]
 
     for batch in batches:
@@ -211,16 +212,17 @@ def project_json(ad_to_campaign_map, num_reducers, *batches):
                   WINDOW_SIZE_SEC)
             key = ad_to_campaign_map[element[AD_ID]]
             partition = sum(key) % num_reducers
-            window_partitions[partition][key] += 1
-    return tuple(list(windows.items()) for windows in window_partitions)
+            window_partitions[partition][(key, window)] += 1
+    return [list(windows.items()) for windows in window_partitions]
 
 
 class EventGenerator(stream_push_tasks.SourceStream):
-    def __init__(self, ad_to_campaign_map, time_slice_ms,
+    def __init__(self, node_resource, ad_to_campaign_map, time_slice_ms,
                  time_slice_num_events, num_parsers, num_filters,
                  num_projectors, *downstream_nodes):
         super().__init__(None, *downstream_nodes)
 
+        self.node_resource = node_resource
         self.ad_to_campaign_map_id = ray.put(ad_to_campaign_map)
         self.num_parsers = num_parsers
         self.num_filters = num_filters
@@ -287,7 +289,7 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 end = start + batch_size
                 if i < (len(elements) % self.num_parsers):
                     end += 1
-                parsed.append(parse_json.remote(x, start, end))
+                parsed.append(parse_json._submit(args=[x, start, end], resources={self.node_resource: 1}))
 
             filtered = []
             batch_size = self.num_parsers // self.num_filters
@@ -296,17 +298,17 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 end = start + batch_size
                 if i < (self.num_parsers % self.num_filters):
                     end += 1
-                filtered.append(filter_json.remote(*parsed[start:end]))
+                filtered.append(filter_json._submit(args=parsed[start:end], resources={self.node_resource: 1}))
 
             projected = []
             batch_size = self.num_filters // self.num_projectors
             start = 0
-            project_json_remote = ray.remote(num_return_vals=len(self.downstream_actors))(project_json)
             for i in range(self.num_projectors):
                 end = start + batch_size
                 if i < (self.num_filters % self.num_projectors):
                     end += 1
-                projected.append(project_json_remote.remote(self.ad_to_campaign_map_id, len(self.downstream_actors), *filtered[start:end]))
+                args = [self.ad_to_campaign_map_id, len(self.downstream_actors)] + filtered[start:end]
+                projected.append(project_json._submit(args=args, num_return_vals=len(self.downstream_actors), resources={self.node_resource: 1}))
 
             for i, reducer in enumerate(self.downstream_actors):
                 reducer_batch = [batch[i] for batch in projected]
@@ -317,14 +319,14 @@ class EventGenerator(stream_push_tasks.SourceStream):
     def generate(self):
         now = time.time()
 
-        log.info("generate: %d at %f", self.pid, time.time())
+        log.warn("generate: %d at %f", self.pid, time.time())
         event_timestamp, elements = self.generate_elements2()
         put_latency = self._push(elements)
 
         after = time.time()
         self.num_elements += len(elements)
         if self.num_elements > 10000:
-            log.info("Throughput: %f per second", self.num_elements / (after - self.throughput_at))
+            log.warn("Throughput: %f per second", self.num_elements / (after - self.throughput_at))
             self.throughput_at = after
             self.num_elements = 0
 
@@ -334,8 +336,8 @@ class EventGenerator(stream_push_tasks.SourceStream):
             time.sleep(-1 * latency)
         elif latency > 0.1:
             log.warning("Falling behind by %f seconds", latency)
-        log.info("%d finished at %f, put %f", self.pid, time.time(), put_latency)
-        log.info("generate: latency is %f", time.time() - float(event_timestamp))
+        log.warn("%d finished at %f, put %f", self.pid, time.time(), put_latency)
+        log.warn("generate: latency is %f", time.time() - float(event_timestamp))
 
         log.debug("latency: %s %f s put; %f s total",
                   self.__class__.__name__, put_latency, latency)
@@ -480,15 +482,14 @@ if __name__ == '__main__':
     # Generate the ad campaigns.
     ad_to_campaign_map = generate_ads()
 
-    actor_placement = {}
 
     # Construct the streams.
-    actor_placement = defaultdict(list)
     if args.test_throughput:
         reducers = [stream_push_tasks.init_actor(stream_push_tasks.get_node(i, len(node_resources)), node_resources, ThroughputLogger) for i in range(num_reducers)]
     else:
         reducers = [stream_push_tasks.init_actor(stream_push_tasks.get_node(i, len(node_resources)), node_resources, GroupBy) for i in range(num_reducers)]
 
+    print("reducers", reducers)
     # Create the event generator source.
     generator_args = [ad_to_campaign_map,
                       args.time_slice_ms, time_slice_num_events,
@@ -498,7 +499,8 @@ if __name__ == '__main__':
     generators = []
     for node_index in range(len(node_resources)):
         for _ in range(args.num_generators):
-            generators.append(init_actor(node_index, node_resources, EventGenerator, args=generator_args))
+            generators.append(stream_push_tasks.init_actor(node_index, node_resources, EventGenerator, args=[node_resources[node_index]] + generator_args))
+    print("generators", generators)
     ray.get([generator.ready.remote() for generator in generators])
 
     time.sleep(1)
@@ -527,7 +529,7 @@ if __name__ == '__main__':
                 total_latency += latency
                 num_windows += 1
         if num_windows > 0:
-            log.info("latency: %d, throughput: %d", total_latency / num_windows, throughput)
+            log.warn("latency: %d, throughput: %d", total_latency / num_windows, throughput)
     all_latencies.sort(key=lambda key: key[0])
     for window, latency in all_latencies:
         print(window, latency)
