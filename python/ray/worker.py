@@ -370,7 +370,9 @@ class Worker(object):
 
         # Serialize and put the object in the object store.
         try:
+            start = time.time()
             self.store_and_register(object_id, value)
+            print("put", object_id.hex(), "took", time.time() - start)
         except pyarrow.PlasmaObjectExists as e:
             # The object already exists in the object store, so there is no
             # need to add it again. TODO(rkn): We need to compare the hashes
