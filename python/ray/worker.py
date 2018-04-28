@@ -600,6 +600,8 @@ class Worker(object):
                 resources = function_properties.resources
             else:
                 resources = {} if resources is None else resources
+                num_cpus = 1 if num_cpus is None else num_cpus
+                num_gpus = 0 if num_gpus is None else num_gpus
                 if "CPU" in resources or "GPU" in resources:
                     raise ValueError("The resources dictionary must not "
                                      "contain the keys 'CPU' or 'GPU'")
