@@ -109,6 +109,9 @@ class SchedulingQueue {
   /// \param tasks The tasks to queue.
   void QueueBlockedTasks(const std::vector<Task> &tasks);
 
+  void QueueForwardingTasks(const std::vector<Task> &tasks);
+  std::vector<Task> RemoveForwardingTasks(std::unordered_set<TaskID, UniqueIDHasher> tasks);
+
  private:
   /// Tasks that are destined for actors that have not yet been created.
   std::list<Task> uncreated_actor_methods_;
@@ -124,6 +127,7 @@ class SchedulingQueue {
   /// Tasks that were dispatched to a worker but are blocked on a data
   /// dependency.
   std::list<Task> blocked_tasks_;
+  std::list<Task> forwarding_tasks_;
 };
 
 }  // namespace raylet

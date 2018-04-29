@@ -370,7 +370,9 @@ class Worker(object):
 
         # Serialize and put the object in the object store.
         try:
+            start = time.time()
             self.store_and_register(object_id, value)
+            print("put", object_id.hex(), "took", time.time() - start)
         except pyarrow.PlasmaObjectExists as e:
             # The object already exists in the object store, so there is no
             # need to add it again. TODO(rkn): We need to compare the hashes
@@ -600,6 +602,8 @@ class Worker(object):
                 resources = function_properties.resources
             else:
                 resources = {} if resources is None else resources
+                num_cpus = 1 if num_cpus is None else num_cpus
+                num_gpus = 0 if num_gpus is None else num_gpus
                 if "CPU" in resources or "GPU" in resources:
                     raise ValueError("The resources dictionary must not "
                                      "contain the keys 'CPU' or 'GPU'")
@@ -615,7 +619,7 @@ class Worker(object):
                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
                 actor_handle_id, actor_counter, is_actor_checkpoint_method,
                 execution_dependencies, resources, self.use_raylet)
-            print(self.actor_id.hex(), "submitted", task.task_id().hex(), "at", time.time())
+            #print(self.actor_id.hex(), "submitted", task.task_id().hex(), "at", time.time())
             # Increment the worker's task index to track how many tasks have
             # been submitted by the current task so far.
             self.task_index += 1
@@ -2404,6 +2408,8 @@ def flush_log(worker=global_worker):
     if not worker.use_raylet:
         worker.local_scheduler_client.log_event(event_log_key, event_log_value,
                                                 time.time())
+    else:
+        worker.redis_client.zadd(event_log_key, time.time(), event_log_value)
     worker.events = []
 
 

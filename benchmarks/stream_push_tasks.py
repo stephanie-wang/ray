@@ -38,7 +38,7 @@ class Stream(object):
                     end = start + batch_size
                     if i < (len(elements) % len(self.downstream_actors)):
                         end += 1
-                    downstream_actor.push.remote(x, start, end)
+                    downstream_actor.push.remote(start, end, x)
                     start = end
 
             else:
@@ -52,15 +52,15 @@ class Stream(object):
                     start = time.time()
                     x = ray.put(partition)
                     put_latency += (time.time() - start)
-                    self.downstream_actors[partition_index].push.remote(x, 0, len(partition))
+                    self.downstream_actors[partition_index].push.remote(0, len(partition), x)
         return put_latency
 
 
 class ProcessingStream(Stream):
-    def push(self, elements, start, end):
+    def push(self, *elements):
         now = time.time()
 
-        elements = self.process_elements(elements[start:end])
+        elements = self.process_elements(elements)
         put_latency = self._push(elements)
 
         latency = time.time() - now

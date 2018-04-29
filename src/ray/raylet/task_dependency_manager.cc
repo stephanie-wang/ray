@@ -80,6 +80,7 @@ void TaskDependencyManager::HandleObjectMissing(const ray::ObjectID &object_id) 
 
 bool TaskDependencyManager::SubscribeTask(const Task &task) {
   TaskID task_id = task.GetTaskSpecification().TaskId();
+  RAY_LOG(INFO) << "Task dependencies subscribed " << task_id;
   TaskEntry task_entry;
 
   // Add the task's arguments to the table of subscribed tasks.
@@ -177,10 +178,12 @@ void TaskDependencyManager::UnsubscribeTask(const TaskID &task_id,
       RAY_CHECK(return_entry->second.status == ObjectAvailability::kWaiting);
       return_entry->second.status = outputs_status;
     }
-    if (return_entry->second.dependent_tasks.empty()) {
-      local_objects_.erase(return_entry);
-    } else if (return_entry->second.status == ObjectAvailability::kRemote) {
-      object_remote_callback_(return_id, true);
+    if (return_entry->second.status == ObjectAvailability::kRemote) {
+      if (return_entry->second.dependent_tasks.empty()) {
+        local_objects_.erase(return_entry);
+      } else {
+        object_remote_callback_(return_id, true);
+      }
     }
   }
 }

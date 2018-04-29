@@ -106,6 +106,18 @@ void SchedulingQueue::QueueBlockedTasks(const std::vector<Task> &tasks) {
   queueTasks(blocked_tasks_, tasks);
 }
 
+void SchedulingQueue::QueueForwardingTasks(const std::vector<Task> &tasks) {
+  queueTasks(forwarding_tasks_, tasks);
+}
+
+std::vector<Task> SchedulingQueue::RemoveForwardingTasks(std::unordered_set<TaskID, UniqueIDHasher> task_ids) {
+  std::vector<Task> removed_tasks;
+  removeTasksFromQueue(forwarding_tasks_, task_ids, removed_tasks);
+  RAY_CHECK(task_ids.size() == 0);
+  return removed_tasks;
+}
+
+
 }  // namespace raylet
 
 }  // namespace ray

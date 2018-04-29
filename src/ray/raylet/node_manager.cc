@@ -317,7 +317,9 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
 void NodeManager::ClientRemoved(const ClientID &client_id) {
   RAY_LOG(INFO) << "Client marked dead " << client_id;
   cluster_resource_map_.erase(client_id);
-  remote_server_connections_.erase(client_id);
+  // TODO(swang): Don't erase the remote server connection since it might still
+  // have outstanding callbacks...
+  //remote_server_connections_.erase(client_id);
   auto inserted = dead_raylets_.insert(client_id);
   if (inserted.second) {
     for (auto it = actor_registry_.begin(); it != actor_registry_.end(); ) {
@@ -610,7 +612,8 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
   }
 
   // Listen for more messages.
-  client->ProcessMessages();
+  size_t available = client->Available();
+  client->ProcessMessages(/*sync=*/(available > 0));
 }
 
 void NodeManager::ProcessNewNodeManager(
@@ -713,7 +716,7 @@ void NodeManager::ScheduleTasks() {
 
   // Transition locally scheduled tasks to SCHEDULED and dispatch scheduled tasks.
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
-  local_queues_.QueueScheduledTasks(tasks, /*head=*/true);
+  local_queues_.QueueScheduledTasks(tasks, /*head=*/false);
   DispatchTasks();
 }
 
@@ -858,7 +861,8 @@ void NodeManager::QueueTask(const Task &task) {
       auto argument_lookup_callback = [this](gcs::AsyncGcsClient *client,
                                                  const ObjectID &id,
                                                  const std::vector<ObjectTableDataT> data) {
-        if (data.empty()) {
+        if (data.empty() && task_dependency_manager_.CheckObjectLocal(id) ==
+            TaskDependencyManager::ObjectAvailability::kRemote) {
           reconstruction_policy_.Listen(id);
           reconstruction_policy_.Reconstruct(id);
         }
@@ -880,6 +884,7 @@ void NodeManager::AssignTask(Task &task) {
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
     if (CheckDuplicateActorTask(actor_registry_, spec)) {
+      // TODO(swang): Remove these from the lineage cache.
       // Drop tasks that have already been executed.
       return;
     }
@@ -908,70 +913,66 @@ void NodeManager::AssignTask(Task &task) {
     << spec.ActorId() << " " << spec.ActorCounter() << " to worker " <<
     worker->Pid() << " at " << start.count();
 
+  // Resource accounting: acquire resources for the assigned task.
+  const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
+
+  auto task_resources = task.GetTaskSpecification().GetRequiredResources();
+  // TODO(swang): Hack to schedule tasks that required custom resources on
+  // first execution locally.
+  if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+    task_resources = GetCpuResources(task);
+  }
+  RAY_CHECK(
+      this->cluster_resource_map_[my_client_id].Acquire(task_resources));
+
+  // We successfully assigned the task to the worker.
+  worker->AssignTaskId(spec.TaskId());
+  // If the task was an actor task, then record this execution to guarantee
+  // consistency in the case of reconstruction.
+  if (spec.IsActorTask()) {
+    // Extend the frontier to include the executing task.
+    auto actor_entry = actor_registry_.find(spec.ActorId());
+    RAY_CHECK(actor_entry != actor_registry_.end());
+    // Update the task's execution dependencies to reflect the actual
+    // execution order, to support deterministic reconstruction.
+    // NOTE(swang): The update of an actor task's execution dependencies is
+    // performed asynchronously. This means that if this node manager dies,
+    // we may lose updates that are in flight to the task table. We only
+    // guarantee deterministic reconstruction ordering for tasks whose
+    // updates are reflected in the task table.
+    auto execution_dependency = actor_entry->second.GetExecutionDependency();
+    if (!execution_dependency.is_nil()) {
+      TaskExecutionSpecification &mutable_spec = task.GetTaskExecutionSpec();
+      mutable_spec.SetExecutionDependencies(
+          {actor_entry->second.GetExecutionDependency()});
+    }
+    actor_entry->second.ExtendFrontier(spec.ActorHandleId(), spec.ActorDummyObject());
+  }
+
+  // We started running the task, so the task is ready to write to GCS.
+  lineage_cache_.AddReadyTask(task);
+  // Mark the task as running.
+  local_queues_.QueueRunningTasks(std::vector<Task>({task}));
+  // Tell the task dependency manager that we no longer need this task's
+  // object dependencies. The task dependency manager assumes that the task's
+  // return values are pending creation.
+  task_dependency_manager_.UnsubscribeExecutingTask(spec.TaskId());
+
+  RAY_LOG(DEBUG) << "Assigning task to worker with pid " << worker->Pid();
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
                                               fbb.CreateVector(std::vector<int>()));
   fbb.Finish(message);
-  auto status = worker->Connection()->WriteMessage(protocol::MessageType_ExecuteTask,
-                                                   fbb.GetSize(), fbb.GetBufferPointer());
-  if (status.ok()) {
-    // Resource accounting: acquire resources for the assigned task.
-    const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
-
-    auto task_resources = task.GetTaskSpecification().GetRequiredResources();
-    // TODO(swang): Hack to schedule tasks that required custom resources on
-    // first execution locally.
-    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
-      task_resources = GetCpuResources(task);
+  worker->Connection()->WriteMessageAsync(protocol::MessageType_ExecuteTask,
+                                          fbb.GetSize(), fbb.GetBufferPointer(),
+                                          [this, worker](ray::Status status) {
+    if (!status.ok()) {
+      RAY_LOG(FATAL) << "Failed to send task to worker " << worker->Pid();
+      // We failed to send the task to the worker, so disconnect the worker.
+      ProcessClientMessage(worker->Connection(), protocol::MessageType_DisconnectClient,
+                           NULL);
     }
-    RAY_CHECK(
-        this->cluster_resource_map_[my_client_id].Acquire(task_resources));
-
-    // We successfully assigned the task to the worker.
-    worker->AssignTaskId(spec.TaskId());
-    // If the task was an actor task, then record this execution to guarantee
-    // consistency in the case of reconstruction.
-    if (spec.IsActorTask()) {
-      // Extend the frontier to include the executing task.
-      auto actor_entry = actor_registry_.find(spec.ActorId());
-      RAY_CHECK(actor_entry != actor_registry_.end());
-      // Update the task's execution dependencies to reflect the actual
-      // execution order, to support deterministic reconstruction.
-      // NOTE(swang): The update of an actor task's execution dependencies is
-      // performed asynchronously. This means that if this node manager dies,
-      // we may lose updates that are in flight to the task table. We only
-      // guarantee deterministic reconstruction ordering for tasks whose
-      // updates are reflected in the task table.
-      auto execution_dependency = actor_entry->second.GetExecutionDependency();
-      if (!execution_dependency.is_nil()) {
-        TaskExecutionSpecification &mutable_spec = task.GetTaskExecutionSpec();
-        mutable_spec.SetExecutionDependencies(
-            {actor_entry->second.GetExecutionDependency()});
-      }
-      actor_entry->second.ExtendFrontier(spec.ActorHandleId(), spec.ActorDummyObject());
-    }
-    // We started running the task, so the task is ready to write to GCS.
-    lineage_cache_.AddReadyTask(task);
-    // Mark the task as running.
-    local_queues_.QueueRunningTasks(std::vector<Task>({task}));
-    // Tell the task dependency manager that we no longer need this task's
-    // object dependencies. The task dependency manager assumes that the task's
-    // return values are pending creation.
-    task_dependency_manager_.UnsubscribeExecutingTask(spec.TaskId());
-  } else {
-    RAY_LOG(WARNING) << "Failed to send task to worker, disconnecting client";
-    // We failed to send the task to the worker, so disconnect the worker.
-    ProcessClientMessage(worker->Connection(), protocol::MessageType_DisconnectClient,
-                         NULL);
-    // Queue this task for future assignment. The task will be assigned to a
-    // worker once one becomes available.
-    local_queues_.QueueScheduledTasks(std::vector<Task>({task}));
-  }
-  // std::chrono::microseconds start =
-  // std::chrono::duration_cast<std::chrono::microseconds>(
-  //    std::chrono::system_clock::now().time_since_epoch()
-  //);
-  // RAY_LOG(INFO) << "dispatched task at " << start.count() / 1000;
+  });
 }
 
 void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
@@ -1106,55 +1107,58 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   }
 
   auto &server_conn = remote_server_connections_.at(node_id);
-  auto status = server_conn.WriteMessage(protocol::MessageType_ForwardTaskRequest,
-                                         fbb.GetSize(), fbb.GetBufferPointer());
-  if (status.ok()) {
-    // If we were able to forward the task, remove the forwarded task from the
-    // lineage cache since the receiving node is now responsible for writing
-    // the task to the GCS.
-    lineage_cache_.RemoveWaitingTask(task_id);
+  local_queues_.QueueForwardingTasks({lineage_cache_entry_task});
+  server_conn.WriteMessageAsync(protocol::MessageType_ForwardTaskRequest,
+                                         fbb.GetSize(), fbb.GetBufferPointer(),
+                                         [this, task_id, node_id](ray::Status status) {
+    auto tasks = local_queues_.RemoveForwardingTasks({task_id});
+    auto task = tasks.front();
+    const auto &spec = task.GetTaskSpecification();
+    auto task_id = spec.TaskId();
+    if (status.ok()) {
+      // If we were able to forward the task, remove the forwarded task from the
+      // lineage cache since the receiving node is now responsible for writing
+      // the task to the GCS.
+      lineage_cache_.RemoveWaitingTask(task_id);
 
-    // Preemptively push any local arguments to the receiving node. For now, we
-    // only do this with actor tasks, since actor tasks must be executed by a
-    // specific process and therefore have affinity to the receiving node.
-    if (spec.IsActorTask()) {
-      // Iterate through the object's arguments. NOTE(swang): We do not include
-      // the execution dependencies here since those cannot be transferred
-      // between nodes.
-      for (int i = 0; i < spec.NumArgs(); ++i) {
-        int count = spec.ArgIdCount(i);
-        for (int j = 0; j < count; j++) {
-          ObjectID argument_id = spec.ArgId(i, j);
-          // If the argument is local, then push it to the receiving node.
-          if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
-              TaskDependencyManager::ObjectAvailability::kLocal) {
-            RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
+      // Preemptively push any local arguments to the receiving node. For now, we
+      // only do this with actor tasks, since actor tasks must be executed by a
+      // specific process and therefore have affinity to the receiving node.
+      if (spec.IsActorTask()) {
+        // Iterate through the object's arguments. NOTE(swang): We do not include
+        // the execution dependencies here since those cannot be transferred
+        // between nodes.
+        for (int i = 0; i < spec.NumArgs(); ++i) {
+          int count = spec.ArgIdCount(i);
+          for (int j = 0; j < count; j++) {
+            ObjectID argument_id = spec.ArgId(i, j);
+            // If the argument is local, then push it to the receiving node.
+            if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
+                TaskDependencyManager::ObjectAvailability::kLocal) {
+              RAY_CHECK_OK(object_manager_.Push(argument_id, node_id));
+            }
           }
         }
       }
+    } else {
+      // TODO(swang): Set a timer before considering this client removed.
+      ClientRemoved(node_id);
+      RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
+      //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
+      //// lost.
+      //RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
+      //               << " to node " << node_id;
+
+      // TODO(swang): Subscribe to the task in the task dependency manager again.
+
+      // This task is considered failed. Increment its number of reconstructions
+      // so that its arguments will be reconstructed once the task enters the
+      // waiting queue.
+      task.GetTaskExecutionSpec().IncrementNumReconstructions();
+      QueueUncreatedActorMethod(task);
     }
-  } else {
-    ClientRemoved(node_id);
-    RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
-    //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
-    //// lost.
-    //RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
-    //               << " to node " << node_id;
-
-    // TODO(swang): Subscribe to the task in the task dependency manager again.
-
-    // This task is considered failed. Increment its number of reconstructions
-    // so that its arguments will be reconstructed once the task enters the
-    // waiting queue.
-    lineage_cache_entry_task.GetTaskExecutionSpec().IncrementNumReconstructions();
-    QueueUncreatedActorMethod(task);
-  }
-
-  std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(
-      std::chrono::system_clock::now().time_since_epoch());
-  // RAY_LOG(INFO) << "sent forward task at " << end.count() / 1000;
-
-  return status;
+  });
+  return ray::Status::OK();
 }
 
 }  // namespace raylet

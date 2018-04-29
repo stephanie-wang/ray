@@ -272,7 +272,8 @@ Status LineageCache::Flush() {
       // GCS. Skip this task for now.
       if (parent && parent->GetStatus() != GcsStatus_COMMITTED) {
         // Children should not become ready to flush before their parents.
-        RAY_CHECK(parent->GetStatus() != GcsStatus_UNCOMMITTED_WAITING);
+        RAY_CHECK(parent->GetStatus() != GcsStatus_UNCOMMITTED_WAITING)
+          << parent_id << " status was " << parent->GetStatus();
         if (parent->GetStatus() == GcsStatus_UNCOMMITTED_REMOTE) {
           // Request notifications about the parent entry's commit in the GCS.
           // Once we receive a notification about the task's commit via
@@ -418,7 +419,8 @@ int64_t PopAncestorTasks(const UniqueID &task_id, Lineage &lineage) {
   popped++;
   RAY_LOG(DEBUG) << "task removed: " << task_id;
   auto status = entry->GetStatus();
-  RAY_CHECK(status == GcsStatus_UNCOMMITTED_REMOTE || status == GcsStatus_COMMITTED);
+  RAY_CHECK(status == GcsStatus_UNCOMMITTED_REMOTE || status == GcsStatus_COMMITTED)
+    << "status of task " << task_id << " was " << status;
   for (const auto &parent_id : entry->GetParentTaskIds()) {
     popped = popped + PopAncestorTasks(parent_id, lineage);
   }
