@@ -15,7 +15,7 @@ class TaskDependencyManagerTest : public ::testing::Test {
  public:
   TaskDependencyManagerTest()
       : task_dependency_manager_(
-            [this](const ObjectID &object_id) { ObjectRemote(object_id); },
+            [this](const ObjectID &object_id, bool request_transfer) { ObjectRemote(object_id); },
             [this](const ObjectID &object_id) {},
             [this](const TaskID &task_id) { TaskReady(task_id); },
             [this](const TaskID &task_id) { TaskWaiting(task_id); }) {}

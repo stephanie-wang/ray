@@ -5,8 +5,8 @@ namespace ray {
 namespace raylet {
 
 TaskDependencyManager::TaskDependencyManager(
-    std::function<void(const ObjectID)> object_remote_handler,
-    std::function<void(const ObjectID)> cancel_object_remote_handler,
+    std::function<void(const ObjectID&, bool)> object_remote_handler,
+    std::function<void(const ObjectID&)> cancel_object_remote_handler,
     std::function<void(const TaskID &)> task_ready_handler,
     std::function<void(const TaskID &)> task_waiting_handler)
     : object_remote_callback_(object_remote_handler),
@@ -21,6 +21,10 @@ TaskDependencyManager::ObjectAvailability TaskDependencyManager::CheckObjectLoca
     return ObjectAvailability::kRemote;
   }
   return entry->second.status;
+}
+
+void TaskDependencyManager::MarkObjectAvailability(const ObjectID &object_id, ObjectAvailability availability) {
+  local_objects_[object_id].status = availability;
 }
 
 std::unordered_set<TaskID, UniqueIDHasher> TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {
@@ -87,11 +91,10 @@ bool TaskDependencyManager::SubscribeTask(const Task &task) {
   for (const auto &argument_id : task_entry.arguments) {
     auto &argument_entry = local_objects_[argument_id];
     if (argument_entry.status == ObjectAvailability::kRemote) {
-      // Hack to prevent us from calling reconstruction on an execution
+      bool request_transfer = i < execution_dependency_index;
+      // Hack to prevent us from pulling dependencies for an execution
       // dependency.
-      if (i < execution_dependency_index) {
-        object_remote_callback_(argument_id);
-      }
+      object_remote_callback_(argument_id, request_transfer);
     } else if (argument_entry.status == ObjectAvailability::kLocal) {
       task_entry.num_missing_arguments--;
     }
@@ -177,7 +180,7 @@ void TaskDependencyManager::UnsubscribeTask(const TaskID &task_id,
     if (return_entry->second.dependent_tasks.empty()) {
       local_objects_.erase(return_entry);
     } else if (return_entry->second.status == ObjectAvailability::kRemote) {
-      object_remote_callback_(return_id);
+      object_remote_callback_(return_id, true);
     }
   }
 }

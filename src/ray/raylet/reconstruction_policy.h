@@ -90,6 +90,10 @@ class ReconstructionPolicy {
   /// \param object_id The object to cancel reconstruction for.
   void Cancel(const ObjectID &object_id);
 
+  /// Attempt to reconstruct an object by appending an entry for the task that
+  /// created it to the reconstruction log.
+  void Reconstruct(const ObjectID &object_id);
+
  private:
   /// Information for an object that we are listening for.
   struct ObjectEntry {
@@ -111,9 +115,6 @@ class ReconstructionPolicy {
   /// reconstruction log.
   void HandleTaskLogAppend(const TaskID &task_id,
                            std::shared_ptr<TaskReconstructionDataT> data, bool appended);
-  /// Attempt to reconstruct an object by appending an entry for the task that
-  /// created it to the reconstruction log.
-  void Reconstruct(const ObjectID &object_id);
 
   /// The reconstruction timer.
   uint64_t reconstruction_timeout_ms_;

@@ -54,6 +54,14 @@ void TaskExecutionSpecification::SetLastTimestamp(int64_t new_timestamp) {
   execution_spec_.last_timestamp = new_timestamp;
 }
 
+int TaskExecutionSpecification::NumReconstructions() const {
+  return execution_spec_.num_reconstructions;
+}
+
+void TaskExecutionSpecification::IncrementNumReconstructions() {
+  execution_spec_.num_reconstructions++;
+}
+
 }  // namespace raylet
 
 }  // namespace ray

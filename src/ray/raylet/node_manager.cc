@@ -97,8 +97,10 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
             });
           }),
       task_dependency_manager_(
-          [this](const ObjectID &object_id) {
-            RAY_CHECK_OK(object_manager_.Pull(object_id));
+          [this](const ObjectID &object_id, bool request_transfer) {
+            if (request_transfer) {
+              RAY_CHECK_OK(object_manager_.Pull(object_id));
+            }
             // Ask the reconstruction policy to reconstruct this object if necessary.
             // TODO(swang): Should we wait for the Lookup to fail before trying to
             // reconstruct the object?
@@ -181,6 +183,13 @@ ray::Status NodeManager::RegisterGcs() {
     ClientAdded(data);
   };
   gcs_client_->client_table().RegisterClientAddedCallback(node_manager_client_added);
+
+  // Register a callback on the client table for new clients.
+  auto node_manager_client_removed = [this](gcs::AsyncGcsClient *client, const ClientID &client_id,
+                                          const ClientTableDataT &data) {
+    ClientRemoved(client_id);
+  };
+  gcs_client_->client_table().RegisterClientRemovedCallback(node_manager_client_removed);
 
   // Subscribe to node manager heartbeats.
   const auto heartbeat_added = [this](gcs::AsyncGcsClient *client, const ClientID &id,
@@ -305,6 +314,26 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   remote_server_connections_.emplace(client_id, std::move(server_conn));
 }
 
+void NodeManager::ClientRemoved(const ClientID &client_id) {
+  RAY_LOG(INFO) << "Client marked dead " << client_id;
+  cluster_resource_map_.erase(client_id);
+  remote_server_connections_.erase(client_id);
+  auto inserted = dead_raylets_.insert(client_id);
+  if (inserted.second) {
+    for (auto it = actor_registry_.begin(); it != actor_registry_.end(); ) {
+      if (it->second.GetNodeManagerId() == client_id) {
+        const auto creation_dependency = it->second.GetActorCreationDependency();
+        RAY_LOG(INFO) << "Actor " << it->first << " failed, reconstructing " << creation_dependency;
+        reconstruction_policy_.Listen(creation_dependency);
+        reconstruction_policy_.Reconstruct(creation_dependency);
+        it = actor_registry_.erase(it);
+      } else {
+        it++;
+      }
+    }
+  }
+}
+
 void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &client_id,
                                  const HeartbeatTableDataT &heartbeat_data) {
   RAY_LOG(DEBUG) << "[HeartbeatAdded]: received heartbeat from client id " << client_id;
@@ -343,6 +372,9 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
   // Register the new actor.
   ActorRegistration actor_registration(data.back());
   ClientID node_manager_id = actor_registration.GetNodeManagerId();
+
+  RAY_CHECK(dead_raylets_.count(node_manager_id) == 0);
+
   // Extend the frontier to include the actor creation task. NOTE(swang): The
   // creator of the actor is always assigned nil as the actor handle ID.
   actor_registration.ExtendFrontier(ActorHandleID::nil(),
@@ -360,11 +392,19 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     return;
   }
 
+  reconstruction_policy_.Cancel(inserted.first->second.GetActorCreationDependency());
+
   // Dequeue any methods that were submitted before the actor's location was
   // known.
   const auto &methods = local_queues_.GetUncreatedActorMethods();
   std::unordered_set<TaskID, UniqueIDHasher> created_actor_method_ids;
   for (const auto &method : methods) {
+    for (int i = 0; i < method.GetTaskSpecification().NumReturns(); i++) {
+      auto return_id = method.GetTaskSpecification().ReturnId(i);
+      if (task_dependency_manager_.CheckObjectLocal(return_id) == TaskDependencyManager::ObjectAvailability::kWaiting) {
+        task_dependency_manager_.MarkObjectAvailability(return_id, TaskDependencyManager::ObjectAvailability::kRemote);
+      }
+    }
     if (method.GetTaskSpecification().ActorId() == actor_id) {
       created_actor_method_ids.insert(method.GetTaskSpecification().TaskId());
     }
@@ -399,7 +439,12 @@ void NodeManager::DispatchTasks() {
   for (const auto &task : scheduled_tasks) {
     const auto &local_resources =
         cluster_resource_map_[my_client_id].GetAvailableResources();
-    const auto &task_resources = task.GetTaskSpecification().GetRequiredResources();
+    auto task_resources = task.GetTaskSpecification().GetRequiredResources();
+    // TODO(swang): Hack to schedule tasks that required custom resources on
+    // first execution locally.
+    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+      task_resources = GetCpuResources(task);
+    }
     if (!task_resources.IsSubset(local_resources)) {
       // Not enough local resources for this task right now, skip this task.
       continue;
@@ -645,10 +690,14 @@ void NodeManager::ScheduleTasks() {
       RAY_CHECK(1 == tasks.size());
       Task &task = tasks.front();
       // TODO(swang): Handle forward task failure.
-      RAY_CHECK_OK(ForwardTask(task, client_id));
-      // Tell the task dependency manager that we no longer need this task's
-      // object dependencies.
-      task_dependency_manager_.UnsubscribeForwardedTask(task.GetTaskSpecification().TaskId());
+      if (dead_raylets_.count(client_id) == 1) {
+        local_task_ids.insert(task_id);
+      } else {
+        RAY_CHECK_OK(ForwardTask(task, client_id));
+        // Tell the task dependency manager that we no longer need this task's
+        // object dependencies.
+        task_dependency_manager_.UnsubscribeForwardedTask(task.GetTaskSpecification().TaskId());
+      }
     }
   }
 
@@ -729,7 +778,8 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
         // The actor is remote. Forward the task to the node manager that owns
         // the actor.
         // TODO(swang): Handle forward task failure.
-        RAY_CHECK_OK(ForwardTask(task, node_manager_id));
+        RAY_CHECK(dead_raylets_.count(node_manager_id) == 0);
+        ForwardTask(task, node_manager_id);
       }
     } else {
       // We do not have a registered location for the object, so either the
@@ -738,26 +788,45 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
       // was already created. Look up the actor's registered location in case
       // we missed the creation notification.
       // NOTE(swang): This codepath needs to be tested in a cluster setting.
-      auto lookup_callback = [this](gcs::AsyncGcsClient *client, const ActorID &actor_id,
+      auto actor_creation_id = spec.ActorCreationDummyObjectId();
+      auto lookup_callback = [this, actor_creation_id](gcs::AsyncGcsClient *client, const ActorID &actor_id,
                                     const std::vector<ActorTableDataT> &data) {
         if (!data.empty()) {
+          RAY_CHECK(data.size() == 1);
           // The actor has been created.
-          HandleActorCreation(actor_id, data);
+          ActorRegistration actor_registration(data.back());
+          ClientID node_manager_id = actor_registration.GetNodeManagerId();
+          if (dead_raylets_.count(node_manager_id) == 1) {
+            reconstruction_policy_.Listen(actor_creation_id);
+          } else {
+            HandleActorCreation(actor_id, data);
+          }
         } else {
           // The actor has not yet been created.
           // TODO(swang): Set a timer for reconstructing the actor creation
           // task.
+          reconstruction_policy_.Listen(actor_creation_id);
         }
       };
       RAY_CHECK_OK(gcs_client_->actor_table().Lookup(JobID::nil(), spec.ActorId(),
                                                      lookup_callback));
       // Keep the task queued until we discover the actor's location.
-      local_queues_.QueueUncreatedActorMethods({task});
+      QueueUncreatedActorMethod(task);
     }
   } else {
     // This is a non-actor task. Queue the task for local execution.
     QueueTask(task);
   }
+}
+
+void NodeManager::QueueUncreatedActorMethod(const Task &task) {
+  for (int i = 0; i < task.GetTaskSpecification().NumReturns(); i++) {
+    auto return_id = task.GetTaskSpecification().ReturnId(i);
+    if (task_dependency_manager_.CheckObjectLocal(return_id) == TaskDependencyManager::ObjectAvailability::kRemote) {
+      task_dependency_manager_.MarkObjectAvailability(return_id, TaskDependencyManager::ObjectAvailability::kWaiting);
+    }
+  }
+  local_queues_.QueueUncreatedActorMethods({task});
 }
 
 void NodeManager::QueueTask(const Task &task) {
@@ -770,6 +839,25 @@ void NodeManager::QueueTask(const Task &task) {
     ScheduleTasks();
   } else {
     local_queues_.QueueWaitingTasks({task});
+    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+      RAY_CHECK(task.GetTaskSpecification().IsActorTask() || task.GetTaskSpecification().IsActorCreationTask());
+      const auto argument_ids = task.GetDependencies();
+      auto argument_lookup_callback = [this](gcs::AsyncGcsClient *client,
+                                                 const ObjectID &id,
+                                                 const std::vector<ObjectTableDataT> data) {
+        if (data.empty()) {
+          reconstruction_policy_.Listen(id);
+          reconstruction_policy_.Reconstruct(id);
+        }
+      };
+      for (const auto &argument_id : argument_ids) {
+        if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
+            TaskDependencyManager::ObjectAvailability::kRemote) {
+          RAY_CHECK_OK(gcs_client_->object_table().Lookup(
+              JobID::nil(), argument_id, argument_lookup_callback));
+        }
+      }
+    }
   }
 }
 
@@ -814,8 +902,15 @@ void NodeManager::AssignTask(Task &task) {
   if (status.ok()) {
     // Resource accounting: acquire resources for the assigned task.
     const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
+
+    auto task_resources = task.GetTaskSpecification().GetRequiredResources();
+    // TODO(swang): Hack to schedule tasks that required custom resources on
+    // first execution locally.
+    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+      task_resources = GetCpuResources(task);
+    }
     RAY_CHECK(
-        this->cluster_resource_map_[my_client_id].Acquire(spec.GetRequiredResources()));
+        this->cluster_resource_map_[my_client_id].Acquire(task_resources));
 
     // We successfully assigned the task to the worker.
     worker->AssignTaskId(spec.TaskId());
@@ -928,23 +1023,31 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
   // TODO(swang): Test this codepath for reconstruction.
   auto lookup_callback = [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
                                 const protocol::TaskT &task_data) {
-    const Task task(task_data);
-    // Skip the write to the GCS.
-    _SubmitTask(task, Lineage());
+    Task task(task_data);
+    _ResubmitTask(task, Lineage());
   };
   auto failure_callback = [this](ray::gcs::AsyncGcsClient *client,
                                  const TaskID &task_id) {
     Lineage lineage = lineage_cache_.GetUncommittedLineage(task_id);
-    auto task_entry = lineage.GetEntry(task_id);
+    auto task_entry = lineage.GetEntryMutable(task_id);
     RAY_CHECK(task_entry) << "Entry not found in GCS or lineage cache!";
+    Task &task = task_entry->TaskDataMutable();
     // Skip the write to the GCS.
-    _SubmitTask(task_entry->TaskData(), lineage);
+    _ResubmitTask(task, lineage);
   };
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id, lookup_callback, failure_callback));
 }
 
+void NodeManager::_ResubmitTask(Task &task, const Lineage &lineage) {
+  RAY_CHECK(task.GetTaskSpecification().IsActorTask() || task.GetTaskSpecification().IsActorCreationTask());
+  task.GetTaskExecutionSpec().IncrementNumReconstructions();
+  // Skip the write to the GCS.
+  _SubmitTask(task, lineage);
+}
+
 ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
+  RAY_CHECK(dead_raylets_.count(node_id) == 0);
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
   std::chrono::milliseconds start =
@@ -990,11 +1093,11 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   auto &server_conn = remote_server_connections_.at(node_id);
   auto status = server_conn.WriteMessage(protocol::MessageType_ForwardTaskRequest,
                                          fbb.GetSize(), fbb.GetBufferPointer());
+  // If we were able to forward the task, remove the forwarded task from the
+  // lineage cache since the receiving node is now responsible for writing
+  // the task to the GCS.
+  lineage_cache_.RemoveWaitingTask(task_id);
   if (status.ok()) {
-    // If we were able to forward the task, remove the forwarded task from the
-    // lineage cache since the receiving node is now responsible for writing
-    // the task to the GCS.
-    lineage_cache_.RemoveWaitingTask(task_id);
 
     // Preemptively push any local arguments to the receiving node. For now, we
     // only do this with actor tasks, since actor tasks must be executed by a
@@ -1016,6 +1119,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
       }
     }
   } else {
+    ClientRemoved(node_id);
     RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
     //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
     //// lost.
@@ -1024,7 +1128,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
     // TODO(swang): Subscribe to the task in the task dependency manager again.
 
-    reconstruction_policy_.Listen(spec.ActorCreationDummyObjectId());
+    QueueUncreatedActorMethod(task);
   }
 
   std::chrono::microseconds end = std::chrono::duration_cast<std::chrono::microseconds>(

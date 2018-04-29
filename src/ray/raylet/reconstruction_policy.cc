@@ -197,7 +197,10 @@ void ReconstructionPolicy::Reconstruct(const ObjectID &object_id) {
   );
   RAY_LOG(INFO) << "Reconstructing object " << object_id << " at " << start.count();
 
+  object_ticks_.erase(object_id);
   auto object_entry = listening_objects_.find(object_id);
+  RAY_CHECK(object_entry != listening_objects_.end());
+
   TaskID task_id = ComputeTaskId(object_id);
   reconstructing_tasks_[task_id].push_back(object_id);
   // If we weren't already trying to re-execute the task that created this

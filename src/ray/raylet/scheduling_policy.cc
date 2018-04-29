@@ -40,6 +40,10 @@ std::unordered_map<TaskID, ClientID, UniqueIDHasher> SchedulingPolicy::Schedule(
       decision[task_id] = local_client_id;
       continue;
     }
+    if (t.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+      decision[task_id] = local_client_id;
+      continue;
+    }
     // Actor tasks were forwarded to us because we broadcasted the actor's
     // location as this node manager.
     if (t.GetTaskSpecification().IsActorTask()) {

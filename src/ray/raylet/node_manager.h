@@ -70,6 +70,7 @@ class NodeManager {
                            const std::vector<ActorTableDataT> &data);
   // Queue a task for local execution.
   void QueueTask(const Task &task);
+  void QueueUncreatedActorMethod(const Task &task);
   /// Submit a task to this node.
   void SubmitTask(const Task &task, const Lineage &uncommitted_lineage);
   /// Assign a task. The task is assumed to not be queued in local_queues_.
@@ -84,6 +85,7 @@ class NodeManager {
   void HandleReadyTaskWaiting(const TaskID &task_id);
   /// Resubmit a task whose return value needs to be reconstructed.
   void ResubmitTask(const TaskID &task_id);
+  void _ResubmitTask(Task &task, const Lineage &lineage);
   /// Forward a task to another node to execute. The task is assumed to not be
   /// queued in local_queues_.
   ray::Status ForwardTask(const Task &task, const ClientID &node_id);
@@ -92,6 +94,7 @@ class NodeManager {
   /// Handler for a notification about a new client from the GCS.
   void ClientAdded(gcs::AsyncGcsClient *client, const UniqueID &id,
                    const ClientTableDataT &data);
+  void ClientRemoved(const ClientID &client_id);
   /// Handler for a heartbeat notification from the GCS.
   void HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &id,
                       const HeartbeatTableDataT &data);
@@ -131,6 +134,7 @@ class NodeManager {
   std::vector<ClientID> remote_clients_;
   std::unordered_map<ClientID, TcpServerConnection, UniqueIDHasher>
       remote_server_connections_;
+  std::unordered_set<ClientID, UniqueIDHasher> dead_raylets_;
   std::unordered_map<ActorID, ActorRegistration, UniqueIDHasher> actor_registry_;
 
   // NOTE(swang): For benchmark purposes only. -1 means use lineage stash. >= 0

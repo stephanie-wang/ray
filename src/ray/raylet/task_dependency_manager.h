@@ -52,8 +52,8 @@ class TaskDependencyManager {
   /// now ready to run because all dependencies are available locally.
   /// \param task_waiting_handler The handler to call for ready tasks that must
   /// now wait to execute, e.g., due to an evicted dependency.
-  TaskDependencyManager(std::function<void(const ObjectID)> object_remote_handler,
-                        std::function<void(const ObjectID)> object_pending_handler,
+  TaskDependencyManager(std::function<void(const ObjectID&, bool)> object_remote_handler,
+                        std::function<void(const ObjectID&)> object_pending_handler,
                         std::function<void(const TaskID &)> task_ready_handler,
                         std::function<void(const TaskID &)> task_waiting_handler);
 
@@ -62,6 +62,8 @@ class TaskDependencyManager {
   /// \param object_id The object to check for.
   /// \return Whether the object is local.
   ObjectAvailability CheckObjectLocal(const ObjectID &object_id) const;
+
+  void MarkObjectAvailability(const ObjectID &object_id, ObjectAvailability availability);
 
   /// Subscribe to a task that is waiting or ready to execute. The registered
   /// remote object handler will be called for any missing dependencies that
@@ -127,7 +129,7 @@ class TaskDependencyManager {
   void UnsubscribeTask(const TaskID &task_id, ObjectAvailability outputs_status);
   /// The callback to call if an object is required by a queued task, not
   /// available locally, and will not be created by a queued task.
-  std::function<void(const ObjectID &)> object_remote_callback_;
+  std::function<void(const ObjectID &, bool)> object_remote_callback_;
   std::function<void(const ObjectID &)> cancel_object_remote_callback_;
   // The callback to call when a subscribed task becomes ready for execution.
   std::function<void(const TaskID &)> task_ready_callback_;
