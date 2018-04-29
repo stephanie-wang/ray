@@ -173,7 +173,7 @@ void MergeLineageHelper(const UniqueID &task_id, const Lineage &lineage_from,
   }
 }
 
-void LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage) {
+bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage) {
   auto task_id = task.GetTaskSpecification().TaskId();
   RAY_LOG(DEBUG) << "Adding waiting task " << task_id;
   // Merge the uncommitted lineage into the lineage cache.
@@ -191,8 +191,7 @@ void LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   // Add the submitted task to the lineage cache as UNCOMMITTED_WAITING. It
   // should be marked as UNCOMMITTED_READY once the task starts execution.
   LineageEntry task_entry(task, GcsStatus_UNCOMMITTED_WAITING);
-  RAY_CHECK(lineage_.SetEntry(std::move(task_entry)))
-      << "Task " << task_id << " status was " << lineage_.GetEntry(task_id)->GetStatus();
+  return lineage_.SetEntry(std::move(task_entry));
 }
 
 void LineageCache::AddReadyTask(const Task &task) {

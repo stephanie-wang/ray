@@ -175,7 +175,7 @@ class LineageCache {
   /// \param uncommitted_lineage The task's uncommitted lineage. These are the
   /// tasks that the given task is data-dependent on, but that have not
   /// been made durable in the GCS, as far the task's submitter knows.
-  void AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage);
+  bool AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage);
 
   /// Add a task that is ready for GCS writeback. This overwrites the task’s
   /// mutable fields in the execution specification.

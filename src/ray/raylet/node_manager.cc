@@ -39,7 +39,9 @@ bool CheckDuplicateActorTask(
   }
   RAY_CHECK(spec.ActorCounter() == expected_task_counter)
       << "Expected actor counter: " << expected_task_counter
-      << ", got: " << spec.ActorCounter();
+      << ", got: " << spec.ActorCounter()
+      << " for task " << spec.TaskId()
+      << " and actor " << spec.ActorId();
   return false;
 };
 
@@ -779,7 +781,12 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // Add the task and its uncommitted lineage to the lineage cache.
-  lineage_cache_.AddWaitingTask(task, uncommitted_lineage);
+  bool added = lineage_cache_.AddWaitingTask(task, uncommitted_lineage);
+  if (!added) {
+    RAY_LOG(WARNING) << "Dropping duplicate task " <<
+      task.GetTaskSpecification().TaskId();
+    return;
+  }
 
   if (spec.IsActorTask()) {
     // Check whether we know the location of the actor.
@@ -856,22 +863,25 @@ void NodeManager::QueueTask(const Task &task) {
   } else {
     local_queues_.QueueWaitingTasks({task});
     if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
-      RAY_CHECK(task.GetTaskSpecification().IsActorTask() || task.GetTaskSpecification().IsActorCreationTask());
-      const auto argument_ids = task.GetDependencies();
-      auto argument_lookup_callback = [this](gcs::AsyncGcsClient *client,
-                                                 const ObjectID &id,
-                                                 const std::vector<ObjectTableDataT> data) {
-        if (data.empty() && task_dependency_manager_.CheckObjectLocal(id) ==
-            TaskDependencyManager::ObjectAvailability::kRemote) {
-          reconstruction_policy_.Listen(id);
-          reconstruction_policy_.Reconstruct(id);
-        }
-      };
-      for (const auto &argument_id : argument_ids) {
-        if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
-            TaskDependencyManager::ObjectAvailability::kRemote) {
-          RAY_CHECK_OK(gcs_client_->object_table().Lookup(
-              JobID::nil(), argument_id, argument_lookup_callback));
+      RAY_CHECK(task.GetTaskExecutionSpecReadonly().NumReconstructions() == 1);
+      // TODO(swang): Hack to only reconstruct dependencies for actor tasks.
+      if (task.GetTaskSpecification().IsActorTask()) {
+        const auto argument_ids = task.GetDependencies();
+        auto argument_lookup_callback = [this](gcs::AsyncGcsClient *client,
+                                                   const ObjectID &id,
+                                                   const std::vector<ObjectTableDataT> data) {
+          if (data.empty() && task_dependency_manager_.CheckObjectLocal(id) ==
+              TaskDependencyManager::ObjectAvailability::kRemote) {
+            reconstruction_policy_.Listen(id);
+            reconstruction_policy_.Reconstruct(id);
+          }
+        };
+        for (const auto &argument_id : argument_ids) {
+          if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
+              TaskDependencyManager::ObjectAvailability::kRemote) {
+            RAY_CHECK_OK(gcs_client_->object_table().Lookup(
+                JobID::nil(), argument_id, argument_lookup_callback));
+          }
         }
       }
     }
@@ -1009,8 +1019,12 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
     // lifetime of the actor, so we do not release any resources here.
   } else {
     // Release task's resources.
+    auto task_resources = task.GetTaskSpecification().GetRequiredResources();
+    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+      task_resources = GetCpuResources(task);
+    }
     RAY_CHECK(this->cluster_resource_map_[gcs_client_->client_table().GetLocalClientId()]
-                  .Release(task.GetTaskSpecification().GetRequiredResources()));
+                  .Release(task_resources));
   }
 
   // If the finished task was an actor task, mark the returned dummy object as
