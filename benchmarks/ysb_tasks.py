@@ -320,11 +320,11 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 start = end
 
             print("Reduce tasks")
-            if time.time() % WINDOW_SIZE_SEC > 0.8:
-                for i, reducer in enumerate(self.downstream_actors):
-                    reducer_batch = [batch[i] for batch in self.projected]
-                    reducer.push.remote(*reducer_batch)
-                self.projected = []
+            #if time.time() % WINDOW_SIZE_SEC > 0.8:
+            for i, reducer in enumerate(self.downstream_actors):
+                reducer_batch = [batch[i] for batch in self.projected]
+                reducer.push.remote(*reducer_batch)
+            self.projected = []
 
         return put_latency
 
@@ -428,7 +428,6 @@ if __name__ == '__main__':
     parser.add_argument('--time-slice-ms', type=int, default=100)
     parser.add_argument('--target-throughput', type=int, default=1e5)
 
-    parser.add_argument('--use-raylet', action='store_true')
     parser.add_argument('--num-nodes', type=int, required=True)
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--no-hugepages', action='store_true')
@@ -461,7 +460,7 @@ if __name__ == '__main__':
         ray.worker._init(
                 start_ray_local=True,
                 redirect_output=True,
-                use_raylet=args.use_raylet,
+                use_raylet=True,
                 num_local_schedulers=args.num_nodes,
                 # Start each node with enough resources for all of the actors.
                 resources=[

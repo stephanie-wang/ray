@@ -27,6 +27,8 @@ if __name__ == '__main__':
     parser.add_argument('--num-parsers', type=int, required=True)
     parser.add_argument('--num-filters', type=int, required=True)
     parser.add_argument('--num-projectors', type=int, required=True)
+    parser.add_argument('--time-slice-ms', type=int, default=100)
+    parser.add_argument('--target-throughput', type=int, default=62500)
     args = parser.parse_args()
 
     ray.worker._init(
@@ -37,13 +39,25 @@ if __name__ == '__main__':
             huge_pages=True,
             plasma_directory="/mnt/hugepages/")
 
+    warmup()
+
     ads = generate_ads()
     a = [ray.remote(resources={})(Test).remote() for _ in range(2)]
-    e = EventGenerator("node1", ads, 100, 62500, args.num_parsers, args.num_filters, args.num_projectors, *a)
+    e = EventGenerator("node1", ads, 100, args.target_throughput, args.num_parsers, args.num_filters, args.num_projectors, *a)
     start = []
     for _ in range(50):
+        now = time.time()
+
         start.append(test(e))
         time.sleep(0.1)
+
+        latency = time.time() - now
+        latency -= args.time_slice_ms / 1000
+        if latency < 0:
+            time.sleep(-1 * latency)
+        elif latency > 0.1:
+            print("Falling behind by %f seconds", latency)
+
     time.sleep(1)
     end = ray.get(a[0].get_timestamps.remote())
     latencies = []
