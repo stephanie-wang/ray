@@ -514,6 +514,16 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
         from_flatbuf(*message->execution_dependencies()));
     TaskSpecification task_spec(*message->task_spec());
     Task task(task_execution_spec, task_spec);
+
+    std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
+    if (worker && !worker->GetAssignedTaskId().is_nil()) {
+      auto running_tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
+      while (task.GetTaskExecutionSpecReadonly().NumReconstructions() < running_tasks.front().GetTaskExecutionSpecReadonly().NumReconstructions()) {
+        task.GetTaskExecutionSpec().IncrementNumReconstructions();
+      }
+      local_queues_.QueueRunningTasks(running_tasks);
+    }
+
     // Submit the task to the local scheduler. Since the task was submitted
     // locally, there is no uncommitted lineage.
     SubmitTask(task, Lineage());
@@ -714,7 +724,10 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
     std::chrono::system_clock::now().time_since_epoch()
   );
   RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task submitted "
-                << task_id << " at " << start.count();
+                << task_id << " for actor " <<
+                task.GetTaskSpecification().ActorId() << " " <<
+                task.GetTaskSpecification().ActorCounter() << " at " <<
+                start.count();
 
   if (gcs_delay_ms_ == 0) {
     gcs_task_cache_.emplace(task_id, task);
@@ -891,7 +904,9 @@ void NodeManager::AssignTask(Task &task) {
   std::chrono::duration_cast<std::chrono::milliseconds>(
     std::chrono::system_clock::now().time_since_epoch()
   );
-  RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " to worker " << worker->Pid() << " at " << start.count();
+  RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " for actor "
+    << spec.ActorId() << " " << spec.ActorCounter() << " to worker " <<
+    worker->Pid() << " at " << start.count();
 
   flatbuffers::FlatBufferBuilder fbb;
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb),
@@ -1093,11 +1108,11 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   auto &server_conn = remote_server_connections_.at(node_id);
   auto status = server_conn.WriteMessage(protocol::MessageType_ForwardTaskRequest,
                                          fbb.GetSize(), fbb.GetBufferPointer());
-  // If we were able to forward the task, remove the forwarded task from the
-  // lineage cache since the receiving node is now responsible for writing
-  // the task to the GCS.
-  lineage_cache_.RemoveWaitingTask(task_id);
   if (status.ok()) {
+    // If we were able to forward the task, remove the forwarded task from the
+    // lineage cache since the receiving node is now responsible for writing
+    // the task to the GCS.
+    lineage_cache_.RemoveWaitingTask(task_id);
 
     // Preemptively push any local arguments to the receiving node. For now, we
     // only do this with actor tasks, since actor tasks must be executed by a
@@ -1128,6 +1143,10 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
     // TODO(swang): Subscribe to the task in the task dependency manager again.
 
+    // This task is considered failed. Increment its number of reconstructions
+    // so that its arguments will be reconstructed once the task enters the
+    // waiting queue.
+    lineage_cache_entry_task.GetTaskExecutionSpec().IncrementNumReconstructions();
     QueueUncreatedActorMethod(task);
   }
 
