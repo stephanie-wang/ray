@@ -1142,7 +1142,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
       }
     } else {
       // TODO(swang): Set a timer before considering this client removed.
-      ClientRemoved(node_id);
+      //ClientRemoved(node_id);
       RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
       //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
       //// lost.
