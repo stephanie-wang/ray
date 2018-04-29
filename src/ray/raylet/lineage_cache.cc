@@ -210,7 +210,7 @@ void LineageCache::RemoveWaitingTask(const TaskID &task_id) {
   auto entry = lineage_.PopEntry(task_id);
   // It's only okay to remove a task that is waiting for execution.
   // TODO(swang): Is this necessarily true when there is reconstruction?
-  RAY_CHECK(entry->GetStatus() == GcsStatus_UNCOMMITTED_WAITING);
+  RAY_CHECK(entry->GetStatus() == GcsStatus_UNCOMMITTED_WAITING) << "status was " << entry->GetStatus();
   // Reset the status to REMOTE. We keep the task instead of removing it
   // completely in case another task is submitted locally that depends on this
   // one.
@@ -219,10 +219,6 @@ void LineageCache::RemoveWaitingTask(const TaskID &task_id) {
 }
 
 Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) {
-  std::chrono::milliseconds start =
-  std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::system_clock::now().time_since_epoch()
-  );
   Lineage uncommitted_lineage;
   // Add all uncommitted ancestors from the lineage cache to the uncommitted
   // lineage of the requested task.
@@ -255,20 +251,10 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) {
     }
   }
 
-  std::chrono::milliseconds end =
-  std::chrono::duration_cast<std::chrono::milliseconds>(
-    std::chrono::system_clock::now().time_since_epoch()
-  );
-  RAY_LOG(INFO) << "GetUncommittedLineage for " << task_id << " took " << (end - start).count();
-
   return uncommitted_lineage;
 }
 
 Status LineageCache::Flush() {
-  std::chrono::milliseconds start =
-      std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::system_clock::now().time_since_epoch());
-  RAY_LOG(INFO) << "Lineage size is " << lineage_.GetEntries().size() << " at " << start.count();
   // Iterate through all tasks that are READY.
   std::vector<TaskID> ready_task_ids;
   for (const auto &task_id : uncommitted_ready_tasks_) {
