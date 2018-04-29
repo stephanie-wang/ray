@@ -104,7 +104,7 @@ class RayConfig {
   RayConfig()
       : ray_protocol_version_(0x0000000000000000),
         heartbeat_timeout_milliseconds_(100),
-        num_heartbeats_timeout_(100),
+        num_heartbeats_timeout_(10),
         get_timeout_milliseconds_(1000),
         worker_get_request_size_(10000),
         worker_fetch_request_size_(10000),
