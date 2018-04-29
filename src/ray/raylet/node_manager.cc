@@ -7,6 +7,15 @@
 
 namespace {
 
+const std::unordered_map<std::string, double> GetCpuResources(const ray::raylet::Task &task) {
+  const auto required_resources = task.GetTaskSpecification().GetRequiredResources();
+  double required_cpus = 0;
+  RAY_CHECK(required_resources.GetResource(ray::raylet::kCPU_ResourceLabel, &required_cpus));
+  const std::unordered_map<std::string, double> cpu_resources = {
+      {ray::raylet::kCPU_ResourceLabel, required_cpus}};
+  return cpu_resources;
+}
+
 /// A helper function to determine whether a given actor task has already been executed
 /// according to the given actor registry. Returns true if the task is a duplicate.
 bool CheckDuplicateActorTask(
