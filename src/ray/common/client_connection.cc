@@ -50,8 +50,8 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
   // Write the message and then wait for more messages.
   // TODO(swang): Does this need to be an async write?
   boost::system::error_code error;
-  boost::asio::write(socket_, message_buffers, error);
-  if (error) {
+  size_t bytes_transferred = boost::asio::write(socket_, message_buffers, error);
+  if (error || bytes_transferred < message_buffers.size()) {
     return ray::Status::IOError(error.message());
   } else {
     return ray::Status::OK();
