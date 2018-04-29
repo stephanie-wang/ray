@@ -168,11 +168,13 @@ Status AsyncGcsClient::Attach(boost::asio::io_service &io_service) {
         new RedisAsioClient(io_service, task_table_contexts_[0]->subscribe_context()));
   }
 
-  for (const auto &shard_context : shard_contexts_) {
-    shard_asio_async_clients_.push_back(std::unique_ptr<RedisAsioClient>(
-        new RedisAsioClient(io_service, shard_context->async_context())));
-    shard_asio_async_clients_.push_back(std::unique_ptr<RedisAsioClient>(
-        new RedisAsioClient(io_service, shard_context->subscribe_context())));
+  if (num_shards_ > 0) {
+    for (const auto &shard_context : shard_contexts_) {
+      shard_asio_async_clients_.push_back(std::unique_ptr<RedisAsioClient>(
+          new RedisAsioClient(io_service, shard_context->async_context())));
+      shard_asio_async_clients_.push_back(std::unique_ptr<RedisAsioClient>(
+          new RedisAsioClient(io_service, shard_context->subscribe_context())));
+    }
   }
 
   return Status::OK();
