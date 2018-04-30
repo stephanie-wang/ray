@@ -17,6 +17,18 @@ const std::unordered_map<std::string, double> GetCpuResources(const ray::raylet:
   return cpu_resources;
 }
 
+int64_t GetExpectedTaskCounter(
+    const std::unordered_map<ActorHandleID,
+    ray::raylet::ActorRegistration::FrontierLeaf, UniqueIDHasher> &frontier,
+    const ray::raylet::TaskSpecification &spec) {
+  int64_t expected_task_counter = 0;
+  auto frontier_entry = frontier.find(spec.ActorHandleId());
+  if (frontier_entry != frontier.end()) {
+    expected_task_counter = frontier_entry->second.task_counter;
+  }
+  return expected_task_counter;
+}
+
 /// A helper function to determine whether a given actor task has already been executed
 /// according to the given actor registry. Returns true if the task is a duplicate.
 bool CheckDuplicateActorTask(
@@ -26,11 +38,7 @@ bool CheckDuplicateActorTask(
   auto actor_entry = actor_registry.find(spec.ActorId());
   RAY_CHECK(actor_entry != actor_registry.end());
   const auto &frontier = actor_entry->second.GetFrontier();
-  int64_t expected_task_counter = 0;
-  auto frontier_entry = frontier.find(spec.ActorHandleId());
-  if (frontier_entry != frontier.end()) {
-    expected_task_counter = frontier_entry->second.task_counter;
-  }
+  int64_t expected_task_counter = GetExpectedTaskCounter(frontier, spec);
   if (spec.ActorCounter() < expected_task_counter) {
     // The assigned task counter is less than expected. The actor has already
     // executed past this task, so do not assign the task again.
@@ -587,6 +595,18 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
         }
       }
     }
+    std::unordered_set<TaskID, UniqueIDHasher> duplicate_task_ids;
+    for (const auto &task : local_queues_.GetWaitingTasks()) {
+      const auto &spec = task.GetTaskSpecification();
+      int64_t expected_task_counter = GetExpectedTaskCounter(frontier, spec);
+      if (spec.ActorCounter() < expected_task_counter) {
+        duplicate_task_ids.insert(spec.TaskId());
+        lineage_cache_.RemoveTask(spec.TaskId());
+        task_dependency_manager_.UnsubscribeForwardedTask(spec.TaskId());
+        RAY_LOG(INFO) << "Dropping duplicate task " << spec.TaskId();
+      }
+    }
+    local_queues_.RemoveTasks(duplicate_task_ids);
     auto actor_entry = actor_registry_.find(actor_id);
     RAY_CHECK(actor_entry != actor_registry_.end());
     actor_entry->second.SetFrontier(std::move(frontier));
@@ -913,6 +933,18 @@ void NodeManager::QueueUncreatedActorMethod(const Task &task) {
 }
 
 void NodeManager::QueueTask(const Task &task) {
+  const auto &spec = task.GetTaskSpecification();
+  if (spec.IsActorTask()) {
+    auto actor_entry = actor_registry_.find(spec.ActorId());
+    if (actor_entry != actor_registry_.end()) {
+      int64_t expected_task_counter = GetExpectedTaskCounter(actor_entry->second.GetFrontier(), spec);
+      if (spec.ActorCounter() < expected_task_counter) {
+        RAY_LOG(INFO) << "Duplicate actor task " << spec.TaskId() << " for actor " << spec.ActorId() << " " << spec.ActorCounter();
+        return;
+      }
+    }
+  }
+
   // Subscribe to the task's dependencies. The task will be moved to the ready
   // queue depending on the availability of its arguments.
   bool ready = task_dependency_manager_.SubscribeTask(task);
@@ -951,7 +983,8 @@ void NodeManager::AssignTask(Task &task) {
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
     if (CheckDuplicateActorTask(actor_registry_, spec)) {
-      // TODO(swang): Remove these from the lineage cache.
+      lineage_cache_.RemoveTask(spec.TaskId());
+      task_dependency_manager_.UnsubscribeForwardedTask(spec.TaskId());
       // Drop tasks that have already been executed.
       return;
     }

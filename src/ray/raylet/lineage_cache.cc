@@ -217,6 +217,14 @@ void LineageCache::RemoveWaitingTask(const TaskID &task_id) {
   RAY_CHECK(lineage_.SetEntry(std::move(*entry)));
 }
 
+void LineageCache::RemoveTask(const TaskID &task_id) {
+  auto entry = lineage_.PopEntry(task_id);
+  // It's only okay to remove a task that is waiting for execution.
+  // TODO(swang): Is this necessarily true when there is reconstruction?
+  RAY_CHECK(entry->GetStatus() == GcsStatus_UNCOMMITTED_WAITING) << "status was " << entry->GetStatus();
+}
+
+
 Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id) {
   Lineage uncommitted_lineage;
   // Add all uncommitted ancestors from the lineage cache to the uncommitted

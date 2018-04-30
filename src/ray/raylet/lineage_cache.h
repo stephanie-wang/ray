@@ -189,6 +189,8 @@ class LineageCache {
   /// \param task_id The ID of the waiting task to remove.
   void RemoveWaitingTask(const TaskID &task_id);
 
+  void RemoveTask(const TaskID &task_id);
+
   /// Get the uncommitted lineage of a task. The uncommitted lineage consists
   /// of all tasks in the given task's lineage that have not been committed in
   /// the GCS, as far as we know.
