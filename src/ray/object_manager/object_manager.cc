@@ -291,7 +291,7 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
     RAY_CHECK_OK(
         connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
   } else {
-    RAY_LOG(WARNING) << "Object manager Pull failed";
+    RAY_LOG(WARNING) << "Error during Pull " << object_id << ": " << status.message();
   }
   return ray::Status::OK();
 }
@@ -351,7 +351,11 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
                                     conn);
   }
   status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, conn);
-  RAY_CHECK_OK(status);
+  if (status.ok()) {
+    connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn);
+  } else {
+    RAY_LOG(WARNING) << "Error during send object " << object_id << ": " << status.message();
+  }
 }
 
 ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
@@ -397,8 +401,6 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
 
   // Do this regardless of whether it failed or succeeded.
   buffer_pool_.ReleaseGetChunk(object_id, chunk_info.chunk_index);
-  RAY_CHECK_OK(
-      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn));
   RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
                  << config_.max_sends;
 
