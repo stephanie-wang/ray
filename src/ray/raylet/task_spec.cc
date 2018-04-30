@@ -64,8 +64,14 @@ TaskSpecification::TaskSpecification(
   SHA256_CTX ctx;
   sha256_init(&ctx);
   sha256_update(&ctx, (BYTE *)&driver_id, sizeof(driver_id));
-  sha256_update(&ctx, (BYTE *)&parent_task_id, sizeof(parent_task_id));
-  sha256_update(&ctx, (BYTE *)&parent_counter, sizeof(parent_counter));
+  if (actor_id.is_nil()) {
+    sha256_update(&ctx, (BYTE *)&parent_task_id, sizeof(parent_task_id));
+    sha256_update(&ctx, (BYTE *)&parent_counter, sizeof(parent_counter));
+  } else {
+    sha256_update(&ctx, (BYTE *)&actor_id, sizeof(actor_id));
+    sha256_update(&ctx, (BYTE *)&actor_handle_id, sizeof(actor_handle_id));
+    sha256_update(&ctx, (BYTE *)&actor_counter, sizeof(actor_counter));
+  }
 
   // Compute the final task ID from the hash.
   BYTE buff[DIGEST_SIZE];
