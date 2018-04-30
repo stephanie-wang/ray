@@ -104,12 +104,13 @@ def actors_on_node(actors, node_index, num_nodes):
     return [actor for i, actor in enumerate(actors) if get_node(i, num_nodes) == node_index]
 
 
-def init_actor(node_index, node_resources, actor_cls, args=None):
+def init_actor(node_index, node_resources, actor_cls, args=None, checkpoint_interval=-1):
     if args is None:
         args = []
     actor = ray.remote(resources={
         node_resources[node_index]: 1,
-        })(actor_cls).remote(*args)
+        },
+        checkpoint_interval=checkpoint_interval)(actor_cls).remote(*args)
     actor.node_index = node_index
     return actor
 
