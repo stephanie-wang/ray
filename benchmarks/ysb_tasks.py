@@ -163,7 +163,7 @@ class GroupBy(stream_push_tasks.ProcessingStream):
         self.pid = os.getpid()
 
     def process_elements(self, batches):
-        log.warn("groupby: %d at %f", self.pid, time.time())
+        log.warn("groupby: %d at %f, event window is %f", self.pid, time.time(), batches[0][0][0][1])
         for elements in batches:
             for window, count in elements:
                 self.windows[window[0]][window[1]] += count
@@ -196,14 +196,14 @@ def parse_json(elements, start, end):
 @ray.remote
 def filter_json(*batches):
     log.warn("filter: %d at %f", os.getpid(), time.time())
-    log.warn("filter: latency is %f", time.time() - float(batches[0][0][EVENT_TIME]))
+    log.warn("filter: latency is %f, event timestamp is %f", time.time() - float(batches[0][0][EVENT_TIME]), float(batches[0][0][EVENT_TIME]))
     return np.concatenate([elements[elements[:, EVENT_TYPE] == b'view'] for elements in batches])
 
 @ray.remote
 def project_json(ad_to_campaign_map, num_reducers, *batches):
     start = time.time()
     log.warn("project: %d at %f", os.getpid(), time.time())
-    log.warn("project: latency is %f", start - float(batches[0][0][EVENT_TIME]))
+    log.warn("project: latency is %f, event timestamp is %f", start - float(batches[0][0][EVENT_TIME]), float(batches[0][0][EVENT_TIME]))
     window_partitions = [Counter() for _ in range(num_reducers)]
 
     for batch in batches:
@@ -276,6 +276,7 @@ class EventGenerator(stream_push_tasks.SourceStream):
                                    self.part6])
 
         self.projected = []
+        self.num_generate_tasks = 0
 
     def _push(self, elements):
         put_latency = 0
@@ -320,19 +321,29 @@ class EventGenerator(stream_push_tasks.SourceStream):
                 start = end
 
             print("Reduce tasks")
-            if time.time() % WINDOW_SIZE_SEC > 0.8:
-                for i, reducer in enumerate(self.downstream_actors):
-                    reducer_batch = [batch[i] for batch in self.projected]
-                    reducer.push.remote(*reducer_batch)
-                self.projected = []
+            #if time.time() % WINDOW_SIZE_SEC > 0.8:
+            for i, reducer in enumerate(self.downstream_actors):
+                reducer_batch = [batch[i] for batch in self.projected]
+                reducer.push.remote(*reducer_batch)
+            self.projected = []
 
         return put_latency
 
-    def generate(self):
-        now = time.time()
+    def start_window(self, self_handle, start_time):
+        self.start_time = start_time
+        self.num_generate_tasks = (float(WINDOW_SIZE_SEC * 1000) / self.time_slice_ms)
+        self.handle = self_handle
+        self.generate()
 
-        log.warn("generate: %d at %f", self.pid, time.time())
-        event_timestamp, elements = self.generate_elements2()
+    def generate(self):
+        diff = self.start_time - time.time()
+        if diff > 0:
+            time.sleep(diff)
+        elif diff < 0.1:
+            log.warning("Falling behind by %f seconds", -1 * diff)
+
+        log.warn("generate: %d at %f, current time is %f", self.pid, self.start_time, time.time())
+        event_timestamp, elements = self.generate_elements(self.start_time)
         put_latency = self._push(elements)
 
         after = time.time()
@@ -342,66 +353,20 @@ class EventGenerator(stream_push_tasks.SourceStream):
             self.throughput_at = after
             self.num_elements = 0
 
-        latency = time.time() - now
-        latency -= self.time_slice_ms / 1000
-        if latency < 0:
-            time.sleep(-1 * latency)
-        elif latency > 0.1:
-            log.warning("Falling behind by %f seconds", latency)
         log.warn("%d finished at %f, put %f", self.pid, time.time(), put_latency)
-        log.warn("generate: latency is %f", time.time() - float(event_timestamp))
+        log.warn("generate: latency is %f", time.time() - self.start_time)
 
-        log.debug("latency: %s %f s put; %f s total",
-                  self.__class__.__name__, put_latency, latency)
-
-        if self.handle is not None:
+        self.num_generate_tasks -= 1
+        if self.num_generate_tasks > 0:
+            self.start_time += self.time_slice_ms / 1000
             self.handle.generate.remote()
 
-    def generate_elements(self):
-        #self.time_slice_start_ms += self.time_slice_ms
-
-        ## Sleep until the start of the next time slice.
-        #diff = (self.time_slice_start_ms / 1000) - time.time()
-        #if diff > self.time_slice_ms / 1000:
-        #    time.sleep(diff)
-        #elif diff < -0.1:
-        #    log.warning("Falling behind by %f seconds", -1 * diff)
-
-        # Generate the JSON string of events for this time slice.
-        #events = []
-        #for i in range(self.time_slice_num_events):
-        #    event = (
-        #        '{'
-        #        '"user_id": "' + self.user_ids[i % len(self.user_ids)] + '",'
-        #        '"page_id": "' + self.page_ids[i % len(self.page_ids)] + '",'
-        #        '"ad_id": "' + self.ad_ids[i % len(self.ad_ids)] + '",'
-        #        '"ad_type": "banner78",'
-        #        '"event_type": "' + self.event_types[i % len(self.event_types)] + '",'
-        #        '"event_time": ' + str(time.time()) + ','
-        #        '"ip_address": "1.2.3.4"'
-        #        '}')
-        #    events.append(event)
-        i = np.random.randint(1000000)
-        event = (
-                '{'
-                '"user_id": "' + self.user_ids[i % len(self.user_ids)] + '",'
-                '"page_id": "' + self.page_ids[i % len(self.page_ids)] + '",'
-                '"ad_id": "' + self.ad_ids[i % len(self.ad_ids)] + '",'
-                '"ad_type": "banner78",'
-                '"event_type": "' + self.event_types[i % len(self.event_types)] + '",'
-                '"event_time": ' + str(time.time()) + ','
-                '"ip_address": "1.2.3.4"'
-                '}')
-        events = [event for _ in range(self.time_slice_num_events)]
-
-        return events
-
-    def generate_elements2(self):
+    def generate_elements(self, timestamp_float):
         self.template[:, 12:48] = self.user_ids_array[self.indices % NUM_USER_IDS]
         self.template[:, 61:97] = self.page_ids_array[self.indices % NUM_PAGE_IDS]
         self.template[:, 108:144] = self.ad_ids_array[self.indices % len(self.ad_ids)]
         self.template[:, 180:190] = self.event_types_array[self.indices % 3]
-        timestamp = (str(time.time())).encode('ascii')[:16]
+        timestamp = (str(timestamp_float)).encode('ascii')[:16]
         if len(timestamp) < 16:
             timestamp += b'0' * (16 - len(timestamp))
         self.template[:, 205:221] = np.tile(np.array(memoryview(timestamp), dtype=np.uint8),
@@ -443,13 +408,15 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    node_resources = ["Node{}".format(i) for i in range(1, args.num_nodes)]
-    args.num_nodes -= 1
-    num_generators = args.num_generators * args.num_nodes
-    num_parsers = args.num_parsers * args.num_nodes
-    num_filters = args.num_filters * args.num_nodes
-    num_projectors = args.num_projectors * args.num_nodes
-    num_reducers = args.num_reducers * args.num_nodes
+    node_resources = ["Node{}".format(i) for i in range(args.num_nodes)]
+    worker_resources = node_resources[1:]
+    num_workers = args.num_nodes - 1
+    assert num_workers > 0
+    num_generators = args.num_generators * num_workers
+    num_parsers = args.num_parsers * num_workers
+    num_filters = args.num_filters * num_workers
+    num_projectors = args.num_projectors * num_workers
+    num_reducers = args.num_reducers * num_workers
 
     huge_pages = not args.no_hugepages
     if huge_pages:
@@ -458,6 +425,7 @@ if __name__ == '__main__':
         plasma_directory = None
 
     if args.redis_address is None:
+        num_tasks_per_node = args.num_generators + args.num_parsers + args.num_filters + args.num_projectors + args.num_reducers
         ray.worker._init(
                 start_ray_local=True,
                 redirect_output=True,
@@ -465,8 +433,7 @@ if __name__ == '__main__':
                 num_local_schedulers=args.num_nodes,
                 # Start each node with enough resources for all of the actors.
                 resources=[
-                    dict([(node_resource, num_generators + num_projectors * 3 +
-                           num_reducers)]) for node_resource in
+                    dict([(node_resource, num_tasks_per_node)]) for node_resource in
                     node_resources
                     ],
                 gcs_delay_ms=args.gcs_delay_ms if args.gcs_delay_ms is not None else -1,
@@ -480,10 +447,10 @@ if __name__ == '__main__':
                 use_raylet=args.use_raylet)
     time.sleep(3)
 
-    warmup_tasks = []
-    for node_resource in node_resources:
-        warmup_tasks.append(ray.remote(resources={node_resource: 1})(warmup).remote())
-    ray.get(warmup_tasks)
+    #warmup_tasks = []
+    #for node_resource in node_resources:
+    #    warmup_tasks.append(ray.remote(resources={node_resource: 1})(warmup).remote())
+    #ray.get(warmup_tasks)
 
     # The number of events to generate per time slice.
     time_slice_num_events = (args.target_throughput / (1000 /
@@ -497,9 +464,9 @@ if __name__ == '__main__':
 
     # Construct the streams.
     if args.test_throughput:
-        reducers = [stream_push_tasks.init_actor(stream_push_tasks.get_node(i, len(node_resources)), node_resources, ThroughputLogger) for i in range(num_reducers)]
+        reducers = [stream_push_tasks.init_actor(stream_push_tasks.get_node(i, len(worker_resources)), worker_resources, ThroughputLogger) for i in range(num_reducers)]
     else:
-        reducers = [stream_push_tasks.init_actor(stream_push_tasks.get_node(i, len(node_resources)), node_resources, GroupBy) for i in range(num_reducers)]
+        reducers = [stream_push_tasks.init_actor(stream_push_tasks.get_node(i, len(worker_resources)), worker_resources, GroupBy) for i in range(num_reducers)]
 
     print("reducers", reducers)
     # Create the event generator source.
@@ -509,25 +476,37 @@ if __name__ == '__main__':
                       ]
     generator_args += reducers
     generators = []
-    for node_index in range(len(node_resources)):
+    for node_index in range(len(worker_resources)):
         for _ in range(args.num_generators):
-            generators.append(stream_push_tasks.init_actor(node_index, node_resources, EventGenerator, args=[node_resources[node_index]] + generator_args))
+            generators.append(stream_push_tasks.init_actor(node_index, worker_resources, EventGenerator, args=[worker_resources[node_index]] + generator_args))
     print("generators", generators)
     ray.get([generator.ready.remote() for generator in generators])
 
     time.sleep(1)
 
-    # Start the event generators.
-    [generator.start.remote(generator) for generator in generators]
-    start = time.time()
+    # Ping the event generators every second to make sure they're still alive.
+    start_time = time.time() // WINDOW_SIZE_SEC
+    start_time += 2
+    print("Starting at", start_time)
+    for _ in range(args.test_time // 2):
+        ray.get([generator.start_window.remote(generator, start_time) for generator in generators])
+        time.sleep(1)
+        start_time += 1
+
+    #p = ray.services.all_processes[ray.services.PROCESS_TYPE_RAYLET][-1]
+    #p.kill()
+    #p.terminate()
+    #while p.poll() is None:
+    #    time.sleep(0.1)
 
     # Ping the event generators every second to make sure they're still alive.
-    for _ in range(args.test_time):
-        #ray.get([generator.ready.remote() for generator in generators])
+    for _ in range(args.test_time // 2):
+        ray.get([generator.start_window.remote(generator, start_time) for generator in generators])
         time.sleep(1)
+        start_time += 1
 
     # Stop generating the events.
-    ray.get([generator.stop.remote() for generator in generators])
+    #ray.get([generator.stop.remote() for generator in generators])
 
     all_latencies = []
     results = ray.get([reducer.last.remote() for reducer in reducers])
