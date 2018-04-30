@@ -75,6 +75,8 @@ class ActorRegistration {
   void ExtendFrontier(const ActorHandleID &handle_id,
                       const ObjectID &execution_dependency);
 
+  void SetFrontier(const std::unordered_map<ActorHandleID, FrontierLeaf, UniqueIDHasher> &&frontier);
+
  private:
   /// Information from the global actor table about this actor, including the
   /// node manager location.

@@ -36,6 +36,10 @@ void ActorRegistration::ExtendFrontier(const ActorHandleID &handle_id,
   execution_dependency_ = execution_dependency;
 }
 
+void ActorRegistration::SetFrontier(const std::unordered_map<ActorHandleID, FrontierLeaf, UniqueIDHasher> &&frontier) {
+  frontier_ = frontier;
+}
+
 }  // namespace raylet
 
 }  // namespace ray

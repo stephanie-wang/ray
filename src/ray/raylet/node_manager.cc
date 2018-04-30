@@ -4,6 +4,7 @@
 
 #include "common_protocol.h"
 #include "ray/raylet/format/node_manager_generated.h"
+#include "local_scheduler/format/local_scheduler_generated.h"
 
 namespace {
 
@@ -536,6 +537,61 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     // locally, there is no uncommitted lineage.
     SubmitTask(task, Lineage());
   } break;
+  case MessageType_GetActorFrontierRequest: {
+    auto message = flatbuffers::GetRoot<GetActorFrontierRequest>(message_data);
+    ActorID actor_id = from_flatbuf(*message->actor_id());
+    auto actor_entry = actor_registry_.find(actor_id);
+    RAY_CHECK(actor_entry != actor_registry_.end());
+    auto frontier = actor_entry->second.GetFrontier();
+    /* Build the ActorFrontier flatbuffer. */
+    std::vector<ActorHandleID> handle_vector;
+    std::vector<int64_t> task_counter_vector;
+    std::vector<ObjectID> frontier_vector;
+    for (const auto &frontier_entry : frontier) {
+      handle_vector.push_back(frontier_entry.first);
+      task_counter_vector.push_back(frontier_entry.second.task_counter);
+      frontier_vector.push_back(frontier_entry.second.execution_dependency);
+    }
+    flatbuffers::FlatBufferBuilder fbb;
+    auto reply = CreateActorFrontier(
+        fbb, to_flatbuf(fbb, actor_id), to_flatbuf(fbb, handle_vector),
+        fbb.CreateVector(task_counter_vector), to_flatbuf(fbb, frontier_vector));
+    fbb.Finish(reply);
+    auto status = client->WriteMessage(protocol::MessageType_GetActorFrontierReply,
+                                       fbb.GetSize(), fbb.GetBufferPointer());
+    RAY_LOG(INFO) << "Returned actor frontier for actor " << actor_id;
+    RAY_CHECK_OK(status);
+  } break;
+  case MessageType_SetActorFrontier: {
+    auto message = flatbuffers::GetRoot<ActorFrontier>(message_data);
+    /* Parse the ActorFrontier flatbuffer. */
+    ActorID actor_id = from_flatbuf(*message->actor_id());
+    std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf, UniqueIDHasher> frontier;
+    for (size_t i = 0; i < message->handle_ids()->size(); ++i) {
+      ActorID handle_id = from_flatbuf(*message->handle_ids()->Get(i));
+      ObjectID execution_dependency = from_flatbuf(*message->frontier_dependencies()->Get(i));
+      frontier[handle_id] = {
+        .task_counter = message->task_counters()->Get(i),
+        .execution_dependency = execution_dependency,
+      };
+      // TODO(swang): Remove duplicate tasks from the queue.
+      if (task_dependency_manager_.CheckObjectLocal(execution_dependency) !=
+          TaskDependencyManager::ObjectAvailability::kLocal) {
+        auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(execution_dependency);
+        if (ready_task_ids.size() > 0) {
+          auto ready_tasks = local_queues_.RemoveTasks(ready_task_ids);
+          // TODO(swang): Schedule them immediately so that the policy doesn't
+          // forward these actor methods somewhere else. In the future, don't
+          // schedule these directly...
+          local_queues_.QueueScheduledTasks(std::vector<Task>(ready_tasks));
+        }
+      }
+    }
+    auto actor_entry = actor_registry_.find(actor_id);
+    RAY_CHECK(actor_entry != actor_registry_.end());
+    actor_entry->second.SetFrontier(std::move(frontier));
+    RAY_LOG(INFO) << "Set actor frontier for actor " << actor_id;
+  } break;
   case protocol::MessageType_ReconstructObject: {
     // TODO(hme): handle multiple object ids.
     auto message = flatbuffers::GetRoot<protocol::ReconstructObject>(message_data);
@@ -1041,7 +1097,9 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
     auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(dummy_object);
     if (ready_task_ids.size() > 0) {
       auto ready_tasks = local_queues_.RemoveTasks(ready_task_ids);
-      // TODO(swang): Don't schedule these directly...
+      // TODO(swang): Schedule them immediately so that the policy doesn't
+      // forward these actor methods somewhere else. In the future, don't
+      // schedule these directly...
       local_queues_.QueueScheduledTasks(std::vector<Task>(ready_tasks));
     }
   }
