@@ -93,9 +93,13 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           /*reconstruction_timeout_ms=*/1000,
           [this](const ObjectID &object_id, const ClientID &client_id) {
             io_service_.post([this, object_id, client_id]() {
-              if (!(client_id == gcs_client_->client_table().GetLocalClientId())) {
-                object_manager_.Pull(object_id, client_id);
+              if (client_id == gcs_client_->client_table().GetLocalClientId()) {
+                return;
               }
+              if (dead_raylets_.count(client_id) == 1) {
+                return;
+              }
+              object_manager_.Pull(object_id, client_id);
             });
           }),
       task_dependency_manager_(
@@ -863,25 +867,22 @@ void NodeManager::QueueTask(const Task &task) {
   } else {
     local_queues_.QueueWaitingTasks({task});
     if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
-      RAY_CHECK(task.GetTaskExecutionSpecReadonly().NumReconstructions() == 1);
-      // TODO(swang): Hack to only reconstruct dependencies for actor tasks.
-      if (task.GetTaskSpecification().IsActorTask()) {
-        const auto argument_ids = task.GetDependencies();
-        auto argument_lookup_callback = [this](gcs::AsyncGcsClient *client,
-                                                   const ObjectID &id,
-                                                   const std::vector<ObjectTableDataT> data) {
-          if (data.empty() && task_dependency_manager_.CheckObjectLocal(id) ==
-              TaskDependencyManager::ObjectAvailability::kRemote) {
-            reconstruction_policy_.Listen(id);
-            reconstruction_policy_.Reconstruct(id);
-          }
-        };
-        for (const auto &argument_id : argument_ids) {
-          if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
-              TaskDependencyManager::ObjectAvailability::kRemote) {
-            RAY_CHECK_OK(gcs_client_->object_table().Lookup(
-                JobID::nil(), argument_id, argument_lookup_callback));
-          }
+    RAY_CHECK(task.GetTaskExecutionSpecReadonly().NumReconstructions() == 1);
+      const auto argument_ids = task.GetDependencies();
+      auto argument_lookup_callback = [this](gcs::AsyncGcsClient *client,
+                                                 const ObjectID &id,
+                                                 const std::vector<ObjectTableDataT> data) {
+        if (data.empty() && task_dependency_manager_.CheckObjectLocal(id) ==
+            TaskDependencyManager::ObjectAvailability::kRemote) {
+          reconstruction_policy_.Listen(id);
+          reconstruction_policy_.Reconstruct(id);
+        }
+      };
+      for (const auto &argument_id : argument_ids) {
+        if (task_dependency_manager_.CheckObjectLocal(argument_id) ==
+            TaskDependencyManager::ObjectAvailability::kRemote) {
+          RAY_CHECK_OK(gcs_client_->object_table().Lookup(
+              JobID::nil(), argument_id, argument_lookup_callback));
         }
       }
     }

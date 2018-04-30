@@ -285,10 +285,14 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
   auto message = object_manager_protocol::CreatePullRequestMessage(
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
   fbb.Finish(message);
-  RAY_CHECK_OK(conn->WriteMessage(object_manager_protocol::MessageType_PullRequest,
-                                  fbb.GetSize(), fbb.GetBufferPointer()));
-  RAY_CHECK_OK(
-      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  auto status = conn->WriteMessage(object_manager_protocol::MessageType_PullRequest,
+                                  fbb.GetSize(), fbb.GetBufferPointer());
+  if (status.ok()) {
+    RAY_CHECK_OK(
+        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn));
+  } else {
+    RAY_LOG(WARNING) << "Object manager Pull failed";
+  }
   return ray::Status::OK();
 }
 
