@@ -535,15 +535,20 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
     std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
     if (worker && !worker->GetAssignedTaskId().is_nil()) {
       auto running_tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
-      while (task.GetTaskExecutionSpecReadonly().NumReconstructions() < running_tasks.front().GetTaskExecutionSpecReadonly().NumReconstructions()) {
-        task.GetTaskExecutionSpec().IncrementNumReconstructions();
+      if (running_tasks.front().GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+        RAY_LOG(INFO) << "Ignoring task " << task.GetTaskSpecification().TaskId() << " submitted by reconstructed task " << running_tasks.front().GetTaskSpecification().TaskId();
+      } else {
+        // Submit the task to the local scheduler. Since the task was submitted
+        // locally, there is no uncommitted lineage.
+        SubmitTask(task, Lineage());
       }
       local_queues_.QueueRunningTasks(running_tasks);
+    } else {
+      // Submit the task to the local scheduler. Since the task was submitted
+      // locally, there is no uncommitted lineage.
+      SubmitTask(task, Lineage());
     }
 
-    // Submit the task to the local scheduler. Since the task was submitted
-    // locally, there is no uncommitted lineage.
-    SubmitTask(task, Lineage());
   } break;
   case MessageType_GetActorFrontierRequest: {
     auto message = flatbuffers::GetRoot<GetActorFrontierRequest>(message_data);
