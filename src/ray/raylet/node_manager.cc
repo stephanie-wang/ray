@@ -940,6 +940,7 @@ void NodeManager::QueueTask(const Task &task) {
       int64_t expected_task_counter = GetExpectedTaskCounter(actor_entry->second.GetFrontier(), spec);
       if (spec.ActorCounter() < expected_task_counter) {
         RAY_LOG(INFO) << "Duplicate actor task " << spec.TaskId() << " for actor " << spec.ActorId() << " " << spec.ActorCounter();
+        lineage_cache_.RemoveTask(spec.TaskId());
         return;
       }
     }
