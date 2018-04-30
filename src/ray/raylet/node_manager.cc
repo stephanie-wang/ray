@@ -587,6 +587,7 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
         .task_counter = message->task_counters()->Get(i),
         .execution_dependency = execution_dependency,
       };
+      RAY_LOG(INFO) << "Frontier " << handle_id << " " << message->task_counters()->Get(i);
       // TODO(swang): Remove duplicate tasks from the queue.
       if (task_dependency_manager_.CheckObjectLocal(execution_dependency) !=
           TaskDependencyManager::ObjectAvailability::kLocal) {
@@ -608,7 +609,8 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
         duplicate_task_ids.insert(spec.TaskId());
         lineage_cache_.RemoveTask(spec.TaskId());
         task_dependency_manager_.UnsubscribeForwardedTask(spec.TaskId());
-        RAY_LOG(INFO) << "Dropping duplicate task " << spec.TaskId();
+        reconstruction_policy_.Cancel(spec.ActorDummyObject());
+        RAY_LOG(INFO) << "Dropping duplicate task after checkpoint " << spec.TaskId();
       }
     }
     local_queues_.RemoveTasks(duplicate_task_ids);
@@ -815,7 +817,8 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
   );
   RAY_LOG(INFO) << gcs_client_->client_table().GetLocalClientId() << ": task submitted "
                 << task_id << " for actor " <<
-                task.GetTaskSpecification().ActorId() << " " <<
+                task.GetTaskSpecification().ActorId() <<
+                " handle " << task.GetTaskSpecification().ActorHandleId() << " " <<
                 task.GetTaskSpecification().ActorCounter() << " at " <<
                 start.count();
 
@@ -868,7 +871,7 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
   // Add the task and its uncommitted lineage to the lineage cache.
   bool added = lineage_cache_.AddWaitingTask(task, uncommitted_lineage);
   if (!added) {
-    RAY_LOG(WARNING) << "Dropping duplicate task " <<
+    RAY_LOG(WARNING) << "Dropping duplicate submitted task " <<
       task.GetTaskSpecification().TaskId();
     return;
   }
@@ -944,7 +947,7 @@ void NodeManager::QueueTask(const Task &task) {
     if (actor_entry != actor_registry_.end()) {
       int64_t expected_task_counter = GetExpectedTaskCounter(actor_entry->second.GetFrontier(), spec);
       if (spec.ActorCounter() < expected_task_counter) {
-        RAY_LOG(INFO) << "Duplicate actor task " << spec.TaskId() << " for actor " << spec.ActorId() << " " << spec.ActorCounter();
+        RAY_LOG(INFO) << "Duplicate actor task " << spec.TaskId() << " for actor " << spec.ActorId() << " handle " << spec.ActorHandleId() << " " << spec.ActorCounter();
         lineage_cache_.RemoveTask(spec.TaskId());
         return;
       }
@@ -1016,7 +1019,7 @@ void NodeManager::AssignTask(Task &task) {
     std::chrono::system_clock::now().time_since_epoch()
   );
   RAY_LOG(INFO) << "Assigning task " << spec.TaskId() << " for actor "
-    << spec.ActorId() << " " << spec.ActorCounter() << " to worker " <<
+    << spec.ActorId() << " handle " << spec.ActorHandleId() << " " << spec.ActorCounter() << " to worker " <<
     worker->Pid() << " at " << start.count();
 
   // Resource accounting: acquire resources for the assigned task.
@@ -1133,13 +1136,16 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
     auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
     RAY_CHECK_OK(object_manager_.Cancel(dummy_object));
     reconstruction_policy_.Cancel(dummy_object);
-    auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(dummy_object);
-    if (ready_task_ids.size() > 0) {
-      auto ready_tasks = local_queues_.RemoveTasks(ready_task_ids);
-      // TODO(swang): Schedule them immediately so that the policy doesn't
-      // forward these actor methods somewhere else. In the future, don't
-      // schedule these directly...
-      local_queues_.QueueScheduledTasks(std::vector<Task>(ready_tasks));
+    if (task_dependency_manager_.CheckObjectLocal(dummy_object) !=
+        TaskDependencyManager::ObjectAvailability::kLocal) {
+      auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(dummy_object);
+      if (ready_task_ids.size() > 0) {
+        auto ready_tasks = local_queues_.RemoveTasks(ready_task_ids);
+        // TODO(swang): Schedule them immediately so that the policy doesn't
+        // forward these actor methods somewhere else. In the future, don't
+        // schedule these directly...
+        local_queues_.QueueScheduledTasks(std::vector<Task>(ready_tasks));
+      }
     }
   }
 
@@ -1158,7 +1164,7 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
                                  const TaskID &task_id) {
     Lineage lineage = lineage_cache_.GetUncommittedLineage(task_id);
     auto task_entry = lineage.GetEntryMutable(task_id);
-    RAY_CHECK(task_entry) << "Entry not found in GCS or lineage cache!";
+    RAY_CHECK(task_entry) << "Entry not found in GCS or lineage cache! " << task_id;
     Task &task = task_entry->TaskDataMutable();
     // Skip the write to the GCS.
     _ResubmitTask(task, lineage);
