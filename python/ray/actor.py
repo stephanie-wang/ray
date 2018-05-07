@@ -525,6 +525,47 @@ class ActorHandleWrapper(object):
         self.actor_creation_resources = actor_creation_resources
         self.actor_method_cpus = actor_method_cpus
 
+    @classmethod
+    def wrap_copy(cls, actor_handle):
+        wrapper = cls(
+            actor_handle._ray_actor_id.id(),
+            actor_handle._ray_actor_handle_id.id(),
+            [c.id() for c in actor_handle._ray_actor_cursor],
+            actor_handle._ray_actor_counter,
+            actor_handle._ray_actor_method_names,
+            actor_handle._ray_actor_method_num_return_vals,
+            actor_handle._ray_method_signatures,
+            actor_handle._ray_checkpoint_interval,
+            actor_handle._ray_class_name)
+        return wrapper
+
+    def unwrap_copy(self, worker):
+        """Make an ActorHandle from the stored fields.
+
+        Args:
+            worker: The worker that is unwrapping the actor handle.
+
+        Returns:
+            The unwrapped ActorHandle instance.
+        """
+        driver_id = worker.task_driver_id.id()
+        register_actor_signatures(worker, driver_id, self.class_name,
+                                  self.actor_method_names,
+                                  self.actor_method_num_return_vals)
+
+        actor_handle_class = make_actor_handle_class(self.class_name)
+        actor_object = actor_handle_class.__new__(actor_handle_class)
+        actor_object._manual_init(
+            ray.local_scheduler.ObjectID(self.actor_id),
+            ray.local_scheduler.ObjectID(self.actor_handle_id),
+            [ray.local_scheduler.ObjectID(c) for c in self.actor_cursor],
+            self.actor_counter,
+            self.actor_method_names,
+            self.actor_method_num_return_vals,
+            self.method_signatures,
+            self.checkpoint_interval)
+        return actor_object
+
 
 def wrap_actor_handle(actor_handle):
     """Wrap the ActorHandle to store the fields.
@@ -839,6 +880,7 @@ def actor_handle_from_class(Class, class_id, actor_creation_resources,
                     args=args,
                     kwargs=kwargs,
                     dependency=actor_cursor)
+                actor_object._ray_actor_creation_dummy_object_id = actor_object._ray_actor_cursor
             else:
                 print("WARNING: this object has no __init__ method.")
 

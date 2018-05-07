@@ -25,6 +25,9 @@ TaskDependencyManager::ObjectAvailability TaskDependencyManager::CheckObjectLoca
 
 void TaskDependencyManager::MarkObjectAvailability(const ObjectID &object_id, ObjectAvailability availability) {
   local_objects_[object_id].status = availability;
+  if (availability > ObjectAvailability::kRemote) {
+    cancel_object_remote_callback_(object_id);
+  }
 }
 
 std::unordered_set<TaskID, UniqueIDHasher> TaskDependencyManager::HandleObjectLocal(const ray::ObjectID &object_id) {

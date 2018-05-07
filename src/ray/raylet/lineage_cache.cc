@@ -177,12 +177,12 @@ bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   auto task_id = task.GetTaskSpecification().TaskId();
   RAY_LOG(DEBUG) << "Adding waiting task " << task_id;
   // Merge the uncommitted lineage into the lineage cache.
-  MergeLineageHelper(task_id, uncommitted_lineage, lineage_, [](GcsStatus status) {
+  MergeLineageHelper(task_id, uncommitted_lineage, lineage_, [task_id](GcsStatus status) {
     if (status != GcsStatus_NONE) {
       // We received the uncommitted lineage from a remote node, so make sure
       // that all entries in the lineage to merge have status
       // UNCOMMITTED_REMOTE.
-      RAY_CHECK(status == GcsStatus_UNCOMMITTED_REMOTE) << "status was: " << status;
+      RAY_CHECK(status == GcsStatus_UNCOMMITTED_REMOTE) << "status of task " << task_id << " was: " << status;
     }
     // The only stopping condition is that an entry is not found.
     return false;

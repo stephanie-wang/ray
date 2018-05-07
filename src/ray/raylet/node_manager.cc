@@ -339,10 +339,10 @@ void NodeManager::ClientRemoved(const ClientID &client_id) {
   if (inserted.second) {
     for (auto it = actor_registry_.begin(); it != actor_registry_.end(); ) {
       if (it->second.GetNodeManagerId() == client_id) {
-        const auto creation_dependency = it->second.GetActorCreationDependency();
-        RAY_LOG(INFO) << "Actor " << it->first << " failed, reconstructing " << creation_dependency;
-        reconstruction_policy_.Listen(creation_dependency);
-        reconstruction_policy_.Reconstruct(creation_dependency);
+        RAY_LOG(INFO) << "Actor " << it->first << " failed";
+        //const auto creation_dependency = it->second.GetActorCreationDependency();
+        //reconstruction_policy_.Listen(creation_dependency);
+        //reconstruction_policy_.Reconstruct(creation_dependency);
         it = actor_registry_.erase(it);
       } else {
         it++;
@@ -893,34 +893,6 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
         ForwardTask(task, node_manager_id);
       }
     } else {
-      // We do not have a registered location for the object, so either the
-      // actor has not yet been created or we missed the notification for the
-      // actor creation because this node joined the cluster after the actor
-      // was already created. Look up the actor's registered location in case
-      // we missed the creation notification.
-      // NOTE(swang): This codepath needs to be tested in a cluster setting.
-      auto actor_creation_id = spec.ActorCreationDummyObjectId();
-      auto lookup_callback = [this, actor_creation_id](gcs::AsyncGcsClient *client, const ActorID &actor_id,
-                                    const std::vector<ActorTableDataT> &data) {
-        if (!data.empty()) {
-          RAY_CHECK(data.size() == 1);
-          // The actor has been created.
-          ActorRegistration actor_registration(data.back());
-          ClientID node_manager_id = actor_registration.GetNodeManagerId();
-          if (dead_raylets_.count(node_manager_id) == 1) {
-            reconstruction_policy_.Listen(actor_creation_id);
-          } else {
-            HandleActorCreation(actor_id, data);
-          }
-        } else {
-          // The actor has not yet been created.
-          // TODO(swang): Set a timer for reconstructing the actor creation
-          // task.
-          reconstruction_policy_.Listen(actor_creation_id);
-        }
-      };
-      RAY_CHECK_OK(gcs_client_->actor_table().Lookup(JobID::nil(), spec.ActorId(),
-                                                     lookup_callback));
       // Keep the task queued until we discover the actor's location.
       QueueUncreatedActorMethod(task);
     }
@@ -931,12 +903,50 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
 }
 
 void NodeManager::QueueUncreatedActorMethod(const Task &task) {
+  const auto &spec = task.GetTaskSpecification();
   for (int i = 0; i < task.GetTaskSpecification().NumReturns(); i++) {
     auto return_id = task.GetTaskSpecification().ReturnId(i);
     if (task_dependency_manager_.CheckObjectLocal(return_id) == TaskDependencyManager::ObjectAvailability::kRemote) {
+      RAY_LOG(INFO) << "Marking uncreated actor method returns waiting " << return_id;
       task_dependency_manager_.MarkObjectAvailability(return_id, TaskDependencyManager::ObjectAvailability::kWaiting);
     }
   }
+  // We do not have a registered location for the object, so either the
+  // actor has not yet been created or we missed the notification for the
+  // actor creation because this node joined the cluster after the actor
+  // was already created. Look up the actor's registered location in case
+  // we missed the creation notification.
+  // NOTE(swang): This codepath needs to be tested in a cluster setting.
+  auto actor_creation_id = spec.ActorCreationDummyObjectId();
+  auto lookup_callback = [this, actor_creation_id](gcs::AsyncGcsClient *client, const ActorID &actor_id,
+                                const std::vector<ActorTableDataT> &data) {
+    if (actor_registry_.count(actor_id) == 1) {
+      return;
+    }
+    if (!data.empty()) {
+      RAY_CHECK(data.size() == 1);
+      // The actor has been created.
+      ActorRegistration actor_registration(data.back());
+      ClientID node_manager_id = actor_registration.GetNodeManagerId();
+      if (dead_raylets_.count(node_manager_id) == 1) {
+        if (!actor_creation_id.is_nil()) {
+          reconstruction_policy_.Listen(actor_creation_id);
+          reconstruction_policy_.Reconstruct(actor_creation_id);
+        }
+      } else {
+        HandleActorCreation(actor_id, data);
+      }
+    } else {
+      // The actor has not yet been created.
+      // TODO(swang): Set a timer for reconstructing the actor creation
+      // task.
+      if (!actor_creation_id.is_nil()) {
+        reconstruction_policy_.Listen(actor_creation_id);
+      }
+    }
+  };
+  RAY_CHECK_OK(gcs_client_->actor_table().Lookup(JobID::nil(), spec.ActorId(),
+                                                 lookup_callback));
   local_queues_.QueueUncreatedActorMethods({task});
 }
 

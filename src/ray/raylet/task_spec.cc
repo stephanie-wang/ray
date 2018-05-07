@@ -211,7 +211,7 @@ int64_t TaskSpecification::ActorCounter() const {
 }
 
 ObjectID TaskSpecification::ActorDummyObject() const {
-  RAY_CHECK(IsActorTask() || IsActorCreationTask());
+  RAY_CHECK(IsActorTask() || IsActorCreationTask()) << TaskId();
   return ReturnId(NumReturns() - 1);
 }
 
