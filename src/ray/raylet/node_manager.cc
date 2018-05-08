@@ -625,6 +625,8 @@ void NodeManager::AssignTask(Task &task) {
         mutable_spec.SetExecutionDependencies(
             {actor_entry->second.GetExecutionDependency()});
       }
+      // Extend the frontier to reflect the execution of this task. The next
+      // task to execute on the actor will be execution-dependent on this task.
       actor_entry->second.ExtendFrontier(spec.ActorHandleId(), spec.ActorDummyObject());
     }
     // We started running the task, so the task is ready to write to GCS.
@@ -657,6 +659,8 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
     // the actor will be forwarded directly to this node.
     auto actor_notification = std::make_shared<ActorTableDataT>();
     actor_notification->actor_id = actor_id.binary();
+    // Store the execution dependency that represents the actor creation task,
+    // so that the actor can be reconstructed quickly on another node.
     actor_notification->actor_creation_dummy_object_id =
         task.GetTaskSpecification().ActorDummyObject().binary();
     // TODO(swang): The driver ID.
