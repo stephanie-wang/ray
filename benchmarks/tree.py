@@ -32,6 +32,7 @@ if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
     parser.add_argument('--use-raylet', action='store_true')
+    parser.add_argument('--test-fault-tolerance', action='store_true')
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--num-recursions', type=int, required=True)
     parser.add_argument('--num-nodes', type=int)
@@ -53,7 +54,7 @@ if __name__ == '__main__':
 
         ray.worker._init(
                 start_ray_local=True,
-                redirect_output=False,
+                redirect_output=True,
                 use_raylet=args.use_raylet,
                 num_local_schedulers=args.num_nodes,
                 num_cpus=4,
@@ -73,9 +74,18 @@ if __name__ == '__main__':
         ray.put(x)
 
 
-    for _ in range(NUM_TRIALS):
+    for i in range(NUM_TRIALS):
         time.sleep(1)
 
         start = time.time()
-        ray.get(tree.remote(num_tasks, args.task_delay_ms))
+        result = tree.remote(num_tasks, args.task_delay_ms)
+
+        if args.test_fault_tolerance and i == 5:
+            p = ray.services.all_processes[ray.services.PROCESS_TYPE_RAYLET][-1]
+            p.kill()
+            p.terminate()
+            while p.poll() is None:
+                time.sleep(0.1)
+
+        ray.get(result)
         log.info("Ray took %f seconds", time.time() - start)
