@@ -194,6 +194,11 @@ bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   return lineage_.SetEntry(std::move(task_entry));
 }
 
+bool LineageCache::AddRemoteTask(const Task &task) {
+  LineageEntry task_entry(task, GcsStatus_UNCOMMITTED_REMOTE);
+  return lineage_.SetEntry(std::move(task_entry));
+}
+
 void LineageCache::AddReadyTask(const Task &task) {
   auto new_entry = LineageEntry(task, GcsStatus_UNCOMMITTED_READY);
   RAY_CHECK(lineage_.SetEntry(std::move(new_entry)));

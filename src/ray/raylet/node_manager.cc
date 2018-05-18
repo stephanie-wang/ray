@@ -537,6 +537,11 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
       auto running_tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
       if (running_tasks.front().GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
         RAY_LOG(INFO) << "Ignoring task " << task.GetTaskSpecification().TaskId() << " submitted by reconstructed task " << running_tasks.front().GetTaskSpecification().TaskId();
+        bool added = lineage_cache_.AddRemoteTask(task);
+        if (!added) {
+          RAY_LOG(WARNING) << "Ignored task already in lineage cache." <<
+            task.GetTaskSpecification().TaskId();
+        }
       } else {
         // Submit the task to the local scheduler. Since the task was submitted
         // locally, there is no uncommitted lineage.
@@ -628,6 +633,15 @@ void NodeManager::ProcessClientMessage(std::shared_ptr<LocalClientConnection> cl
         TaskDependencyManager::ObjectAvailability::kRemote) {
       RAY_CHECK_OK(object_manager_.Pull(object_id));
       reconstruction_policy_.Listen(object_id);
+
+      std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
+      if (worker && !worker->GetAssignedTaskId().is_nil()) {
+        auto running_tasks = local_queues_.RemoveTasks({worker->GetAssignedTaskId()});
+        if (running_tasks.front().GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+          reconstruction_policy_.Reconstruct(object_id);
+        }
+        local_queues_.QueueRunningTasks(running_tasks);
+      }
     }
 
     // If the blocked client is a worker, and the worker isn't already blocked,
@@ -805,7 +819,7 @@ void NodeManager::ScheduleTasks() {
 
   // Transition locally scheduled tasks to SCHEDULED and dispatch scheduled tasks.
   std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
-  local_queues_.QueueScheduledTasks(tasks, /*head=*/false);
+  local_queues_.QueueScheduledTasks(tasks, /*head=*/true);
   DispatchTasks();
 }
 
@@ -1184,7 +1198,7 @@ void NodeManager::ResubmitTask(const TaskID &task_id) {
 }
 
 void NodeManager::_ResubmitTask(Task &task, const Lineage &lineage) {
-  RAY_CHECK(task.GetTaskSpecification().IsActorTask() || task.GetTaskSpecification().IsActorCreationTask());
+  //RAY_CHECK(task.GetTaskSpecification().IsActorTask() || task.GetTaskSpecification().IsActorCreationTask());
   task.GetTaskExecutionSpec().IncrementNumReconstructions();
   // Skip the write to the GCS.
   _SubmitTask(task, lineage);
@@ -1271,19 +1285,23 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     } else {
       // TODO(swang): Set a timer before considering this client removed.
       //ClientRemoved(node_id);
-      RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
-      //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
-      //// lost.
-      //RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
-      //               << " to node " << node_id;
+      if (spec.IsActorTask()) {
+        RAY_CHECK(spec.IsActorTask()) << "Reconstruction not supported for non actor tasks.";
+        //// TODO(atumanov): caller must handle ForwardTask failure to ensure tasks are not
+        //// lost.
+        //RAY_LOG(FATAL) << "[NodeManager][ForwardTask] failed to forward task " << task_id
+        //               << " to node " << node_id;
 
-      // TODO(swang): Subscribe to the task in the task dependency manager again.
+        // TODO(swang): Subscribe to the task in the task dependency manager again.
 
-      // This task is considered failed. Increment its number of reconstructions
-      // so that its arguments will be reconstructed once the task enters the
-      // waiting queue.
-      task.GetTaskExecutionSpec().IncrementNumReconstructions();
-      QueueUncreatedActorMethod(task);
+        // This task is considered failed. Increment its number of reconstructions
+        // so that its arguments will be reconstructed once the task enters the
+        // waiting queue.
+        task.GetTaskExecutionSpec().IncrementNumReconstructions();
+        QueueUncreatedActorMethod(task);
+      } else {
+        QueueTask(task);
+      }
     }
   });
   return ray::Status::OK();

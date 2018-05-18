@@ -83,7 +83,10 @@ int main(int argc, char *argv[]) {
   // guaranteed to be valid since this function will run the event loop
   // instead of returning immediately.
   auto handler = [&main_service](const boost::system::error_code &error,
-                                 int signal_number) { main_service.stop(); };
+                                 int signal_number) {
+    RAY_LOG(INFO) << "EXITING!";
+    main_service.stop();
+  };
   boost::asio::signal_set signals(main_service, SIGTERM);
   signals.async_wait(handler);
 

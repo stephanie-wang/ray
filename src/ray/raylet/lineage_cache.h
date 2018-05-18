@@ -177,6 +177,8 @@ class LineageCache {
   /// been made durable in the GCS, as far the task's submitter knows.
   bool AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage);
 
+  bool AddRemoteTask(const Task &task);
+
   /// Add a task that is ready for GCS writeback. This overwrites the task’s
   /// mutable fields in the execution specification.
   ///
