@@ -58,7 +58,7 @@ std::unordered_map<TaskID, ClientID, UniqueIDHasher> SchedulingPolicy::Schedule(
 
     // Weight the local client higher. It should be chosen ~50% of the time.
     size_t num_clients = client_keys.size();
-    if (num_clients > 2) {
+    if (num_clients >= 2) {
       for (size_t i = 0; i < num_clients - 1; i++) {
         client_keys.push_back(local_client_id);
       }
