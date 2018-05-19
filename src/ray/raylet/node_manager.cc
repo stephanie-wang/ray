@@ -458,11 +458,11 @@ void NodeManager::DispatchTasks() {
     const auto &local_resources =
         cluster_resource_map_[my_client_id].GetAvailableResources();
     auto task_resources = task.GetTaskSpecification().GetRequiredResources();
-    // TODO(swang): Hack to schedule tasks that required custom resources on
-    // first execution locally.
-    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
-      task_resources = GetCpuResources(task);
-    }
+    //// TODO(swang): Hack to schedule tasks that required custom resources on
+    //// first execution locally.
+    //if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+    //  task_resources = GetCpuResources(task);
+    //}
     if (!task_resources.IsSubset(local_resources)) {
       // Not enough local resources for this task right now, skip this task.
       continue;
@@ -1051,11 +1051,11 @@ void NodeManager::AssignTask(Task &task) {
   const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
 
   auto task_resources = task.GetTaskSpecification().GetRequiredResources();
-  // TODO(swang): Hack to schedule tasks that required custom resources on
-  // first execution locally.
-  if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
-    task_resources = GetCpuResources(task);
-  }
+  //// TODO(swang): Hack to schedule tasks that required custom resources on
+  //// first execution locally.
+  //if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+  //  task_resources = GetCpuResources(task);
+  //}
   RAY_CHECK(
       this->cluster_resource_map_[my_client_id].Acquire(task_resources));
 
@@ -1144,9 +1144,9 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> worker) {
   } else {
     // Release task's resources.
     auto task_resources = task.GetTaskSpecification().GetRequiredResources();
-    if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
-      task_resources = GetCpuResources(task);
-    }
+    //if (task.GetTaskExecutionSpecReadonly().NumReconstructions() > 0) {
+    //  task_resources = GetCpuResources(task);
+    //}
     RAY_CHECK(this->cluster_resource_map_[gcs_client_->client_table().GetLocalClientId()]
                   .Release(task_resources));
   }
