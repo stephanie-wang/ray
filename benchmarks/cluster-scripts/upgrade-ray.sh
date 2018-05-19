@@ -6,8 +6,8 @@ pushd .
 # Upgrade Ray.
 cd ray
 git fetch origin
-git checkout xray-no-lineage-stash
-git reset --hard origin/xray-no-lineage-stash
+git checkout xray-task-reconstruction
+git reset --hard origin/xray-task-reconstruction
 #git checkout fault-tolerance-tests
 #git checkout reconstruction-suppression-tests
 
