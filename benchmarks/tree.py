@@ -18,11 +18,9 @@ def tree(n, sleep_time_ms):
     if n <= 1:
         return n
 
-    # Call ray.put on the argument to create a dependency on the parent task.
-    child = ray.put(n / 2)
     nodes = ray.get([
-        tree.remote(child, sleep_time_ms),
-        tree.remote(child, sleep_time_ms),
+        tree.remote(n / 2, sleep_time_ms),
+        tree.remote(n / 2, sleep_time_ms),
     ])
 
     return nodes[0] + nodes[1]
