@@ -69,6 +69,10 @@ class TaskExecutionSpecification {
   /// Increment the number of times this task has been forwarded.
   void IncrementNumForwards();
 
+  void SetNumExecutions(int64_t num_executions);
+
+  int64_t NumExecutions() const;
+
   /// Get the task's last timestamp.
   ///
   /// \return The timestamp when this task was last received for scheduling.

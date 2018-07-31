@@ -74,6 +74,10 @@ class Task {
   /// Increment the number of times this task has been forwarded.
   void IncrementNumForwards();
 
+  void SetNumExecutions(int64_t num_executions) {
+    task_execution_spec_.SetNumExecutions(num_executions);
+  }
+
   /// Get the task's object dependencies. This comprises the immutable task
   /// arguments and the mutable execution dependencies.
   ///

@@ -95,7 +95,7 @@ class NodeManager {
   /// Perform a placement decision on placeable tasks.
   void ScheduleTasks();
   /// Handle a task whose return value(s) must be reconstructed.
-  void HandleTaskReconstruction(const TaskID &task_id);
+  void HandleTaskReconstruction(const TaskID &task_id, int64_t num_executions);
   /// Resubmit a task for execution. This is a task that was previously already
   /// submitted to a raylet but which must now be re-executed.
   void ResubmitTask(const Task &task);

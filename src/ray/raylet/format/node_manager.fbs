@@ -80,6 +80,7 @@ table TaskExecutionSpecification {
   last_timestamp: double;
   // The number of times this task was spilled back by local schedulers.
   num_forwards: int;
+  num_executions: int;
 }
 
 table Task {

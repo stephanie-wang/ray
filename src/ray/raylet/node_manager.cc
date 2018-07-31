@@ -92,7 +92,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       scheduling_policy_(local_queues_),
       reconstruction_policy_(
           io_service_,
-          [this](const TaskID &task_id) { HandleTaskReconstruction(task_id); },
+          [this](const TaskID &task_id, int64_t reconstruction_attempt) { HandleTaskReconstruction(task_id, reconstruction_attempt); },
           RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->client_table().GetLocalClientId(), gcs_client->task_lease_table(),
           std::make_shared<ObjectDirectory>(gcs_client),
@@ -868,7 +868,8 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
           // is also dead.
           if (spec.ReconstructionEnabled()) {
             ObjectID actor_creation_object = spec.ActorCreationDummyObjectId();
-            reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object);
+            reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object,
+                                                             false);
             local_queues_.QueueMethodsWaitingForActorCreation({task});
             task_dependency_manager_.TaskPending(task);
           } else {
@@ -896,7 +897,7 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
         } else {
           // The actor has not yet been created.
           // Set a timer for reconstructing the actor creation task.
-          reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object);
+          reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object, false);
         }
       };
       RAY_CHECK_OK(gcs_client_->actor_table().Lookup(JobID::nil(), spec.ActorId(),
@@ -1006,8 +1007,9 @@ void NodeManager::EnqueuePlaceableTask(const Task &task) {
   // TODO(atumanov): add task lookup hashmap and change EnqueuePlaceableTask to take
   // a vector of TaskIDs. Trigger MoveTask internally.
   // Subscribe to the task's dependencies.
+  bool fast_reconstruction = (task.GetTaskExecutionSpec().NumExecutions() > 0);
   bool args_ready = task_dependency_manager_.SubscribeDependencies(
-      task.GetTaskSpecification().TaskId(), task.GetDependencies());
+      task.GetTaskSpecification().TaskId(), task.GetDependencies(), fast_reconstruction);
   // Enqueue the task. If all dependencies are available, then the task is queued
   // in the READY state, else the WAITING state.
   // (See design_docs/task_states.rst for the state transition diagram.)
@@ -1181,22 +1183,23 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   worker.AssignTaskId(TaskID::nil());
 }
 
-void NodeManager::HandleTaskReconstruction(const TaskID &task_id) {
+void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t reconstruction_attempt) {
   RAY_LOG(INFO) << "Reconstructing task " << task_id << " on client "
                 << gcs_client_->client_table().GetLocalClientId();
   // Retrieve the task spec in order to re-execute the task.
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id,
       /*success_callback=*/
-      [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
+      [this, reconstruction_attempt](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
              const ray::protocol::TaskT &task_data) {
         // The task was in the GCS task table. Use the stored task spec to
         // re-execute the task.
-        const Task task(task_data);
+        Task task(task_data);
+        task.SetNumExecutions(reconstruction_attempt + 1);
         ResubmitTask(task);
       },
       /*failure_callback=*/
-      [this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id) {
+      [this, reconstruction_attempt](ray::gcs::AsyncGcsClient *client, const TaskID &task_id) {
         // The task was not in the GCS task table. It must therefore be in the
         // lineage cache.
         if (!lineage_cache_.ContainsTask(task_id)) {
@@ -1211,7 +1214,8 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id) {
                                                     "job may hang.";
         } else {
           // Use a copy of the cached task spec to re-execute the task.
-          const Task task = lineage_cache_.GetTask(task_id);
+          Task task = lineage_cache_.GetTask(task_id);
+          task.SetNumExecutions(reconstruction_attempt + 1);
           ResubmitTask(task);
         }
       }));

@@ -19,7 +19,7 @@ namespace raylet {
 
 class ReconstructionPolicyInterface {
  public:
-  virtual void ListenAndMaybeReconstruct(const ObjectID &object_id) = 0;
+  virtual void ListenAndMaybeReconstruct(const ObjectID &object_id, bool fast_reconstruction) = 0;
   virtual void Cancel(const ObjectID &object_id) = 0;
   virtual ~ReconstructionPolicyInterface(){};
 };
@@ -40,7 +40,7 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
   /// lease notifications from.
   ReconstructionPolicy(
       boost::asio::io_service &io_service,
-      std::function<void(const TaskID &)> reconstruction_handler,
+      std::function<void(const TaskID &, int64_t reconstruction_attempt)> reconstruction_handler,
       int64_t initial_reconstruction_timeout_ms, const ClientID &client_id,
       gcs::PubsubInterface<TaskID> &task_lease_pubsub,
       std::shared_ptr<ObjectDirectoryInterface> object_directory,
@@ -52,7 +52,7 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
   /// for the task that created the object.
   ///
   /// \param object_id The object to check for reconstruction.
-  void ListenAndMaybeReconstruct(const ObjectID &object_id);
+  void ListenAndMaybeReconstruct(const ObjectID &object_id, bool fast_reconstruction);
 
   /// Cancel listening for an object. Notifications for the object will be
   /// ignored. This does not cancel a reconstruction attempt that is already in
@@ -117,12 +117,12 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
 
   /// Handle the response for an attempt at adding an entry to the task
   /// reconstruction log.
-  void HandleReconstructionLogAppend(const TaskID &task_id, bool success);
+  void HandleReconstructionLogAppend(const TaskID &task_id, bool success, int64_t reconstruction_attempt);
 
   /// The event loop.
   boost::asio::io_service &io_service_;
   /// The handler to call for tasks that require reconstruction.
-  const std::function<void(const TaskID &)> reconstruction_handler_;
+  const std::function<void(const TaskID &, int64_t reconstruction_attempt)> reconstruction_handler_;
   /// The initial timeout within which a task lease notification must be
   /// received. Otherwise, reconstruction will be triggered.
   const int64_t initial_reconstruction_timeout_ms_;

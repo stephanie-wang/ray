@@ -6,7 +6,7 @@ namespace raylet {
 
 ReconstructionPolicy::ReconstructionPolicy(
     boost::asio::io_service &io_service,
-    std::function<void(const TaskID &)> reconstruction_handler,
+    std::function<void(const TaskID &, int64_t reconstruction_attempt)> reconstruction_handler,
     int64_t initial_reconstruction_timeout_ms, const ClientID &client_id,
     gcs::PubsubInterface<TaskID> &task_lease_pubsub,
     std::shared_ptr<ObjectDirectoryInterface> object_directory,
@@ -62,7 +62,8 @@ void ReconstructionPolicy::SetTaskTimeout(
 }
 
 void ReconstructionPolicy::HandleReconstructionLogAppend(const TaskID &task_id,
-                                                         bool success) {
+                                                         bool success,
+                                                         int64_t reconstruction_attempt) {
   auto it = listening_tasks_.find(task_id);
   if (it == listening_tasks_.end()) {
     return;
@@ -74,7 +75,8 @@ void ReconstructionPolicy::HandleReconstructionLogAppend(const TaskID &task_id,
   SetTaskTimeout(it, initial_reconstruction_timeout_ms_);
 
   if (success) {
-    reconstruction_handler_(task_id);
+    RAY_LOG(INFO) << "Reconstructing task " << task_id;
+    reconstruction_handler_(task_id, reconstruction_attempt);
   }
 }
 
@@ -110,14 +112,14 @@ void ReconstructionPolicy::AttemptReconstruction(const TaskID &task_id,
   RAY_CHECK_OK(task_reconstruction_log_.AppendAt(
       JobID::nil(), task_id, reconstruction_entry,
       /*success_callback=*/
-      [this](gcs::AsyncGcsClient *client, const TaskID &task_id,
+      [this, reconstruction_attempt](gcs::AsyncGcsClient *client, const TaskID &task_id,
              const TaskReconstructionDataT &data) {
-        HandleReconstructionLogAppend(task_id, /*success=*/true);
+        HandleReconstructionLogAppend(task_id, /*success=*/true, reconstruction_attempt);
       },
       /*failure_callback=*/
-      [this](gcs::AsyncGcsClient *client, const TaskID &task_id,
+      [this, reconstruction_attempt](gcs::AsyncGcsClient *client, const TaskID &task_id,
              const TaskReconstructionDataT &data) {
-        HandleReconstructionLogAppend(task_id, /*success=*/false);
+        HandleReconstructionLogAppend(task_id, /*success=*/false, reconstruction_attempt);
       },
       reconstruction_attempt));
 
@@ -168,7 +170,7 @@ void ReconstructionPolicy::HandleTaskLeaseNotification(const TaskID &task_id,
   }
 }
 
-void ReconstructionPolicy::ListenAndMaybeReconstruct(const ObjectID &object_id) {
+void ReconstructionPolicy::ListenAndMaybeReconstruct(const ObjectID &object_id, bool fast_reconstruction) {
   TaskID task_id = ComputeTaskId(object_id);
   auto it = listening_tasks_.find(task_id);
   // Add this object to the list of objects created by the same task.
@@ -177,7 +179,11 @@ void ReconstructionPolicy::ListenAndMaybeReconstruct(const ObjectID &object_id) 
     it = inserted.first;
     // Set a timer for the task that created the object. If the lease for that
     // task expires, then reconstruction of that task will be triggered.
-    SetTaskTimeout(it, initial_reconstruction_timeout_ms_);
+    if (fast_reconstruction) {
+      SetTaskTimeout(it, 0);
+    } else {
+      SetTaskTimeout(it, initial_reconstruction_timeout_ms_);
+    }
   }
   it->second.created_objects.insert(object_id);
 }

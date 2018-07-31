@@ -46,6 +46,14 @@ void TaskExecutionSpecification::IncrementNumForwards() {
   execution_spec_.num_forwards += 1;
 }
 
+void TaskExecutionSpecification::SetNumExecutions(int64_t num_executions) {
+  execution_spec_.num_executions = num_executions;
+}
+
+int64_t TaskExecutionSpecification::NumExecutions() const {
+  return execution_spec_.num_executions;
+}
+
 int64_t TaskExecutionSpecification::LastTimestamp() const {
   return execution_spec_.last_timestamp;
 }
