@@ -329,15 +329,18 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
   PyObject *resource_map = nullptr;
   // True if we should use the raylet code path and false otherwise.
   PyObject *use_raylet_object = nullptr;
+  // True if we should reconstruct this task in the case of failure and false
+  // otherwise.
+  PyObject *reconstruction_object = nullptr;
   if (!PyArg_ParseTuple(
-          args, "O&O&OiO&i|O&O&O&O&iOOOO", &PyObjectToUniqueID, &driver_id,
+          args, "O&O&OiO&i|O&O&O&O&iOOOOO", &PyObjectToUniqueID, &driver_id,
           &PyObjectToUniqueID, &function_id, &arguments, &num_returns,
           &PyObjectToUniqueID, &parent_task_id, &parent_counter,
           &PyObjectToUniqueID, &actor_creation_id, &PyObjectToUniqueID,
           &actor_creation_dummy_object_id, &PyObjectToUniqueID, &actor_id,
           &PyObjectToUniqueID, &actor_handle_id, &actor_counter,
           &is_actor_checkpoint_method_object, &execution_arguments,
-          &resource_map, &use_raylet_object)) {
+          &resource_map, &use_raylet_object, &reconstruction_object)) {
     return -1;
   }
 
@@ -459,11 +462,17 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
       }
     }
 
+    bool reconstruction = false;
+    if (reconstruction_object != nullptr &&
+        PyObject_IsTrue(reconstruction_object) == 1) {
+      reconstruction = true;
+    }
     self->task_spec = new ray::raylet::TaskSpecification(
         driver_id, parent_task_id, parent_counter, actor_creation_id,
         actor_creation_dummy_object_id, actor_id, actor_handle_id,
         actor_counter, function_id, args, num_returns, required_resources,
-        Language::PYTHON);
+        Language::PYTHON,
+        reconstruction);
   }
 
   /* Set the task's execution dependencies. */

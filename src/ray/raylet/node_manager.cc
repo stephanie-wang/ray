@@ -442,6 +442,7 @@ void NodeManager::CleanUpTasksForDeadActor(const ActorID &actor_id) {
   auto removed_tasks = local_queues_.RemoveTasks(tasks_to_remove);
   for (auto const &task : removed_tasks) {
     const TaskSpecification &spec = task.GetTaskSpecification();
+    RAY_CHECK(spec.ReconstructionEnabled());
     TreatTaskAsFailed(spec);
     task_dependency_manager_.TaskCanceled(spec.TaskId());
   }
@@ -1211,25 +1212,23 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id) {
 }
 
 void NodeManager::ResubmitTask(const Task &task) {
-  // Actor reconstruction is turned off by default right now. If this is an
-  // actor task, treat the task as failed and do not resubmit it.
-  if (task.GetTaskSpecification().IsActorTask()) {
+  if (!task.GetTaskSpecification().ReconstructionEnabled()) {
     TreatTaskAsFailed(task.GetTaskSpecification());
-    return;
-  }
 
-  // Driver tasks cannot be reconstructed. If this is a driver task, push an
-  // error to the driver and do not resubmit it.
-  if (task.GetTaskSpecification().IsDriverTask()) {
-    // TODO(rkn): Define this constant somewhere else.
-    std::string type = "put_reconstruction";
-    std::ostringstream error_message;
-    error_message << "The task with ID " << task.GetTaskSpecification().TaskId()
-                  << " is a driver task and so the object created by ray.put "
-                  << "could not be reconstructed.";
-    RAY_CHECK_OK(gcs_client_->error_table().PushErrorToDriver(
-        task.GetTaskSpecification().DriverId(), type, error_message.str(),
-        current_time_ms()));
+    // Driver tasks cannot be reconstructed. If this is a driver task, push an
+    // error to the driver and do not resubmit it.
+    if (task.GetTaskSpecification().IsDriverTask()) {
+      // TODO(rkn): Define this constant somewhere else.
+      std::string type = "put_reconstruction";
+      std::ostringstream error_message;
+      error_message << "The task with ID " << task.GetTaskSpecification().TaskId()
+                    << " is a driver task and so the object created by ray.put "
+                    << "could not be reconstructed.";
+      RAY_CHECK_OK(gcs_client_->error_table().PushErrorToDriver(
+          task.GetTaskSpecification().DriverId(), type, error_message.str(),
+          current_time_ms()));
+    }
+
     return;
   }
 

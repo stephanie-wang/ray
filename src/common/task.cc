@@ -115,7 +115,7 @@ class TaskBuilder {
         to_flatbuf(fbb, actor_id_), to_flatbuf(fbb, actor_handle_id_),
         actor_counter_, is_actor_checkpoint_method_,
         to_flatbuf(fbb, function_id_), arguments, fbb.CreateVector(returns),
-        map_to_flatbuf(fbb, resource_map_));
+        map_to_flatbuf(fbb, resource_map_), true);
     /* Finish the TaskInfo. */
     fbb.Finish(message);
     *size = fbb.GetSize();

@@ -62,6 +62,7 @@ table TaskInfo {
   required_resources: [ResourcePair];
   // The language that this task belongs to
   language: TaskLanguage;
+  reconstruction: bool;
 }
 
 // Object information data structure.

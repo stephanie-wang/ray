@@ -99,7 +99,8 @@ class TaskSpecification {
                     const std::vector<std::shared_ptr<TaskArgument>> &arguments,
                     int64_t num_returns,
                     const std::unordered_map<std::string, double> &required_resources,
-                    const Language &language);
+                    const Language &language,
+                    bool reconstruction);
 
   TaskSpecification(const UniqueID &driver_id, const TaskID &parent_task_id,
                     int64_t parent_counter, const ActorID &actor_creation_id,
@@ -109,7 +110,8 @@ class TaskSpecification {
                     const std::vector<std::shared_ptr<TaskArgument>> &task_arguments,
                     int64_t num_returns,
                     const std::unordered_map<std::string, double> &required_resources,
-                    const Language &language);
+                    const Language &language,
+                    bool reconstruction);
 
   /// Deserialize a task specification from a flatbuffer's string data.
   ///
@@ -144,6 +146,7 @@ class TaskSpecification {
   const ResourceSet GetRequiredResources() const;
   bool IsDriverTask() const;
   Language GetLanguage() const;
+  bool ReconstructionEnabled() const;
 
   // Methods specific to actor tasks.
   bool IsActorCreationTask() const;

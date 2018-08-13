@@ -506,12 +506,13 @@ class ActorClass(object):
             each actor method.
     """
 
-    def __init__(self, modified_class, class_id, checkpoint_interval, num_cpus,
-                 num_gpus, resources, actor_method_cpus):
+    def __init__(self, modified_class, class_id, checkpoint_interval, reconstruction,
+                 num_cpus, num_gpus, resources, actor_method_cpus):
         self._modified_class = modified_class
         self._class_id = class_id
         self._class_name = modified_class.__name__
         self._checkpoint_interval = checkpoint_interval
+        self._reconstruction = reconstruction
         self._num_cpus = num_cpus
         self._num_gpus = num_gpus
         self._resources = resources
@@ -630,7 +631,8 @@ class ActorClass(object):
                 creation_args,
                 actor_creation_id=actor_id,
                 num_return_vals=1,
-                resources=resources)
+                resources=resources,
+                reconstruction=False)
 
         # We initialize the actor counter at 1 to account for the actor
         # creation task.
@@ -639,7 +641,8 @@ class ActorClass(object):
             actor_id, self._class_name, actor_cursor, actor_counter,
             self._actor_method_names, self._method_signatures,
             self._actor_method_num_return_vals, actor_cursor,
-            self._actor_method_cpus, worker.task_driver_id)
+            self._actor_method_cpus, worker.task_driver_id,
+            reconstruction=self._reconstruction)
 
         # Call __init__ as a remote function.
         if "__init__" in actor_handle._ray_actor_method_names:
@@ -718,7 +721,8 @@ class ActorHandle(object):
                  actor_method_cpus,
                  actor_driver_id,
                  actor_handle_id=None,
-                 previous_actor_handle_id=None):
+                 previous_actor_handle_id=None,
+                 reconstruction=False):
         # False if this actor handle was created by forking or pickling. True
         # if it was created by the _serialization_helper function.
         self._ray_original_handle = previous_actor_handle_id is None
@@ -741,6 +745,7 @@ class ActorHandle(object):
         self._ray_actor_method_cpus = actor_method_cpus
         self._ray_actor_driver_id = actor_driver_id
         self._ray_previous_actor_handle_id = previous_actor_handle_id
+        self._reconstruction = reconstruction
 
     def _actor_method_call(self,
                            method_name,
@@ -816,7 +821,8 @@ class ActorHandle(object):
             # We add one for the dummy return ID.
             num_return_vals=num_return_vals + 1,
             resources={"CPU": self._ray_actor_method_cpus},
-            driver_id=self._ray_actor_driver_id)
+            driver_id=self._ray_actor_driver_id,
+            reconstruction=self._reconstruction)
         # Update the actor counter and cursor to reflect the most recent
         # invocation.
         self._ray_actor_counter += 1
@@ -909,7 +915,8 @@ class ActorHandle(object):
             "actor_driver_id": self._ray_actor_driver_id.id(),
             "previous_actor_handle_id": self._ray_actor_handle_id.id()
             if self._ray_actor_handle_id else None,
-            "ray_forking": ray_forking
+            "ray_forking": ray_forking,
+            "reconstruction": self._reconstruction,
         }
 
         if ray_forking:
@@ -954,7 +961,8 @@ class ActorHandle(object):
             actor_driver_id,
             actor_handle_id=actor_handle_id,
             previous_actor_handle_id=ray.ObjectID(
-                state["previous_actor_handle_id"]))
+                state["previous_actor_handle_id"]),
+            reconstruction=state["reconstruction"])
 
     def __getstate__(self):
         """This code path is used by pickling but not by Ray forking."""
@@ -966,7 +974,7 @@ class ActorHandle(object):
 
 
 def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
-               checkpoint_interval):
+               checkpoint_interval, reconstruction):
     if checkpoint_interval is None:
         checkpoint_interval = -1
 
@@ -1064,8 +1072,8 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
 
     class_id = _random_string()
 
-    return ActorClass(Class, class_id, checkpoint_interval, num_cpus, num_gpus,
-                      resources, actor_method_cpus)
+    return ActorClass(Class, class_id, checkpoint_interval, reconstruction,
+                      num_cpus, num_gpus, resources, actor_method_cpus)
 
 
 ray.worker.global_worker.fetch_and_register_actor = fetch_and_register_actor

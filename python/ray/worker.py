@@ -567,7 +567,8 @@ class Worker(object):
                     execution_dependencies=None,
                     num_return_vals=None,
                     resources=None,
-                    driver_id=None):
+                    driver_id=None,
+                    reconstruction=True):
         """Submit a remote task to the scheduler.
 
         Tell the scheduler to schedule the execution of the function with ID
@@ -2206,7 +2207,8 @@ def connect(info,
             worker.current_task_id, worker.task_index,
             ray.ObjectID(NIL_ACTOR_ID), ray.ObjectID(NIL_ACTOR_ID),
             ray.ObjectID(NIL_ACTOR_ID), ray.ObjectID(NIL_ACTOR_ID),
-            nil_actor_counter, False, [], {"CPU": 0}, worker.use_raylet)
+            nil_actor_counter, False, [], {"CPU": 0}, worker.use_raylet,
+            False)
 
         # Add the driver task to the task table.
         if not worker.use_raylet:
@@ -2621,12 +2623,16 @@ def make_decorator(num_return_vals=None,
                    resources=None,
                    max_calls=None,
                    checkpoint_interval=None,
+                   actor_reconstruction=None,
                    worker=None):
     def decorator(function_or_class):
         if (inspect.isfunction(function_or_class)
                 or is_cython(function_or_class)):
             # Set the remote function default resources.
             if checkpoint_interval is not None:
+                raise Exception("The keyword 'checkpoint_interval' is not "
+                                "allowed for remote functions.")
+            if actor_reconstruction is not None:
                 raise Exception("The keyword 'checkpoint_interval' is not "
                                 "allowed for remote functions.")
 
@@ -2658,7 +2664,8 @@ def make_decorator(num_return_vals=None,
 
             return worker.make_actor(function_or_class, cpus_to_use, num_gpus,
                                      resources, actor_method_cpus,
-                                     checkpoint_interval)
+                                     checkpoint_interval,
+                                     actor_reconstruction)
 
         raise Exception("The @ray.remote decorator must be applied to "
                         "either a function or to a class.")
