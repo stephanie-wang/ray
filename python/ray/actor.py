@@ -977,6 +977,8 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
                checkpoint_interval, reconstruction):
     if checkpoint_interval is None:
         checkpoint_interval = -1
+    if reconstruction is None:
+        reconstruction = False
 
     if checkpoint_interval == 0:
         raise Exception("checkpoint_interval must be greater than 0.")

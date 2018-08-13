@@ -1296,6 +1296,9 @@ void NodeManager::ForwardTaskOrResubmit(const Task &task,
     // have the task. TaskDependencyManager::TaskPending() is assumed to be
     // idempotent.
     task_dependency_manager_.TaskPending(task);
+    // Remove the task from the lineage cache. The task will get added back
+    // once it is resubmitted.
+    lineage_cache_.RemoveWaitingTask(task_id);
 
     // Actor tasks can only be executed at the actor's location, so they are
     // retried after a timeout. All other tasks that fail to be forwarded are

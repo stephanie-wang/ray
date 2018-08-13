@@ -658,7 +658,8 @@ class Worker(object):
                 num_return_vals, self.current_task_id, task_index,
                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
                 actor_handle_id, actor_counter, is_actor_checkpoint_method,
-                execution_dependencies, resources, self.use_raylet)
+                execution_dependencies, resources, self.use_raylet,
+                reconstruction)
             self.local_scheduler_client.submit(task)
 
             return task.returns()
