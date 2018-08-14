@@ -115,6 +115,7 @@ class NodeManager {
   void HandleWorkerBlocked(std::shared_ptr<Worker> worker);
   /// Handle a worker exiting a `ray.get`.
   void HandleWorkerUnblocked(std::shared_ptr<Worker> worker);
+  void SetActorFrontier(const protocol::ActorFrontier &frontier_data);
 
   /// Methods for actor scheduling.
   /// Handler for the creation of an actor, possibly on a remote node.

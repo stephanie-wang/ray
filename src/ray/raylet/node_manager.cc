@@ -43,6 +43,18 @@ RAY_CHECK_ENUM(protocol::MessageType::GetActorFrontierReply,
 RAY_CHECK_ENUM(protocol::MessageType::SetActorFrontier,
                local_scheduler_protocol::MessageType::SetActorFrontier);
 
+int64_t GetExpectedActorTaskCounter(
+    const ray::raylet::ActorRegistration &actor_registration,
+    const ActorHandleID &handle_id) {
+  const auto &frontier = actor_registration.GetFrontier();
+  int64_t expected_task_counter = 0;
+  auto frontier_entry = frontier.find(handle_id);
+  if (frontier_entry != frontier.end()) {
+    expected_task_counter = frontier_entry->second.task_counter;
+  }
+  return expected_task_counter;
+}
+
 /// A helper function to determine whether a given actor task has already been executed
 /// according to the given actor registry. Returns true if the task is a duplicate.
 bool CheckDuplicateActorTask(
@@ -50,12 +62,8 @@ bool CheckDuplicateActorTask(
     const ray::raylet::TaskSpecification &spec) {
   auto actor_entry = actor_registry.find(spec.ActorId());
   RAY_CHECK(actor_entry != actor_registry.end());
-  const auto &frontier = actor_entry->second.GetFrontier();
-  int64_t expected_task_counter = 0;
-  auto frontier_entry = frontier.find(spec.ActorHandleId());
-  if (frontier_entry != frontier.end()) {
-    expected_task_counter = frontier_entry->second.task_counter;
-  }
+  int64_t expected_task_counter =
+      GetExpectedActorTaskCounter(actor_entry->second, spec.ActorHandleId());
   if (spec.ActorCounter() < expected_task_counter) {
     // The assigned task counter is less than expected. The actor has already
     // executed past this task, so do not assign the task again.
@@ -736,28 +744,7 @@ void NodeManager::ProcessClientMessage(
   } break;
   case protocol::MessageType::SetActorFrontier: {
     auto message = flatbuffers::GetRoot<protocol::ActorFrontier>(message_data);
-    const ActorID actor_id = from_flatbuf(*message->actor_id());
-    auto actor_entry = actor_registry_.find(actor_id);
-    RAY_CHECK(actor_entry != actor_registry_.end());
-    std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf> frontier;
-    for (size_t i = 0; i < message->handle_ids()->size(); ++i) {
-      ActorID handle_id = from_flatbuf(*message->handle_ids()->Get(i));
-      const ObjectID execution_dependency =
-          from_flatbuf(*message->frontier_dependencies()->Get(i));
-      frontier[handle_id] = ActorRegistration::FrontierLeaf{
-          .task_counter = message->task_counters()->Get(i),
-          .execution_dependency = execution_dependency,
-      };
-      RAY_LOG(INFO) << "setting actor checkpoint " << handle_id << " "
-                    << execution_dependency << " " << frontier[handle_id].task_counter;
-    }
-    actor_entry->second.SetFrontier(std::move(frontier));
-    for (const auto &frontier_leaf : actor_entry->second.GetFrontier()) {
-      if (!task_dependency_manager_.CheckObjectLocal(
-              frontier_leaf.second.execution_dependency)) {
-        HandleObjectLocal(frontier_leaf.second.execution_dependency);
-      }
-    }
+    SetActorFrontier(*message);
   } break;
 
   default:
@@ -905,8 +892,16 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
           // Handle the fact that this actor is dead.
           TreatTaskAsFailed(spec);
         } else {
-          // Queue the task for local execution, bypassing placement.
-          EnqueuePlaceableTask(task);
+          if (spec.ActorCounter() <
+              GetExpectedActorTaskCounter(actor_entry->second, spec.ActorHandleId())) {
+            RAY_LOG(WARNING) << "A task was resubmitted, so we are ignoring it. This "
+                             << "should only happen during reconstruction. "
+                             << spec.TaskId();
+            TreatTaskAsFailed(spec);
+          } else {
+            // Queue the task for local execution, bypassing placement.
+            EnqueuePlaceableTask(task);
+          }
         }
       } else {
         // The actor is remote. Forward the task to the node manager that owns
@@ -1460,6 +1455,62 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
     }
   }
   return status;
+}
+
+void GetDuplicateActorTasksFromList(
+    const ActorID &actor_id, const std::list<Task> &tasks,
+    std::unordered_set<TaskID> &tasks_to_remove,
+    const ray::raylet::ActorRegistration &actor_registration) {
+  for (auto const &task : tasks) {
+    auto const &spec = task.GetTaskSpecification();
+    if (actor_id == spec.ActorId()) {
+      if (spec.ActorCounter() <
+          GetExpectedActorTaskCounter(actor_registration, spec.ActorHandleId())) {
+        tasks_to_remove.insert(spec.TaskId());
+      }
+    }
+  }
+}
+
+void NodeManager::SetActorFrontier(const protocol::ActorFrontier &frontier_data) {
+  // Parse the frontier data.
+  const ActorID actor_id = from_flatbuf(*frontier_data.actor_id());
+  std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf> frontier;
+  for (size_t i = 0; i < frontier_data.handle_ids()->size(); ++i) {
+    ActorID handle_id = from_flatbuf(*frontier_data.handle_ids()->Get(i));
+    const ObjectID execution_dependency =
+        from_flatbuf(*frontier_data.frontier_dependencies()->Get(i));
+    frontier[handle_id] = ActorRegistration::FrontierLeaf{
+        .task_counter = frontier_data.task_counters()->Get(i),
+        .execution_dependency = execution_dependency,
+    };
+    RAY_LOG(INFO) << "setting actor checkpoint " << handle_id << " "
+                  << execution_dependency << " " << frontier[handle_id].task_counter;
+  }
+  // Set the actor's frontier.
+  auto actor_entry = actor_registry_.find(actor_id);
+  RAY_CHECK(actor_entry != actor_registry_.end());
+  actor_entry->second.SetFrontier(std::move(frontier));
+  // Mark all of the dependencies along the new frontier as local.
+  for (const auto &frontier_leaf : actor_entry->second.GetFrontier()) {
+    if (!task_dependency_manager_.CheckObjectLocal(
+            frontier_leaf.second.execution_dependency)) {
+      HandleObjectLocal(frontier_leaf.second.execution_dependency);
+    }
+  }
+  // Remove duplicate tasks from the scheduling queue.
+  std::unordered_set<TaskID> duplicate_tasks;
+  GetDuplicateActorTasksFromList(actor_id, local_queues_.GetWaitingTasks(),
+                                 duplicate_tasks, actor_entry->second);
+  GetDuplicateActorTasksFromList(actor_id, local_queues_.GetReadyTasks(), duplicate_tasks,
+                                 actor_entry->second);
+  const auto removed_tasks = local_queues_.RemoveTasks(duplicate_tasks);
+  for (const auto &task : removed_tasks) {
+    const TaskSpecification &spec = task.GetTaskSpecification();
+    RAY_LOG(INFO) << "Removing duplicate task " << spec.TaskId();
+    task_dependency_manager_.TaskCanceled(spec.TaskId());
+    task_dependency_manager_.UnsubscribeDependencies(spec.TaskId());
+  }
 }
 
 }  // namespace raylet
