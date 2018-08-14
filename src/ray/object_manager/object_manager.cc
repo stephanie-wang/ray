@@ -740,8 +740,8 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
       // TODO(hme): This chunk failed, so create a pull request for this chunk.
     }
   } else {
-    RAY_LOG(ERROR) << "Create Chunk Failed index = " << chunk_index << ": "
-                   << chunk_status.second.message();
+    // RAY_LOG(ERROR) << "Create Chunk Failed index = " << chunk_index << ": "
+    //               << chunk_status.second.message();
     // Read object into empty buffer.
     uint64_t buffer_length = buffer_pool_.GetBufferLength(chunk_index, data_size);
     std::vector<uint8_t> mutable_vec;

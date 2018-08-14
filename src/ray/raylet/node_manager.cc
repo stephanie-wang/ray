@@ -60,7 +60,7 @@ bool CheckDuplicateActorTask(
     // The assigned task counter is less than expected. The actor has already
     // executed past this task, so do not assign the task again.
     RAY_LOG(WARNING) << "A task was resubmitted, so we are ignoring it. This "
-                     << "should only happen during reconstruction.";
+                     << "should only happen during reconstruction. " << spec.TaskId();
     return true;
   }
   RAY_CHECK(spec.ActorCounter() == expected_task_counter)
@@ -710,6 +710,54 @@ void NodeManager::ProcessClientMessage(
     auto message = flatbuffers::GetRoot<protocol::FreeObjectsRequest>(message_data);
     std::vector<ObjectID> object_ids = from_flatbuf(*message->object_ids());
     object_manager_.FreeObjects(object_ids, message->local_only());
+  } break;
+  case protocol::MessageType::GetActorFrontierRequest: {
+    auto message = flatbuffers::GetRoot<protocol::GetActorFrontierRequest>(message_data);
+    const ActorID actor_id = from_flatbuf(*message->actor_id());
+    const auto actor_entry = actor_registry_.find(actor_id);
+    RAY_CHECK(actor_entry != actor_registry_.end());
+    const auto &frontier = actor_entry->second.GetFrontier();
+    std::vector<ActorHandleID> handle_ids;
+    std::vector<int64_t> task_counters;
+    std::vector<ObjectID> frontier_dependencies;
+    for (const auto &frontier_leaf : frontier) {
+      handle_ids.push_back(frontier_leaf.first);
+      task_counters.push_back(frontier_leaf.second.task_counter);
+      frontier_dependencies.push_back(frontier_leaf.second.execution_dependency);
+    }
+    flatbuffers::FlatBufferBuilder fbb;
+    auto reply = protocol::CreateActorFrontier(
+        fbb, to_flatbuf(fbb, actor_id), to_flatbuf(fbb, handle_ids),
+        fbb.CreateVector(task_counters), to_flatbuf(fbb, frontier_dependencies));
+    fbb.Finish(reply);
+    RAY_CHECK_OK(client->WriteMessage(
+        static_cast<int64_t>(protocol::MessageType::GetActorFrontierReply), fbb.GetSize(),
+        fbb.GetBufferPointer()));
+  } break;
+  case protocol::MessageType::SetActorFrontier: {
+    auto message = flatbuffers::GetRoot<protocol::ActorFrontier>(message_data);
+    const ActorID actor_id = from_flatbuf(*message->actor_id());
+    auto actor_entry = actor_registry_.find(actor_id);
+    RAY_CHECK(actor_entry != actor_registry_.end());
+    std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf> frontier;
+    for (size_t i = 0; i < message->handle_ids()->size(); ++i) {
+      ActorID handle_id = from_flatbuf(*message->handle_ids()->Get(i));
+      const ObjectID execution_dependency =
+          from_flatbuf(*message->frontier_dependencies()->Get(i));
+      frontier[handle_id] = ActorRegistration::FrontierLeaf{
+          .task_counter = message->task_counters()->Get(i),
+          .execution_dependency = execution_dependency,
+      };
+      RAY_LOG(INFO) << "setting actor checkpoint " << handle_id << " "
+                    << execution_dependency << " " << frontier[handle_id].task_counter;
+    }
+    actor_entry->second.SetFrontier(std::move(frontier));
+    for (const auto &frontier_leaf : actor_entry->second.GetFrontier()) {
+      if (!task_dependency_manager_.CheckObjectLocal(
+              frontier_leaf.second.execution_dependency)) {
+        HandleObjectLocal(frontier_leaf.second.execution_dependency);
+      }
+    }
   } break;
 
   default:

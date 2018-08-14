@@ -29,6 +29,11 @@ const std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf>
   return frontier_;
 }
 
+void ActorRegistration::SetFrontier(
+    const std::unordered_map<ActorHandleID, FrontierLeaf> &&frontier) {
+  frontier_ = std::move(frontier);
+}
+
 void ActorRegistration::ExtendFrontier(const ActorHandleID &handle_id,
                                        const ObjectID &execution_dependency) {
   auto &frontier_entry = frontier_[handle_id];

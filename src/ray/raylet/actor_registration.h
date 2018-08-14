@@ -66,6 +66,8 @@ class ActorRegistration {
   /// that handle.
   const std::unordered_map<ActorHandleID, FrontierLeaf> &GetFrontier() const;
 
+  void SetFrontier(const std::unordered_map<ActorHandleID, FrontierLeaf> &&frontier);
+
   /// Extend the frontier of the actor by a single task. This should be called
   /// whenever the actor executes a task.
   ///
