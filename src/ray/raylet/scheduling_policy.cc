@@ -38,10 +38,10 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
                    << t.GetTaskSpecification().GetRequiredResources().ToString();
     // TODO(atumanov): replace the simple spillback policy with exponential backoff based
     // policy.
-    if (t.GetTaskExecutionSpec().NumForwards() >= 1) {
-      decision[task_id] = local_client_id;
-      continue;
-    }
+    //if (t.GetTaskExecutionSpecReadonly().NumForwards() >= 1) {
+    //  decision[task_id] = local_client_id;
+    //  continue;
+    //}
     // Construct a set of viable node candidates and randomly pick between them.
     // Get all the client id keys and randomly pick.
     std::vector<ClientID> client_keys;
@@ -56,6 +56,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
         client_keys.push_back(node_client_id);
       }
     }
+    RAY_LOG(INFO) << "number of eligible clients " << client_keys.size();
 
     if (!client_keys.empty()) {
       // Choose index at random.

@@ -363,7 +363,7 @@ void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &cl
 
 void NodeManager::HandleActorCreation(const ActorID &actor_id,
                                       const std::vector<ActorTableDataT> &data) {
-  RAY_LOG(DEBUG) << "Actor creation notification received: " << actor_id;
+  RAY_LOG(INFO) << "Actor creation notification received: " << actor_id;
 
   // TODO(swang): In presence of failures, data may have size > 1, since the
   // actor will have been created multiple times. In that case, we should
@@ -373,44 +373,37 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
 
   // Register the new actor.
   ActorRegistration actor_registration(data.back());
-  ClientID received_node_manager_id = actor_registration.GetNodeManagerId();
   // Extend the frontier to include the actor creation task. NOTE(swang): The
   // creator of the actor is always assigned nil as the actor handle ID.
   actor_registration.ExtendFrontier(ActorHandleID::nil(),
                                     actor_registration.GetActorCreationDependency());
-  auto inserted = actor_registry_.emplace(actor_id, std::move(actor_registration));
-  if (!inserted.second) {
-    // If we weren't able to insert the actor's location, check that the
-    // existing entry is the same as the new one.
-    // TODO(swang): This is not true in the case of failures.
-    RAY_CHECK(received_node_manager_id == inserted.first->second.GetNodeManagerId())
-        << "Actor scheduled on " << inserted.first->second.GetNodeManagerId()
-        << ", but received notification for " << received_node_manager_id;
-  } else {
-    // The actor's location is now known. Dequeue any methods that were
-    // submitted before the actor's location was known.
-    // (See design_docs/task_states.rst for the state transition diagram.)
-    const auto &methods = local_queues_.GetMethodsWaitingForActorCreation();
-    std::unordered_set<TaskID> created_actor_method_ids;
-    for (const auto &method : methods) {
-      if (method.GetTaskSpecification().ActorId() == actor_id) {
-        created_actor_method_ids.insert(method.GetTaskSpecification().TaskId());
-      }
+
+  ObjectID actor_creation_object = actor_registration.GetActorCreationDependency();
+  reconstruction_policy_.Cancel(actor_creation_object);
+
+  actor_registry_.erase(actor_id);
+  actor_registry_.emplace(actor_id, std::move(actor_registration));
+
+  // The actor's location is now known. Dequeue any methods that were
+  // submitted before the actor's location was known.
+  // (See design_docs/task_states.rst for the state transition diagram.)
+  const auto &methods = local_queues_.GetMethodsWaitingForActorCreation();
+  std::unordered_set<TaskID> created_actor_method_ids;
+  for (const auto &method : methods) {
+    if (method.GetTaskSpecification().ActorId() == actor_id) {
+      created_actor_method_ids.insert(method.GetTaskSpecification().TaskId());
     }
-    // Resubmit the methods that were submitted before the actor's location was
-    // known.
-    auto created_actor_methods = local_queues_.RemoveTasks(created_actor_method_ids);
-    for (const auto &method : created_actor_methods) {
-      if (!lineage_cache_.RemoveWaitingTask(method.GetTaskSpecification().TaskId())) {
-        RAY_LOG(WARNING) << "Task " << method.GetTaskSpecification().TaskId()
-                         << " already removed from the lineage cache. This is most "
-                            "likely due to reconstruction.";
-      }
-      // The task's uncommitted lineage was already added to the local lineage
-      // cache upon the initial submission, so it's okay to resubmit it with an
-      // empty lineage this time.
-      SubmitTask(method, Lineage());
-    }
+  }
+  // Resubmit the methods that were submitted before the actor's location was
+  // known.
+  auto created_actor_methods = local_queues_.RemoveTasks(created_actor_method_ids);
+  for (const auto &method : created_actor_methods) {
+    lineage_cache_.RemoveWaitingTask(method.GetTaskSpecification().TaskId());
+    RAY_LOG(INFO) << "created actor method " << method.GetTaskSpecification().TaskId();
+    // The task's uncommitted lineage was already added to the local lineage
+    // cache upon the initial submission, so it's okay to resubmit it with an
+    // empty lineage this time.
+    SubmitTask(method, Lineage());
   }
 }
 
@@ -850,12 +843,14 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
   }
 
   const TaskSpecification &spec = task.GetTaskSpecification();
+  RAY_LOG(INFO) << "submitting task " << task.GetTaskSpecification().TaskId() << " is actor task? " << spec.IsActorTask() << " forwarded? " << forwarded;
   if (spec.IsActorTask()) {
     // Check whether we know the location of the actor.
     const auto actor_entry = actor_registry_.find(spec.ActorId());
     if (actor_entry != actor_registry_.end()) {
       // We have a known location for the actor.
       auto node_manager_id = actor_entry->second.GetNodeManagerId();
+      RAY_LOG(INFO) << "node manager is " << node_manager_id;
       if (node_manager_id == gcs_client_->client_table().GetLocalClientId()) {
         // The actor is local. Check if the actor is still alive.
         if (!actor_entry->second.IsAlive()) {
@@ -871,7 +866,14 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
         if (gcs_client_->client_table().IsRemoved(node_manager_id)) {
           // The remote node manager is dead, so handle the fact that this actor
           // is also dead.
-          TreatTaskAsFailed(spec);
+          if (spec.ReconstructionEnabled()) {
+            ObjectID actor_creation_object = spec.ActorCreationDummyObjectId();
+            reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object);
+            local_queues_.QueueMethodsWaitingForActorCreation({task});
+            task_dependency_manager_.TaskPending(task);
+          } else {
+            TreatTaskAsFailed(spec);
+          }
         } else {
           // Attempt to forward the task. If this fails to forward the task,
           // the task will be resubmit locally.
@@ -885,15 +887,16 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
       // was already created. Look up the actor's registered location in case
       // we missed the creation notification.
       // NOTE(swang): This codepath needs to be tested in a cluster setting.
-      auto lookup_callback = [this](gcs::AsyncGcsClient *client, const ActorID &actor_id,
+      ObjectID actor_creation_object = spec.ActorCreationDummyObjectId();
+      auto lookup_callback = [this, actor_creation_object](gcs::AsyncGcsClient *client, const ActorID &actor_id,
                                     const std::vector<ActorTableDataT> &data) {
         if (!data.empty()) {
           // The actor has been created.
           HandleActorCreation(actor_id, data);
         } else {
           // The actor has not yet been created.
-          // TODO(swang): Set a timer for reconstructing the actor creation
-          // task.
+          // Set a timer for reconstructing the actor creation task.
+          reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object);
         }
       };
       RAY_CHECK_OK(gcs_client_->actor_table().Lookup(JobID::nil(), spec.ActorId(),
@@ -1019,6 +1022,7 @@ void NodeManager::EnqueuePlaceableTask(const Task &task) {
 
 void NodeManager::AssignTask(Task &task) {
   const TaskSpecification &spec = task.GetTaskSpecification();
+  RAY_LOG(INFO) << "assigning task " << spec.TaskId();
 
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
@@ -1131,6 +1135,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     // If this was an actor creation task, then convert the worker to an actor.
     auto actor_id = task.GetTaskSpecification().ActorCreationId();
     worker.AssignActorId(actor_id);
+    RAY_LOG(INFO) << "finished actor task " << actor_id;
 
     // Publish the actor creation event to all other nodes so that methods for
     // the actor will be forwarded directly to this node.
@@ -1138,6 +1143,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     actor_notification->actor_id = actor_id.binary();
     actor_notification->actor_creation_dummy_object_id =
         task.GetTaskSpecification().ActorDummyObject().binary();
+    RAY_LOG(INFO) << "notifying " << ObjectID::from_binary(actor_notification->actor_creation_dummy_object_id);
     // TODO(swang): The driver ID.
     actor_notification->driver_id = JobID::nil().binary();
     actor_notification->node_manager_id =

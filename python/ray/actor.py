@@ -632,7 +632,7 @@ class ActorClass(object):
                 actor_creation_id=actor_id,
                 num_return_vals=1,
                 resources=resources,
-                reconstruction=False)
+                reconstruction=True)
 
         # We initialize the actor counter at 1 to account for the actor
         # creation task.
@@ -722,7 +722,7 @@ class ActorHandle(object):
                  actor_driver_id,
                  actor_handle_id=None,
                  previous_actor_handle_id=None,
-                 reconstruction=False):
+                 reconstruction=True):
         # False if this actor handle was created by forking or pickling. True
         # if it was created by the _serialization_helper function.
         self._ray_original_handle = previous_actor_handle_id is None
@@ -978,7 +978,7 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
     if checkpoint_interval is None:
         checkpoint_interval = -1
     if reconstruction is None:
-        reconstruction = False
+        reconstruction = True
 
     if checkpoint_interval == 0:
         raise Exception("checkpoint_interval must be greater than 0.")

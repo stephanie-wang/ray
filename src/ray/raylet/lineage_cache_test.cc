@@ -116,7 +116,6 @@ static inline Task ExampleTask(const std::vector<ObjectID> &arguments,
                                 UniqueID::from_random(), task_arguments, num_returns,
                                 required_resources, Language::PYTHON,
                                 /*reconstruction=*/false);
->>>>>>> pass reconstruction flag from Python to backend
   auto execution_spec = TaskExecutionSpecification(std::vector<ObjectID>());
   execution_spec.IncrementNumForwards();
   Task task = Task(execution_spec, spec);

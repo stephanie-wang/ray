@@ -1304,9 +1304,6 @@ class ActorExceptionFailures(unittest.TestCase):
         process.wait()
 
 
-@unittest.skipIf(
-    os.environ.get("RAY_USE_XRAY") == "1",
-    "This test does not work with xray yet.")
 class ActorReconstruction(unittest.TestCase):
     def tearDown(self):
         ray.shutdown()
@@ -1624,7 +1621,6 @@ class ActorReconstruction(unittest.TestCase):
         for error in errors:
             assert error["type"] == ray_constants.CHECKPOINT_PUSH_ERROR
 
-    @unittest.skip("Fork/join consistency not yet implemented.")
     def testDistributedHandle(self):
         counter, ids = self.setup_counter_actor(test_checkpoint=False)
 
