@@ -407,7 +407,6 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
   auto created_actor_methods = local_queues_.RemoveTasks(created_actor_method_ids);
   for (const auto &method : created_actor_methods) {
     lineage_cache_.RemoveWaitingTask(method.GetTaskSpecification().TaskId());
-    RAY_LOG(INFO) << "created actor method " << method.GetTaskSpecification().TaskId();
     // The task's uncommitted lineage was already added to the local lineage
     // cache upon the initial submission, so it's okay to resubmit it with an
     // empty lineage this time.
@@ -878,14 +877,12 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
   }
 
   const TaskSpecification &spec = task.GetTaskSpecification();
-  RAY_LOG(INFO) << "submitting task " << task.GetTaskSpecification().TaskId() << " is actor task? " << spec.IsActorTask() << " forwarded? " << forwarded;
   if (spec.IsActorTask()) {
     // Check whether we know the location of the actor.
     const auto actor_entry = actor_registry_.find(spec.ActorId());
     if (actor_entry != actor_registry_.end()) {
       // We have a known location for the actor.
       auto node_manager_id = actor_entry->second.GetNodeManagerId();
-      RAY_LOG(INFO) << "node manager is " << node_manager_id;
       if (node_manager_id == gcs_client_->client_table().GetLocalClientId()) {
         // The actor is local. Check if the actor is still alive.
         if (!actor_entry->second.IsAlive()) {
@@ -1067,7 +1064,6 @@ void NodeManager::EnqueuePlaceableTask(const Task &task) {
 
 void NodeManager::AssignTask(Task &task) {
   const TaskSpecification &spec = task.GetTaskSpecification();
-  RAY_LOG(INFO) << "assigning task " << spec.TaskId();
 
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
@@ -1180,7 +1176,6 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     // If this was an actor creation task, then convert the worker to an actor.
     auto actor_id = task.GetTaskSpecification().ActorCreationId();
     worker.AssignActorId(actor_id);
-    RAY_LOG(INFO) << "finished actor task " << actor_id;
 
     // Publish the actor creation event to all other nodes so that methods for
     // the actor will be forwarded directly to this node.
@@ -1188,7 +1183,6 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     actor_notification->actor_id = actor_id.binary();
     actor_notification->actor_creation_dummy_object_id =
         task.GetTaskSpecification().ActorDummyObject().binary();
-    RAY_LOG(INFO) << "notifying " << ObjectID::from_binary(actor_notification->actor_creation_dummy_object_id);
     // TODO(swang): The driver ID.
     actor_notification->driver_id = JobID::nil().binary();
     actor_notification->node_manager_id =
@@ -1484,8 +1478,6 @@ void NodeManager::SetActorFrontier(const protocol::ActorFrontier &frontier_data)
         .task_counter = frontier_data.task_counters()->Get(i),
         .execution_dependency = execution_dependency,
     };
-    RAY_LOG(INFO) << "setting actor checkpoint " << handle_id << " "
-                  << execution_dependency << " " << frontier[handle_id].task_counter;
   }
   // Set the actor's frontier.
   auto actor_entry = actor_registry_.find(actor_id);
@@ -1507,10 +1499,11 @@ void NodeManager::SetActorFrontier(const protocol::ActorFrontier &frontier_data)
   const auto removed_tasks = local_queues_.RemoveTasks(duplicate_tasks);
   for (const auto &task : removed_tasks) {
     const TaskSpecification &spec = task.GetTaskSpecification();
-    RAY_LOG(INFO) << "Removing duplicate task " << spec.TaskId();
     task_dependency_manager_.TaskCanceled(spec.TaskId());
     task_dependency_manager_.UnsubscribeDependencies(spec.TaskId());
   }
+  RAY_LOG(INFO) << "Removed " << removed_tasks.size() << " duplicate tasks for actor "
+                << actor_id;
 }
 
 }  // namespace raylet
