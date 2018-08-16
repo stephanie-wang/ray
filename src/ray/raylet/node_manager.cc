@@ -145,7 +145,7 @@ ray::Status NodeManager::RegisterGcs() {
   const auto task_committed_callback = [this](gcs::AsyncGcsClient *client,
                                               const TaskID &task_id,
                                               const ray::protocol::TaskT &task_data) {
-    lineage_cache_.HandleEntryCommitted(task_id);
+    lineage_cache_.HandleEntryCommitted(task_id, false);
   };
   RAY_RETURN_NOT_OK(gcs_client_->raylet_task_table().Subscribe(
       JobID::nil(), gcs_client_->client_table().GetLocalClientId(),
