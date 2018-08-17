@@ -20,7 +20,9 @@ from ray.utils import (
     is_cython,
     push_error_to_driver,
 )
+import boto3
 
+S3_CHECKPOINTING = True
 DEFAULT_ACTOR_METHOD_NUM_RETURN_VALS = 1
 
 
@@ -164,20 +166,21 @@ def save_and_log_checkpoint(worker, actor):
         actor: The actor to checkpoint.
         checkpoint_index: The number of tasks that have executed so far.
     """
-    try:
-        actor.__ray_checkpoint__()
-    except Exception:
-        traceback_str = ray.utils.format_error_message(traceback.format_exc())
-        # Log the error message.
-        ray.utils.push_error_to_driver(
-            worker,
-            ray_constants.CHECKPOINT_PUSH_ERROR,
-            traceback_str,
-            driver_id=worker.task_driver_id.id(),
-            data={
-                "actor_class": actor.__class__.__name__,
-                "function_name": actor.__ray_checkpoint__.__name__
-            })
+    with ray.profile("save_checkpoint"):
+        try:
+            actor.__ray_checkpoint__()
+        except Exception:
+            traceback_str = ray.utils.format_error_message(traceback.format_exc())
+            # Log the error message.
+            ray.utils.push_error_to_driver(
+                worker,
+                ray_constants.CHECKPOINT_PUSH_ERROR,
+                traceback_str,
+                driver_id=worker.task_driver_id.id(),
+                data={
+                    "actor_class": actor.__class__.__name__,
+                    "function_name": actor.__ray_checkpoint__.__name__
+                })
 
 
 def restore_and_log_checkpoint(worker, actor):
@@ -187,21 +190,22 @@ def restore_and_log_checkpoint(worker, actor):
         worker: The worker to use to log errors.
         actor: The actor to restore.
     """
-    checkpoint_resumed = False
-    try:
-        checkpoint_resumed = actor.__ray_checkpoint_restore__()
-    except Exception:
-        traceback_str = ray.utils.format_error_message(traceback.format_exc())
-        # Log the error message.
-        ray.utils.push_error_to_driver(
-            worker,
-            ray_constants.CHECKPOINT_PUSH_ERROR,
-            traceback_str,
-            driver_id=worker.task_driver_id.id(),
-            data={
-                "actor_class": actor.__class__.__name__,
-                "function_name": actor.__ray_checkpoint_restore__.__name__
-            })
+    with ray.profile("restore_checkpoint"):
+        checkpoint_resumed = False
+        try:
+            checkpoint_resumed = actor.__ray_checkpoint_restore__()
+        except Exception:
+            traceback_str = ray.utils.format_error_message(traceback.format_exc())
+            # Log the error message.
+            ray.utils.push_error_to_driver(
+                worker,
+                ray_constants.CHECKPOINT_PUSH_ERROR,
+                traceback_str,
+                driver_id=worker.task_driver_id.id(),
+                data={
+                    "actor_class": actor.__class__.__name__,
+                    "function_name": actor.__ray_checkpoint_restore__.__name__
+                })
     return checkpoint_resumed
 
 
@@ -986,6 +990,22 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
     # Modify the class to have an additional method that will be used for
     # terminating the worker.
     class Class(cls):
+        S3_BUCKET_NAME = "actor-checkpoints"
+
+        def __ray_init_s3_client__(self):
+            if S3_CHECKPOINTING:
+                if getattr(self, "S3_CLIENT", None) is None:
+                    self.S3_CLIENT = boto3.client('s3')
+                    try:
+                        self.S3_CLIENT.create_bucket(
+                                ACL="private",
+                                Bucket=self.S3_BUCKET_NAME,
+                                CreateBucketConfiguration={
+                                    "LocationConstraint": "us-west-2",
+                                    })
+                    except:
+                        pass
+
         def __ray_terminate__(self):
             worker = ray.worker.get_global_worker()
             if worker.mode != ray.LOCAL_MODE:
@@ -1023,6 +1043,7 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             frontier according to the local scheduler, and the checkpoint index
             (number of tasks executed so far).
             """
+            self.__ray_init_s3_client__()
             worker = ray.worker.global_worker
             checkpoint_index = worker.actor_task_counter
             # Get the state to save.
@@ -1035,6 +1056,13 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             actor_id = ray.ObjectID(worker.actor_id)
             frontier = worker.local_scheduler_client.get_actor_frontier(
                 actor_id)
+            if S3_CHECKPOINTING:
+                checkpoint_key = "{}/{}".format(actor_id.hex(), checkpoint_index)
+                self.S3_CLIENT.put_object(
+                        Bucket=self.S3_BUCKET_NAME,
+                        Key=checkpoint_key,
+                        Body=checkpoint)
+                checkpoint = checkpoint_key
             # Save the checkpoint in Redis. TODO(rkn): Checkpoints
             # should not be stored in Redis. Fix this.
             set_actor_checkpoint(worker, worker.actor_id, checkpoint_index,
@@ -1050,6 +1078,8 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             Returns:
                 A bool indicating whether a checkpoint was resumed.
             """
+            self.__ray_init_s3_client__()
+
             worker = ray.worker.global_worker
             # Get the most recent checkpoint stored, if any.
             checkpoint_index, checkpoint, frontier = get_actor_checkpoint(
@@ -1057,6 +1087,10 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             # Try to resume from the checkpoint.
             checkpoint_resumed = False
             if checkpoint_index is not None:
+                if S3_CHECKPOINTING:
+                    checkpoint = self.S3_CLIENT.get_object(
+                            Bucket=self.S3_BUCKET_NAME,
+                            Key=checkpoint.decode('ascii'))['Body'].read()
                 # Load the actor state from the checkpoint.
                 worker.actors[worker.actor_id] = (
                     worker.actor_class.__ray_restore_from_checkpoint__(
