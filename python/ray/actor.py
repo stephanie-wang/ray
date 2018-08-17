@@ -995,16 +995,19 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
         def __ray_init_s3_client__(self):
             if S3_CHECKPOINTING:
                 if getattr(self, "S3_CLIENT", None) is None:
-                    self.S3_CLIENT = boto3.client('s3')
-                    try:
-                        self.S3_CLIENT.create_bucket(
-                                ACL="private",
-                                Bucket=self.S3_BUCKET_NAME,
-                                CreateBucketConfiguration={
-                                    "LocationConstraint": "us-west-2",
-                                    })
-                    except:
-                        pass
+                    with ray.profile("init_s3_client"):
+                        self.S3_CLIENT = boto3.client('s3')
+                        ## The below lines are only necessary if the bucket has
+                        ## never been created before.
+                        #try:
+                        #    self.S3_CLIENT.create_bucket(
+                        #            ACL="private",
+                        #            Bucket=self.S3_BUCKET_NAME,
+                        #            CreateBucketConfiguration={
+                        #                "LocationConstraint": "us-west-2",
+                        #                })
+                        #except:
+                        #    pass
 
         def __ray_terminate__(self):
             worker = ray.worker.get_global_worker()
