@@ -122,6 +122,28 @@ static inline Task ExampleTask(const std::vector<ObjectID> &arguments,
   return task;
 }
 
+static inline Task ExampleActorTask(const ActorID &actor_id,
+                                    const std::vector<ObjectID> &arguments,
+                                    int64_t num_returns,
+                                    int64_t actor_task_counter) {
+  std::unordered_map<std::string, double> required_resources;
+  std::vector<std::shared_ptr<TaskArgument>> task_arguments;
+  for (auto &argument : arguments) {
+    std::vector<ObjectID> references = {argument};
+    task_arguments.emplace_back(std::make_shared<TaskArgumentByReference>(references));
+  }
+  auto spec = TaskSpecification(UniqueID::nil(), UniqueID::from_random(), 0,
+                                ActorID::nil(), ObjectID::nil(),
+                                actor_id, ActorHandleID::nil(),
+                                actor_task_counter,
+                                UniqueID::from_random(), task_arguments, num_returns,
+                                required_resources);
+  auto execution_spec = TaskExecutionSpecification(std::vector<ObjectID>());
+  execution_spec.IncrementNumForwards();
+  Task task = Task(execution_spec, spec);
+  return task;
+}
+
 std::vector<ObjectID> InsertTaskChain(LineageCache &lineage_cache,
                                       std::vector<Task> &inserted_tasks, int chain_size,
                                       const std::vector<ObjectID> &initial_arguments,
@@ -130,6 +152,25 @@ std::vector<ObjectID> InsertTaskChain(LineageCache &lineage_cache,
   std::vector<ObjectID> arguments = initial_arguments;
   for (int i = 0; i < chain_size; i++) {
     auto task = ExampleTask(arguments, num_returns);
+    RAY_CHECK(lineage_cache.AddWaitingTask(task, empty_lineage));
+    inserted_tasks.push_back(task);
+    arguments.clear();
+    for (int j = 0; j < task.GetTaskSpecification().NumReturns(); j++) {
+      arguments.push_back(task.GetTaskSpecification().ReturnId(j));
+    }
+  }
+  return arguments;
+}
+
+std::vector<ObjectID> InsertActorTaskChain(LineageCache &lineage_cache,
+                                      std::vector<Task> &inserted_tasks, int chain_size,
+                                      const std::vector<ObjectID> &initial_arguments,
+                                      int64_t num_returns) {
+  Lineage empty_lineage;
+  std::vector<ObjectID> arguments = initial_arguments;
+  ActorID actor_id = ActorID::from_random();
+  for (int i = 0; i < chain_size; i++) {
+    auto task = ExampleActorTask(actor_id, arguments, num_returns, i);
     RAY_CHECK(lineage_cache.AddWaitingTask(task, empty_lineage));
     inserted_tasks.push_back(task);
     arguments.clear();
@@ -556,6 +597,45 @@ TEST_F(LineageCacheTest, TestEvictionUncommittedChildren) {
   // are therefore committed in the GCS.
   mock_gcs_.Flush();
   CheckFlush(lineage_cache_, mock_gcs_, num_tasks_flushed);
+}
+
+TEST_F(LineageCacheTest, TestOutOfOrderEvictionActorTasks) {
+  // Insert a chain of dependent tasks that is more than twice as long as the
+  // maximum lineage size. This will ensure that we request notifications for
+  // at most 2 remote tasks.
+  uint64_t lineage_size = (2 * max_lineage_size_) + 2;
+  size_t num_tasks_flushed = 0;
+  std::vector<Task> tasks;
+  InsertActorTaskChain(lineage_cache_, tasks, lineage_size, std::vector<ObjectID>(), 1);
+
+  // Simulate forwarding the chain of tasks to a remote node.
+  for (const auto &task : tasks) {
+    auto task_id = task.GetTaskSpecification().TaskId();
+    ASSERT_TRUE(lineage_cache_.RemoveWaitingTask(task_id));
+  }
+
+  // Check that the last task in the chain still has all tasks in its
+  // uncommitted lineage.
+  const auto last_task_id = tasks.back().GetTaskSpecification().TaskId();
+  auto uncommitted_lineage =
+      lineage_cache_.GetUncommittedLineage(last_task_id, ClientID::nil());
+  ASSERT_EQ(uncommitted_lineage.GetEntries().size(), lineage_size);
+  ASSERT_EQ(lineage_cache_.NumEntries(), lineage_size);
+
+  // Simulate executing the rest of the tasks on a remote node and receiving
+  // the notifications from the GCS in reverse order of execution.
+  auto it = tasks.rbegin();
+  for (size_t i = 0; i < lineage_size; i++) {
+    auto task_data = std::make_shared<protocol::TaskT>();
+    RAY_CHECK_OK(mock_gcs_.RemoteAdd(it->GetTaskSpecification().TaskId(), task_data));
+    // Check that the remote task is flushed.
+    num_tasks_flushed++;
+    mock_gcs_.Flush();
+    CheckFlush(lineage_cache_, mock_gcs_, num_tasks_flushed);
+    it++;
+  }
+  mock_gcs_.Flush();
+  ASSERT_TRUE(lineage_cache_.NumEntries() < lineage_size);
 }
 
 }  // namespace raylet
