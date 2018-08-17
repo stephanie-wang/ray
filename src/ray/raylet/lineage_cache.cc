@@ -159,6 +159,7 @@ LineageCache::LineageCache(const ClientID &client_id,
     : client_id_(client_id),
       task_storage_(task_storage),
       task_pubsub_(task_pubsub),
+      max_lineage_size_(max_lineage_size),
       disabled_(disabled) {}
 
 /// A helper function to merge one lineage into another, in DFS order.
@@ -213,7 +214,10 @@ void LineageCache::AddUncommittedLineage(const TaskID &task_id, const Lineage &u
   // if the new entry has an equal or lower GCS status than the current entry
   // in lineage_to. This also prevents us from traversing the same node twice.
   if (lineage_.SetEntry(entry->TaskData(), entry->GetStatus())) {
-    SubscribeTask(task_id);
+    if (entry->RequestEvictionNotification(max_lineage_size_)) {
+      RAY_LOG(DEBUG) << "subscribing to remote task " << task_id;
+      SubscribeTask(task_id);
+    }
     for (const auto &parent_id : parent_ids) {
       children_[parent_id].insert(task_id);
       AddUncommittedLineage(parent_id, uncommitted_lineage);
@@ -285,7 +289,10 @@ bool LineageCache::RemoveWaitingTask(const TaskID &task_id) {
   // completely in case another task is submitted locally that depends on this
   // one.
   entry->ResetStatus(GcsStatus::UNCOMMITTED_REMOTE);
-  RAY_CHECK(SubscribeTask(task_id));
+  if (entry->RequestEvictionNotification(max_lineage_size_)) {
+    RAY_LOG(DEBUG) << "subscribing to removed task " << task_id;
+    RAY_CHECK(SubscribeTask(task_id));
+  }
   return true;
 }
 
@@ -326,7 +333,9 @@ void LineageCache::FlushTask(const TaskID &task_id) {
 
   gcs::raylet::TaskTable::WriteCallback task_callback = [this](
       ray::gcs::AsyncGcsClient *client, const TaskID &id, const protocol::TaskT &data) {
-    HandleEntryCommitted(id, false);
+    const Task task(data);
+    bool lineage_committed = task.GetTaskExecutionSpec().GetLineageCommitted();
+    HandleEntryCommitted(id, lineage_committed);
   };
   auto task = lineage_.GetEntry(task_id);
   // TODO(swang): Make this better...
@@ -414,26 +423,28 @@ void LineageCache::EvictTask(const TaskID &task_id) {
 }
 
 void LineageCache::EvictRemoteLineage(const TaskID &task_id) {
+  RAY_LOG(DEBUG) << "evict remote lineage " << task_id;
   auto entry = lineage_.GetEntry(task_id);
   if (!entry) {
     return;
   }
-  // Only evict tasks that are remote. Other tasks, and their lineage, will be
-  // evicted once they are committed.
-  const auto parent_ids = entry->GetParentTaskIds();
   committed_tasks_.insert(task_id);
-  if (entry->GetStatus() == GcsStatus::UNCOMMITTED_REMOTE) {
-    // Remove the ancestor task.
-    // TODO: force evict
-    EvictTask(task_id);
-  }
-  // Recurse and remove this task's ancestors.
+  // Recurse and remove this task's ancestors. We recurse first before removing
+  // the current task. Tasks can only be evicted if their parents are evicted,
+  // so we evict ancestors first.
+  const auto parent_ids = entry->GetParentTaskIds();
   for (const auto &parent_id : parent_ids) {
     EvictRemoteLineage(parent_id);
   }
+  // Only evict tasks that are remote. Other tasks, and their lineage, will be
+  // evicted once they are committed.
+  if (entry->GetStatus() == GcsStatus::UNCOMMITTED_REMOTE || entry->GetStatus() == GcsStatus::COMMITTING) {
+    // Remove the ancestor task.
+    EvictTask(task_id);
+  }
 }
 
-void LineageCache::HandleEntryCommitted(const TaskID &task_id, bool evicted) {
+void LineageCache::HandleEntryCommitted(const TaskID &task_id, bool lineage_committed) {
   if (disabled_) {
     return;
   }
@@ -445,8 +456,28 @@ void LineageCache::HandleEntryCommitted(const TaskID &task_id, bool evicted) {
     return;
   }
 
+  RAY_LOG(DEBUG) << "Entry committed " << task_id << " lineage committed? " << lineage_committed;
   committed_tasks_.insert(task_id);
-  EvictTask(task_id);
+  if (lineage_committed) {
+    EvictRemoteLineage(task_id);
+  } else if (entry->NotifyEvicted(max_lineage_size_)) {
+    gcs::raylet::TaskTable::WriteCallback task_callback = [this](
+        ray::gcs::AsyncGcsClient *client, const TaskID &id, const protocol::TaskT &data) {
+      HandleEntryCommitted(id, true);
+    };
+    lineage_.GetEntryMutable(task_id)->TaskDataMutable().SetLineageCommitted();
+    flatbuffers::FlatBufferBuilder fbb;
+    auto message = entry->TaskData().ToFlatbuffer(fbb);
+    fbb.Finish(message);
+    auto task_data = std::make_shared<protocol::TaskT>();
+    auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
+    root->UnPackTo(task_data.get());
+    RAY_CHECK_OK(task_storage_.Add(entry->TaskData().GetTaskSpecification().DriverId(),
+                                   task_id, task_data, task_callback));
+
+  } else {
+    EvictTask(task_id);
+  }
 }
 
 const Task &LineageCache::GetTask(const TaskID &task_id) const {

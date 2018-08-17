@@ -250,7 +250,7 @@ class LineageCache {
   /// COMMITTED and cleans up any ancestor tasks that are in the cache.
   ///
   /// \param task_id The ID of the task entry that was committed.
-  void HandleEntryCommitted(const TaskID &task_id, bool evicted);
+  void HandleEntryCommitted(const TaskID &task_id, bool lineage_committed);
 
   /// Get a task. The task must be in the lineage cache.
   ///
@@ -296,6 +296,7 @@ class LineageCache {
   /// The pubsub storage system for task information. This can be used to
   /// request notifications for the commit of a task entry.
   gcs::PubsubInterface<TaskID> &task_pubsub_;
+  uint64_t max_lineage_size_;
   /// The set of tasks that have been committed but not evicted.
   std::unordered_set<TaskID> committed_tasks_;
   /// A mapping from each task to its children. This mapping includes all
