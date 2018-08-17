@@ -58,6 +58,22 @@ void LineageEntry::UpdateTaskData(const Task &task) {
   ComputeParentTaskIds();
 }
 
+bool LineageEntry::NotifyEvicted(uint64_t lineage_size) const {
+  const auto &spec = TaskData().GetTaskSpecification();
+  if (!spec.IsActorTask()) {
+    return false;
+  }
+  return spec.ActorCounter() % lineage_size == 0;
+}
+
+bool LineageEntry::RequestEvictionNotification(uint64_t lineage_size) const {
+  const auto &spec = TaskData().GetTaskSpecification();
+  if (!spec.IsActorTask()) {
+    return true;
+  }
+  return spec.ActorCounter() % lineage_size == 0;
+}
+
 Lineage::Lineage() {}
 
 Lineage::Lineage(const protocol::ForwardTaskRequest &task_request) {

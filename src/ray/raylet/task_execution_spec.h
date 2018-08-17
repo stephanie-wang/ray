@@ -84,6 +84,9 @@ class TaskExecutionSpecification {
   /// time stamp to. Tracks the last time this task entered a local scheduler.
   void SetLastTimestamp(int64_t new_timestamp);
 
+  bool GetLineageCommitted() const;
+  void SetLineageCommitted();
+
  private:
   protocol::TaskExecutionSpecificationT execution_spec_;
 };

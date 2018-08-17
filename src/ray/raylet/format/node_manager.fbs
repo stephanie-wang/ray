@@ -81,6 +81,7 @@ table TaskExecutionSpecification {
   // The number of times this task was spilled back by local schedulers.
   num_forwards: int;
   num_executions: int;
+  lineage_committed: bool;
 }
 
 table Task {

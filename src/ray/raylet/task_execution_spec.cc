@@ -62,6 +62,13 @@ void TaskExecutionSpecification::SetLastTimestamp(int64_t new_timestamp) {
   execution_spec_.last_timestamp = new_timestamp;
 }
 
+bool TaskExecutionSpecification::GetLineageCommitted() const {
+  return execution_spec_.lineage_committed;
+}
+void TaskExecutionSpecification::SetLineageCommitted() {
+  execution_spec_.lineage_committed = true;
+}
+
 }  // namespace raylet
 
 }  // namespace ray

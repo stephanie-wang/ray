@@ -102,6 +102,9 @@ class LineageEntry {
   /// \return Void.
   void UpdateTaskData(const Task &task);
 
+  bool NotifyEvicted(uint64_t lineage_size) const;
+  bool RequestEvictionNotification(uint64_t lineage_size) const;
+
  private:
   /// Compute cached parent task IDs. This task is dependent on values returned
   /// by these tasks.

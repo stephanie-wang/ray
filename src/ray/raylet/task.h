@@ -88,6 +88,10 @@ class Task {
   /// \param task Task structure with updated dynamic information.
   void CopyTaskExecutionSpec(const Task &task);
 
+  void SetLineageCommitted() {
+    task_execution_spec_.SetLineageCommitted();
+  }
+
  private:
   void ComputeDependencies();
 
