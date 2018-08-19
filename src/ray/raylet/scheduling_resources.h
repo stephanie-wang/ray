@@ -53,6 +53,8 @@ class ResourceSet {
   /// \return True if objects are equal, False otherwise.
   bool IsEqual(const ResourceSet &other) const;
 
+  ResourceSet GetCpuResources() const;
+
   /// \brief Test whether this ResourceSet is a subset of the other ResourceSet.
   ///
   /// \param other: The resource set we check being a subset of.

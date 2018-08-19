@@ -463,7 +463,10 @@ void NodeManager::DispatchTasks() {
   }
 
   for (const auto &task : scheduled_tasks) {
-    const auto &task_resources = task.GetTaskSpecification().GetRequiredResources();
+    // TODO(swang): Hack to schedule reconstructed tasks that require
+    // custom resources that are no longer available.
+    auto task_resources = task.GetTaskSpecification().GetRequiredResources();
+    task_resources = task_resources.GetCpuResources();
     if (!local_available_resources_.Contains(task_resources)) {
       // Not enough local resources for this task right now, skip this task.
       // TODO(rkn): We should always skip node managers that have 0 CPUs.
@@ -1095,10 +1098,12 @@ void NodeManager::AssignTask(Task &task) {
   const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
 
   // Resource accounting: acquire resources for the assigned task.
-  auto acquired_resources =
-      local_available_resources_.Acquire(spec.GetRequiredResources());
-  RAY_CHECK(
-      this->cluster_resource_map_[my_client_id].Acquire(spec.GetRequiredResources()));
+  // TODO(swang): Hack to schedule reconstructed tasks that require
+  // custom resources that are no longer available.
+  auto task_resources = spec.GetRequiredResources();
+  task_resources = task_resources.GetCpuResources();
+  auto acquired_resources = local_available_resources_.Acquire(task_resources);
+  RAY_CHECK(this->cluster_resource_map_[my_client_id].Acquire(task_resources));
 
   if (spec.IsActorCreationTask()) {
     worker->SetLifetimeResourceIds(acquired_resources);
@@ -1198,8 +1203,13 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     local_available_resources_.Release(worker.GetTaskResourceIds());
     worker.ResetTaskResourceIds();
 
+    // TODO(swang): Hack to schedule reconstructed tasks that require
+    // custom resources that are no longer available.
+    //if (task.GetTaskExecutionSpec().NumExecutions() > 0) {
+    auto task_resources = task.GetTaskSpecification().GetRequiredResources();
+    task_resources = task_resources.GetCpuResources();
     RAY_CHECK(this->cluster_resource_map_[gcs_client_->client_table().GetLocalClientId()]
-                  .Release(task.GetTaskSpecification().GetRequiredResources()));
+                  .Release(task_resources));
   }
 
   // If the finished task was an actor task, mark the returned dummy object as

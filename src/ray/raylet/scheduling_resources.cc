@@ -65,6 +65,14 @@ bool ResourceSet::IsEqual(const ResourceSet &rhs) const {
   return (this->IsSubset(rhs) && rhs.IsSubset(*this));
 }
 
+ResourceSet ResourceSet::GetCpuResources() const {
+  double required_cpus = 0;
+  RAY_CHECK(GetResource(ray::raylet::kCPU_ResourceLabel, &required_cpus));
+  const std::unordered_map<std::string, double> cpu_resources = {
+      {ray::raylet::kCPU_ResourceLabel, required_cpus}};
+  return cpu_resources;
+}
+
 bool ResourceSet::AddResource(const std::string &resource_name, double capacity) {
   this->resource_capacity_[resource_name] = capacity;
   return true;
