@@ -87,6 +87,12 @@ class ActorRegistration {
   /// \return Void.
   void MarkDead();
 
+  void ResetNodeManagerId(const ClientID &node_manager_id) {
+    // TODO(swang): What should the execution_dependency_ be set to?
+    alive_ = true;
+    actor_table_data_.node_manager_id = node_manager_id.binary();
+  }
+
  private:
   /// Information from the global actor table about this actor, including the
   /// node manager location.

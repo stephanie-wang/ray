@@ -237,14 +237,14 @@ def make_actor_method_executor(worker, method_name, method, actor_imported):
 
         # If this is the first task to execute on the actor, try to resume from
         # a checkpoint.
-        if actor_imported and worker.actor_task_counter == 1:
-            checkpoint_resumed = restore_and_log_checkpoint(worker, actor)
-            if checkpoint_resumed:
-                # NOTE(swang): Since we did not actually execute the __init__
-                # method, this will put None as the return value. If the
-                # __init__ method is supposed to return multiple values, an
-                # exception will be logged.
-                return
+        #if actor_imported and worker.actor_task_counter == 1:
+        #    checkpoint_resumed = restore_and_log_checkpoint(worker, actor)
+        #    if checkpoint_resumed:
+        #        # NOTE(swang): Since we did not actually execute the __init__
+        #        # method, this will put None as the return value. If the
+        #        # __init__ method is supposed to return multiple values, an
+        #        # exception will be logged.
+        #        return
 
         # Determine whether we should checkpoint the actor.
         checkpointing_on = (actor_imported
@@ -352,6 +352,8 @@ def fetch_and_register_actor(actor_class_key, worker):
         # TODO(pcm): Why is the below line necessary?
         unpickled_class.__module__ = module
         worker.actors[actor_id_str] = unpickled_class.__new__(unpickled_class)
+        checkpoint_resumed = restore_and_log_checkpoint(worker, worker.actors[actor_id_str])
+        print("Resumed checkpoint", checkpoint_resumed)
 
         def pred(x):
             return (inspect.isfunction(x) or inspect.ismethod(x)

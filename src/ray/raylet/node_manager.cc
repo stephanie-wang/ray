@@ -389,8 +389,15 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
   ObjectID actor_creation_object = actor_registration.GetActorCreationDependency();
   reconstruction_policy_.Cancel(actor_creation_object);
 
-  actor_registry_.erase(actor_id);
-  actor_registry_.emplace(actor_id, std::move(actor_registration));
+  auto inserted = actor_registry_.emplace(actor_id, actor_registration);
+  if (!inserted.second) {
+    // Only reset the node manager ID if there was already an entry. We do this
+    // to avoid overwriting the frontier information, which might exist if the
+    // actor was resumed from a checkpoint.
+    if (inserted.first->second.GetNodeManagerId() != actor_registration.GetNodeManagerId()) {
+      inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
+    }
+  }
 
   // The actor's location is now known. Dequeue any methods that were
   // submitted before the actor's location was known.
@@ -557,7 +564,7 @@ void NodeManager::ProcessClientMessage(
       if (!actor_id.is_nil()) {
         // TODO(rkn): Consider broadcasting a message to all of the other
         // node managers so that they can mark the actor as dead.
-        RAY_LOG(DEBUG) << "The actor with ID " << actor_id << " died.";
+        RAY_LOG(INFO) << "The actor with ID " << actor_id << " died.";
         auto actor_entry = actor_registry_.find(actor_id);
         RAY_CHECK(actor_entry != actor_registry_.end());
         actor_entry->second.MarkDead();
@@ -1481,6 +1488,7 @@ void GetDuplicateActorTasksFromList(
 void NodeManager::SetActorFrontier(const protocol::ActorFrontier &frontier_data) {
   // Parse the frontier data.
   const ActorID actor_id = from_flatbuf(*frontier_data.actor_id());
+  RAY_LOG(INFO) << "Setting actor frontier for " << actor_id;
   std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf> frontier;
   for (size_t i = 0; i < frontier_data.handle_ids()->size(); ++i) {
     ActorID handle_id = from_flatbuf(*frontier_data.handle_ids()->Get(i));
@@ -1490,6 +1498,7 @@ void NodeManager::SetActorFrontier(const protocol::ActorFrontier &frontier_data)
         .task_counter = frontier_data.task_counters()->Get(i),
         .execution_dependency = execution_dependency,
     };
+    RAY_LOG(INFO) << "Setting actor counter " << frontier_data.task_counters()->Get(i);
   }
   // Set the actor's frontier.
   auto actor_entry = actor_registry_.find(actor_id);
