@@ -1360,7 +1360,7 @@ void NodeManager::ForwardTaskOrResubmit(const Task &task,
     // Actor tasks can only be executed at the actor's location, so they are
     // retried after a timeout. All other tasks that fail to be forwarded are
     // deemed to be placeable again.
-    if (task.GetTaskSpecification().IsActorTask()) {
+    //if (task.GetTaskSpecification().IsActorTask()) {
       // The task is for an actor on another node.  Create a timer to resubmit
       // the task in a little bit. TODO(rkn): Really this should be a
       // unique_ptr instead of a shared_ptr. However, it's a little harder to
@@ -1376,17 +1376,19 @@ void NodeManager::ForwardTaskOrResubmit(const Task &task,
             RAY_CHECK(!error);
             RAY_LOG(DEBUG) << "Resubmitting task " << task_id
                            << " because ForwardTask failed.";
-            SubmitTask(task, Lineage());
+            Task task_copy(task);
+            task_copy.SetNumExecutions(task.GetTaskExecutionSpec().NumExecutions() + 1);
+            SubmitTask(task_copy, Lineage());
           });
       // Remove the task from the lineage cache. The task will get added back
       // once it is resubmitted.
       lineage_cache_.RemoveWaitingTask(task_id);
-    } else {
-      // The task is not for an actor and may therefore be placed on another
-      // node immediately. Send it to the scheduling policy to be placed again.
-      local_queues_.QueuePlaceableTasks({task});
-      ScheduleTasks();
-    }
+    //} else {
+    //  // The task is not for an actor and may therefore be placed on another
+    //  // node immediately. Send it to the scheduling policy to be placed again.
+    //  local_queues_.QueuePlaceableTasks({task});
+    //  ScheduleTasks();
+    //}
   }
 }
 
