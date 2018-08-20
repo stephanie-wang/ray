@@ -1276,6 +1276,7 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t recons
 }
 
 void NodeManager::ResubmitTask(const Task &task) {
+  RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId() << " for actor " << task.GetTaskSpecification().ActorId() << " counter " << task.GetTaskSpecification().ActorCounter();
   if (!task.GetTaskSpecification().ReconstructionEnabled()) {
     TreatTaskAsFailed(task.GetTaskSpecification());
 
@@ -1294,6 +1295,16 @@ void NodeManager::ResubmitTask(const Task &task) {
     }
 
     return;
+  }
+
+  const auto &spec = task.GetTaskSpecification();
+  if (spec.IsActorTask()) {
+    auto actor_entry = actor_registry_.find(spec.ActorId());
+    RAY_CHECK(actor_entry != actor_registry_.end());
+    if (spec.ActorCounter() < GetExpectedActorTaskCounter(actor_entry->second, spec.ActorHandleId())) {
+      RAY_LOG(WARNING) << "An actor task was reconstructed, so we are ignoring it." << spec.TaskId();
+      return;
+    }
   }
 
   // The task may be reconstructed. Submit it with an empty lineage, since any
