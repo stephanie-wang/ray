@@ -137,7 +137,8 @@ static inline Task ExampleActorTask(const ActorID &actor_id,
                                 actor_id, ActorHandleID::nil(),
                                 actor_task_counter,
                                 UniqueID::from_random(), task_arguments, num_returns,
-                                required_resources);
+                                required_resources, Language::PYTHON,
+                                /*reconstruction=*/false);
   auto execution_spec = TaskExecutionSpecification(std::vector<ObjectID>());
   execution_spec.IncrementNumForwards();
   Task task = Task(execution_spec, spec);
