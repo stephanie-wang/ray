@@ -27,10 +27,10 @@ class RAY_EXPORT AsyncGcsClient {
   /// \param client_id The ID to assign to the client.
   /// \param command_type GCS command type.  If CommandType::kChain, chain-replicated
   /// versions of the tables might be used, if available.
-  AsyncGcsClient(const ClientID &client_id, CommandType command_type);
-  AsyncGcsClient(const ClientID &client_id);
-  AsyncGcsClient(CommandType command_type);
-  AsyncGcsClient();
+  AsyncGcsClient(const std::string &address, int port, const ClientID &client_id, CommandType command_type);
+  AsyncGcsClient(const std::string &address, int port, const ClientID &client_id);
+  AsyncGcsClient(const std::string &address, int port, CommandType command_type);
+  AsyncGcsClient(const std::string &address, int port);
 
   /// Connect to the GCS.
   ///
@@ -71,7 +71,7 @@ class RAY_EXPORT AsyncGcsClient {
   Status GetExport(const std::string &driver_id, int64_t export_index,
                    const GetExportCallback &done_callback);
 
-  std::shared_ptr<RedisContext> context() { return context_; }
+  std::vector<std::shared_ptr<RedisContext>> shard_contexts() { return shard_contexts_; }
   std::shared_ptr<RedisContext> primary_context() { return primary_context_; }
 
  private:
@@ -88,9 +88,9 @@ class RAY_EXPORT AsyncGcsClient {
   std::unique_ptr<ProfileTable> profile_table_;
   std::unique_ptr<ClientTable> client_table_;
   // The following contexts write to the data shard
-  std::shared_ptr<RedisContext> context_;
-  std::unique_ptr<RedisAsioClient> asio_async_client_;
-  std::unique_ptr<RedisAsioClient> asio_subscribe_client_;
+  std::vector<std::shared_ptr<RedisContext>> shard_contexts_;
+  std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_async_clients_;
+  std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_subscribe_clients_;
   // The following context writes everything to the primary shard
   std::shared_ptr<RedisContext> primary_context_;
   std::unique_ptr<DriverTable> driver_table_;
