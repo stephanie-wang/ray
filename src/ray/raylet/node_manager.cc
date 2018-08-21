@@ -1113,6 +1113,12 @@ void NodeManager::HandleWorkerUnblocked(std::shared_ptr<Worker> worker) {
 }
 
 void NodeManager::EnqueuePlaceableTask(const Task &task) {
+  // We started running the task, so the task is ready to write to GCS.
+  if (!lineage_cache_.AddReadyTask(task)) {
+    RAY_LOG(WARNING)
+        << "Task " << task.GetTaskSpecification().TaskId()
+        << " already in lineage cache. This is most likely due to reconstruction.";
+  }
   // Mark the task as pending. Once the task has finished execution, or once it
   // has been forwarded to another node, the task must be marked as canceled in
   // the TaskDependencyManager.
@@ -1214,12 +1220,6 @@ void NodeManager::AssignTask(Task &task) {
       task.SetExecutionDependencies({execution_dependency});
       // Extend the frontier to include the executing task.
       actor_entry->second.ExtendFrontier(spec.ActorHandleId(), spec.ActorDummyObject());
-    }
-    // We started running the task, so the task is ready to write to GCS.
-    if (!lineage_cache_.AddReadyTask(task)) {
-      RAY_LOG(WARNING)
-          << "Task " << spec.TaskId()
-          << " already in lineage cache. This is most likely due to reconstruction.";
     }
     // Mark the task as running.
     // (See design_docs/task_states.rst for the state transition diagram.)
