@@ -155,11 +155,13 @@ LineageCache::LineageCache(const ClientID &client_id,
                            gcs::TableInterface<TaskID, protocol::Task> &task_storage,
                            gcs::PubsubInterface<TaskID> &task_pubsub,
                            uint64_t max_lineage_size,
+                           boost::asio::io_service &io_service,
                            bool disabled)
     : client_id_(client_id),
       task_storage_(task_storage),
       task_pubsub_(task_pubsub),
       max_lineage_size_(max_lineage_size),
+      io_service_(io_service),
       disabled_(disabled) {}
 
 /// A helper function to merge one lineage into another, in DFS order.
@@ -328,10 +330,34 @@ bool LineageCache::RemoveWaitingTask(const TaskID &task_id) {
       // Since this task was in state WAITING, check that we were not
       // already subscribed to the task.
       RAY_CHECK(SubscribeTask(task_id));
+    } else {
+      SetTaskTimer(task_id);
     }
   }
   // The task was successfully reset to UNCOMMITTED_REMOTE.
   return true;
+}
+
+void LineageCache::CancelTaskTimer(const TaskID &task_id) {
+  timers_.erase(task_id);
+}
+
+void LineageCache::SetTaskTimer(const TaskID &task_id) {
+  auto it = timers_.find(task_id);
+  if (it != timers_.end()) {
+    return;
+  }
+
+  auto period = boost::posix_time::seconds(1);
+  auto inserted = timers_.emplace(task_id, std::unique_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(io_service_, period)));
+  inserted.first->second->async_wait([this, task_id](const boost::system::error_code &error) {
+          if (!error) {
+            SubscribeTask(task_id);
+          } else {
+            // Check that the error was due to the timer being canceled.
+            RAY_CHECK(error == boost::asio::error::operation_aborted);
+          }
+      });
 }
 
 void LineageCache::MarkTaskAsForwarded(const TaskID &task_id, const ClientID &node_id) {
@@ -433,6 +459,7 @@ void LineageCache::Flush() {
 }
 
 bool LineageCache::SubscribeTask(const TaskID &task_id) {
+  RAY_LOG(INFO) << "Subscribing to task " << task_id;
   auto inserted = subscribed_tasks_.insert(task_id);
   bool unsubscribed = inserted.second;
   if (unsubscribed) {
@@ -440,6 +467,7 @@ bool LineageCache::SubscribeTask(const TaskID &task_id) {
     // notifications for it.
     RAY_CHECK_OK(task_pubsub_.RequestNotifications(JobID::nil(), task_id, client_id_));
   }
+  CancelTaskTimer(task_id);
   // Return whether we were previously unsubscribed to this task and are now
   // subscribed.
   return unsubscribed;

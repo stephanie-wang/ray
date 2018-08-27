@@ -88,11 +88,12 @@ LineageCacheInterface *InitLineageCache(
     const ClientID &client_id,
     gcs::TableInterface<TaskID, protocol::Task> &task_storage,
     gcs::PubsubInterface<TaskID> &task_pubsub, uint64_t max_lineage_size,
+    boost::asio::io_service &io_service,
     bool disabled) {
   switch (policy) {
   case LineageCachePolicy::kLineageCache: {
     RAY_LOG(INFO) << "Using LineageCache policy, k=" << max_lineage_size;
-    return new LineageCache(client_id, task_storage, task_pubsub, max_lineage_size, disabled);
+    return new LineageCache(client_id, task_storage, task_pubsub, max_lineage_size, io_service, disabled);
   } break;
   case LineageCachePolicy::kLineageCacheFlush: {
     RAY_LOG(INFO) << "Using LineageCacheFlush policy";
@@ -141,6 +142,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
                                       gcs_client->raylet_task_table(),
                                       gcs_client->raylet_task_table(),
                                       config.max_lineage_size,
+                                      io_service,
                                       /*disabled=*/(config.gcs_delay_ms >= 0))),
       remote_clients_(),
       remote_server_connections_(),

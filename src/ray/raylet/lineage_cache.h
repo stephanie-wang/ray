@@ -9,6 +9,8 @@
 #include "ray/gcs/tables.h"
 #include "ray/id.h"
 #include "ray/status.h"
+#include <boost/asio.hpp>
+#include <boost/asio/error.hpp>
 // clang-format on
 
 namespace ray {
@@ -215,6 +217,7 @@ class LineageCache : public LineageCacheInterface {
   LineageCache(const ClientID &client_id,
                gcs::TableInterface<TaskID, protocol::Task> &task_storage,
                gcs::PubsubInterface<TaskID> &task_pubsub, uint64_t max_lineage_size,
+               boost::asio::io_service &io_service,
                bool disabled = false);
 
   /// Add a task that is waiting for execution and its uncommitted lineage.
@@ -293,6 +296,9 @@ class LineageCache : public LineageCacheInterface {
 
   size_t NumEntries() const;
 
+  void SetTaskTimer(const TaskID &task_id);
+  void CancelTaskTimer(const TaskID &task_id);
+
  private:
   /// Try to flush a task that is in UNCOMMITTED_READY state. If the task has
   /// parents that are not committed yet, then the child will be flushed once
@@ -336,6 +342,7 @@ class LineageCache : public LineageCacheInterface {
   /// notification will be requested from the pubsub storage system so that
   /// the task and its lineage can be evicted from the stash.
   uint64_t max_lineage_size_;
+  boost::asio::io_service &io_service_;
   /// The set of tasks that are in UNCOMMITTED_READY state. This is a cache of
   /// the tasks that may be flushable.
   // TODO(swang): As an optimization, we may also want to further distinguish
@@ -355,6 +362,7 @@ class LineageCache : public LineageCacheInterface {
   /// storage system. We will receive a notification for these tasks on commit.
   std::unordered_set<TaskID> subscribed_tasks_;
   bool disabled_;
+  std::unordered_map<TaskID, std::unique_ptr<boost::asio::deadline_timer>> timers_;
 };
 
 /// \class LineageCache

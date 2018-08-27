@@ -91,7 +91,7 @@ class LineageCacheTest : public ::testing::Test {
   LineageCacheTest()
       : max_lineage_size_(10),
         mock_gcs_(),
-        lineage_cache_(ClientID::from_random(), mock_gcs_, mock_gcs_, max_lineage_size_) {
+        lineage_cache_(ClientID::from_random(), mock_gcs_, mock_gcs_, max_lineage_size_, io_service_) {
     mock_gcs_.Subscribe([this](ray::gcs::AsyncGcsClient *client, const TaskID &task_id,
                                const ray::protocol::TaskT &data) {
       lineage_cache_.HandleEntryCommitted(task_id);
@@ -101,6 +101,7 @@ class LineageCacheTest : public ::testing::Test {
  protected:
   uint64_t max_lineage_size_;
   MockGcs mock_gcs_;
+  boost::asio::io_service io_service_;
   LineageCache lineage_cache_;
 };
 
