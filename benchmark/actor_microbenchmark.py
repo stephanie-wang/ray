@@ -94,7 +94,7 @@ if __name__ == "__main__":
         ray.worker._init(start_ray_local=True, use_raylet=True, num_local_schedulers=args.num_raylets * 2,
                          resources=[
                             {
-                                "Node{}".format(i): args.num_workers + 4,
+                                "Node{}".format(i): args.num_workers + 2,
                             } for i in range(args.num_raylets * 2)],
                          gcs_delay_ms=gcs_delay_ms,
                          num_redis_shards=args.num_shards,
