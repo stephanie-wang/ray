@@ -114,7 +114,6 @@ def parse_all_experiments():
     policies = [
             (0, -1),
             (1, -1),
-            (2, -1),
             (0, 0),
             ]
     for policy, gcs_delay in policies:
@@ -184,7 +183,6 @@ def run_all_experiments():
     policies = [
             (0, 0),
             (0, -1),
-            (1, -1),
             (2, -1),
             ]
     for policy in policies:

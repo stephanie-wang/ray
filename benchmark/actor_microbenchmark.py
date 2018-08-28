@@ -10,11 +10,20 @@ import argparse
 
 BATCH_SIZE = 100
 
+@ray.remote
+def foo(i):
+    print(i)
+    return None
+
+@ray.remote
+def bar():
+    print('bar')
+    return 1
+
 class A(object):
     def __init__(self, node_resource):
         print("Actor A start...")
-        self.b = ray.remote(resources={node_resource: 1})(B).remote()
-        ray.get(self.b.ready.remote())
+        self.node_resource = node_resource
 
     def ready(self):
         time.sleep(1)
@@ -31,7 +40,7 @@ class A(object):
         if target_throughput < batch_size:
             batch_size = int(target_throughput)
         while True:
-            self.b.f.remote()
+            foo._submit(args=[i], resources={self.node_resource: 1})
             if i % batch_size == 0 and i > 0:
                 end = time.time()
                 sleep_time = (batch_size / target_throughput) - (end - start2)
@@ -51,29 +60,9 @@ class A(object):
         time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
         print("push, end " + time_str)
 
-        ray.get(self.b.get_sum.remote())
+        ray.get(bar.remote())
         end = time.time()
         return i, end - start
-
-class B(object):
-    def __init__(self):
-        print("Actor B start...")
-        self.sum = 0
-        #import yep
-        #yep.start('actorB.prof')
-
-    def ready(self):
-        time.sleep(1)
-        return True
-
-    def f(self):
-        return
-
-    def get_sum(self):
-        #import yep
-        #yep.stop()
-        return self.sum
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
