@@ -24,11 +24,11 @@ K = [100]
 def get_filename(num_raylets, lineage_cache_policy, max_lineage_size,
         gcs_delay, num_redis_shards, target_throughput, trial):
     if max_lineage_size is None:
-        filename = "{}-raylets-{}-policy-{}-gcs-{}-shards-{}-throughput{}.out".format(
+        filename = "nodependencies-{}-raylets-{}-policy-{}-gcs-{}-shards-{}-throughput{}.out".format(
                 num_raylets, lineage_cache_policy, gcs_delay, num_redis_shards,
                 target_throughput, trial)
     else:
-        filename = "{}-raylets-{}-policy-{}-k-{}-gcs-{}-shards-{}-throughput{}.out".format(
+        filename = "nodependencies-{}-raylets-{}-policy-{}-k-{}-gcs-{}-shards-{}-throughput{}.out".format(
                 num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay,
                 num_redis_shards, target_throughput, trial)
     return filename
@@ -62,10 +62,8 @@ def parse_experiment_throughput(num_raylets, lineage_cache_policy,
             while line:
                 if "Lineage" in line:
                     lineage_overloaded = True
-                    throughput = -1
                 elif "Queue" in line:
                     queue_overloaded = True
-                    throughput = -1
                 line = f.readline()
         return throughput, lineage_overloaded, queue_overloaded, timed_out
     except:
@@ -113,7 +111,6 @@ def parse_all_experiments():
             }
     policies = [
             (0, -1),
-            (1, -1),
             (0, 0),
             ]
     for policy, gcs_delay in policies:
@@ -183,7 +180,6 @@ def run_all_experiments():
     policies = [
             (0, 0),
             (0, -1),
-            (2, -1),
             ]
     for policy in policies:
         max_throughputs[policy] = 0

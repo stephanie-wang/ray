@@ -11,9 +11,8 @@ import argparse
 BATCH_SIZE = 100
 
 @ray.remote
-def foo(i):
-    print(i)
-    return None
+def foo():
+    return
 
 @ray.remote
 def bar():
@@ -40,7 +39,10 @@ class A(object):
         if target_throughput < batch_size:
             batch_size = int(target_throughput)
         while True:
-            foo._submit(args=[i], resources={self.node_resource: 1})
+            foo_begin = time.time()
+            foo._submit(args=[], resources={self.node_resource: 1})
+            if time.time() - foo_begin > 0.001:
+                print("foo submit took", time.time() - foo_begin)
             if i % batch_size == 0 and i > 0:
                 end = time.time()
                 sleep_time = (batch_size / target_throughput) - (end - start2)
@@ -50,18 +52,21 @@ class A(object):
                 if end - start >= experiment_time:
                     break
 
-            if i % 10000 == 0 and i > 0:
+            if i % 1000 == 0 and i > 0:
                 end = time.time()
-                print("push, throughput round ", i / 10000, ":", 10000 / (end - start1))
+                print("push, throughput round ", i / 1000, ":", 1000 / (end - start1))
                 start1 = end
 
             i += 1
 
         time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
-        print("push, end " + time_str)
+        print("push, end " + time_str, i)
 
-        ray.get(bar.remote())
+        ray.get(bar._submit(args=[], resources={self.node_resource: 1}))
+
         end = time.time()
+        time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
+        print("push, done " + time_str, i)
         return i, end - start
 
 if __name__ == "__main__":
@@ -89,7 +94,7 @@ if __name__ == "__main__":
         ray.worker._init(start_ray_local=True, use_raylet=True, num_local_schedulers=args.num_raylets * 2,
                          resources=[
                             {
-                                "Node{}".format(i): args.num_workers,
+                                "Node{}".format(i): args.num_workers + 4,
                             } for i in range(args.num_raylets * 2)],
                          gcs_delay_ms=gcs_delay_ms,
                          num_redis_shards=args.num_shards,
