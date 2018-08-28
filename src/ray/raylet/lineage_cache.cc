@@ -352,7 +352,9 @@ void LineageCache::SetTaskTimer(const TaskID &task_id) {
   auto inserted = timers_.emplace(task_id, std::unique_ptr<boost::asio::deadline_timer>(new boost::asio::deadline_timer(io_service_, period)));
   inserted.first->second->async_wait([this, task_id](const boost::system::error_code &error) {
           if (!error) {
-            SubscribeTask(task_id);
+            if (timers_.count(task_id) == 1) {
+              SubscribeTask(task_id);
+            }
           } else {
             // Check that the error was due to the timer being canceled.
             RAY_CHECK(error == boost::asio::error::operation_aborted);
@@ -459,7 +461,6 @@ void LineageCache::Flush() {
 }
 
 bool LineageCache::SubscribeTask(const TaskID &task_id) {
-  RAY_LOG(INFO) << "Subscribing to task " << task_id;
   auto inserted = subscribed_tasks_.insert(task_id);
   bool unsubscribed = inserted.second;
   if (unsubscribed) {
@@ -482,6 +483,7 @@ bool LineageCache::UnsubscribeTask(const TaskID &task_id) {
     RAY_CHECK_OK(task_pubsub_.CancelNotifications(JobID::nil(), task_id, client_id_));
     subscribed_tasks_.erase(it);
   }
+  CancelTaskTimer(task_id);
   // Return whether we were previously subscribed to this task and are now
   // unsubscribed.
   return subscribed;
