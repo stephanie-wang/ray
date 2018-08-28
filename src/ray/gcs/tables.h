@@ -330,6 +330,17 @@ class HeartbeatTable : public Table<ClientID, HeartbeatTableData> {
   virtual ~HeartbeatTable() {}
 };
 
+class HeartbeatBatchTable : public Table<ClientID, HeartbeatBatchTableData> {
+ public:
+  HeartbeatBatchTable(const std::shared_ptr<RedisContext> &context,
+                      AsyncGcsClient *client)
+      : Table(context, client) {
+    pubsub_channel_ = TablePubsub::HEARTBEAT_BATCH;
+    prefix_ = TablePrefix::HEARTBEAT_BATCH;
+  }
+  virtual ~HeartbeatBatchTable() {}
+};
+
 class DriverTable : public Log<JobID, DriverTableData> {
  public:
   DriverTable(const std::shared_ptr<RedisContext> &context, AsyncGcsClient *client)
@@ -337,6 +348,7 @@ class DriverTable : public Log<JobID, DriverTableData> {
     pubsub_channel_ = TablePubsub::DRIVER;
     prefix_ = TablePrefix::DRIVER;
   };
+
   virtual ~DriverTable() {}
 
   /// Appends driver data to the driver table.
