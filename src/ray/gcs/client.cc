@@ -17,6 +17,7 @@ AsyncGcsClient::AsyncGcsClient(const ClientID &client_id, CommandType command_ty
   task_reconstruction_log_.reset(new TaskReconstructionLog(context_, this));
   task_lease_table_.reset(new TaskLeaseTable(context_, this));
   heartbeat_table_.reset(new HeartbeatTable(context_, this));
+  heartbeat_batch_table_.reset(new HeartbeatBatchTable(context_, this));
   driver_table_.reset(new DriverTable(primary_context_, this));
   error_table_.reset(new ErrorTable(primary_context_, this));
   profile_table_.reset(new ProfileTable(context_, this));
