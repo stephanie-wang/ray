@@ -1518,7 +1518,8 @@ def _init(address_info=None,
           use_raylet=None,
           gcs_delay_ms=-1,
           lineage_cache_policy=None,
-          max_lineage_size=None):
+          max_lineage_size=None,
+          lease_factor=None):
     """Helper method to connect to an existing Ray cluster or start a new one.
 
     This method handles two cases. Either a Ray cluster already exists and we
@@ -1650,7 +1651,8 @@ def _init(address_info=None,
             use_raylet=use_raylet,
             gcs_delay_ms=gcs_delay_ms,
             lineage_cache_policy=lineage_cache_policy,
-            max_lineage_size=max_lineage_size)
+            max_lineage_size=max_lineage_size,
+            lease_factor=lease_factor)
     else:
         if redis_address is None:
             raise Exception("When connecting to an existing cluster, "

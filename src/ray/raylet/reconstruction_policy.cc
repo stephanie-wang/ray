@@ -80,8 +80,8 @@ void ReconstructionPolicy::HandleReconstructionLogAppend(const TaskID &task_id,
   SetTaskTimeout(it, initial_reconstruction_timeout_ms_);
 
   if (success) {
-    RAY_LOG(INFO) << "Reconstructing task " << task_id;
-    //reconstruction_handler_(task_id, reconstruction_attempt);
+    RAY_LOG(INFO) << "Reconstructing task " << task_id << " at " << current_time_ms();
+    reconstruction_handler_(task_id, reconstruction_attempt);
   }
 }
 

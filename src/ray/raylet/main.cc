@@ -6,7 +6,7 @@
 
 #ifndef RAYLET_TEST
 int main(int argc, char *argv[]) {
-  RAY_CHECK(argc >= 13);
+  RAY_CHECK(argc >= 14);
 
   const std::string raylet_socket_name = std::string(argv[1]);
   const std::string store_socket_name = std::string(argv[2]);
@@ -19,9 +19,10 @@ int main(int argc, char *argv[]) {
   const std::string java_worker_command = std::string(argv[9]);
   const int lineage_cache_policy = std::stoi(argv[10]);
   const uint64_t max_lineage_size = std::stoi(argv[11]);
+  const float lease_factor = std::stof(argv[12], nullptr);
   int gcs_delay_ms = -1;
-  if (argc == 13) {
-    gcs_delay_ms = std::stoi(argv[12]);
+  if (argc == 14) {
+    gcs_delay_ms = std::stoi(argv[13]);
   }
 
   // Configuration for the node manager.
@@ -45,6 +46,7 @@ int main(int argc, char *argv[]) {
   node_manager_config.num_workers_per_process =
       RayConfig::instance().num_workers_per_process();
   node_manager_config.gcs_delay_ms = gcs_delay_ms;
+  node_manager_config.lease_factor = lease_factor;
   // Use a default worker that can execute empty tasks with dependencies.
 
   std::string worker_command;

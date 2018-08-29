@@ -983,7 +983,8 @@ def start_raylet(redis_address,
                  cleanup=True,
                  gcs_delay_ms=-1,
                  lineage_cache_policy=None,
-                 max_lineage_size=None):
+                 max_lineage_size=None,
+                 lease_factor=None):
     """Start a raylet, which is a combined local scheduler and object manager.
 
     Args:
@@ -1013,6 +1014,8 @@ def start_raylet(redis_address,
         lineage_cache_policy = LINEAGE_CACHE
     if max_lineage_size is None:
         max_lineage_size = MAX_LINEAGE_SIZE
+    if lease_factor is None:
+        lease_factor = 1
     assert lineage_cache_policy in LINEAGE_CACHE_POLICIES
 
     if use_valgrind and use_profiler:
@@ -1052,6 +1055,7 @@ def start_raylet(redis_address,
         "",  # Worker command for Java, not needed for Python.
         str(lineage_cache_policy),
         str(max_lineage_size),
+        str(lease_factor),
         str(gcs_delay_ms),
     ]
 
@@ -1335,7 +1339,8 @@ def start_ray_processes(address_info=None,
                         use_raylet=False,
                         gcs_delay_ms=-1,
                         lineage_cache_policy=None,
-                        max_lineage_size=None):
+                        max_lineage_size=None,
+                        lease_factor=None):
     """Helper method to start Ray processes.
 
     Args:
@@ -1596,7 +1601,8 @@ def start_ray_processes(address_info=None,
                     cleanup=cleanup,
                     gcs_delay_ms=gcs_delay_ms,
                     lineage_cache_policy=lineage_cache_policy,
-                    max_lineage_size=max_lineage_size))
+                    max_lineage_size=max_lineage_size,
+                    lease_factor=lease_factor))
 
     if not use_raylet:
         # Start any workers that the local scheduler has not already started.
@@ -1653,7 +1659,8 @@ def start_ray_node(node_ip_address,
                    use_raylet=False,
                    gcs_delay_ms=-1,
                    lineage_cache_policy=None,
-                   max_lineage_size=None):
+                   max_lineage_size=None,
+                   lease_factor=None):
     """Start the Ray processes for a single node.
 
     This assumes that the Ray processes on some master node have already been
@@ -1714,7 +1721,8 @@ def start_ray_node(node_ip_address,
         use_raylet=use_raylet,
         gcs_delay_ms=gcs_delay_ms,
         lineage_cache_policy=lineage_cache_policy,
-        max_lineage_size=max_lineage_size)
+        max_lineage_size=max_lineage_size,
+        lease_factor=lease_factor)
 
 
 def start_ray_head(address_info=None,
@@ -1740,7 +1748,8 @@ def start_ray_head(address_info=None,
                    use_raylet=False,
                    gcs_delay_ms=-1,
                    lineage_cache_policy=None,
-                   max_lineage_size=None):
+                   max_lineage_size=None,
+                   lease_factor=None):
     """Start Ray in local mode.
 
     Args:
@@ -1824,7 +1833,8 @@ def start_ray_head(address_info=None,
         use_raylet=use_raylet,
         gcs_delay_ms=gcs_delay_ms,
         lineage_cache_policy=lineage_cache_policy,
-        max_lineage_size=max_lineage_size)
+        max_lineage_size=max_lineage_size,
+        lease_factor=lease_factor)
 
 
 def try_to_create_directory(directory_path):

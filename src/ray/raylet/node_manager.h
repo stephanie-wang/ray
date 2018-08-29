@@ -32,6 +32,7 @@ struct NodeManagerConfig {
   std::string store_socket_name;
   int gcs_delay_ms;
   LineageCachePolicy lineage_cache_policy;
+  float lease_factor;
 };
 
 class NodeManager {

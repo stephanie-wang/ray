@@ -125,7 +125,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       reconstruction_policy_(
           io_service_,
           [this](const TaskID &task_id, int64_t reconstruction_attempt) { HandleTaskReconstruction(task_id, reconstruction_attempt); },
-          RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
+          config.lease_factor * RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->client_table().GetLocalClientId(), gcs_client->task_lease_table(),
           std::make_shared<ObjectDirectory>(gcs_client),
           gcs_client_->task_reconstruction_log(),
@@ -133,7 +133,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       task_dependency_manager_(
           object_manager, reconstruction_policy_, io_service,
           gcs_client_->client_table().GetLocalClientId(),
-          RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
+          config.lease_factor * RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client->task_lease_table(),
           /*disabled=*/false),
       lineage_cache_(InitLineageCache(config.lineage_cache_policy,
@@ -1371,8 +1371,6 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
 }
 
 void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t reconstruction_attempt) {
-  RAY_LOG(FATAL) << "Reconstructing task " << task_id << " on client "
-                << gcs_client_->client_table().GetLocalClientId();
   // Retrieve the task spec in order to re-execute the task.
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id,
