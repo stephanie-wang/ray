@@ -9,12 +9,17 @@ import time
 import argparse
 
 BATCH_SIZE = 100
+ROUND_TIME = 1
+NUM_ROUNDS = 60
+
+@ray.remote
+def foo():
+    return 1
 
 class A(object):
     def __init__(self, node_resource):
         print("Actor A start...")
-        self.b = ray.remote(resources={node_resource: 1})(B).remote()
-        ray.get(self.b.ready.remote())
+        self.node_resource = node_resource
 
     def ready(self):
         time.sleep(1)
@@ -23,57 +28,43 @@ class A(object):
     def f(self, target_throughput, experiment_time):
         time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
         print("push, start " + time_str)
-        start = time.time()
-        start1 = time.time()
-        start2 = time.time()
         i = 0
         batch_size = BATCH_SIZE
         if target_throughput < batch_size:
             batch_size = int(target_throughput)
+        batch = []
+        latencies = []
+        round_start = time.time()
+        batch_start = time.time()
+        round_number = 0
+        num_rounds = experiment_time / ROUND_TIME
         while True:
-            self.b.f.remote()
+            batch.append(foo._submit(args=[], resources={self.node_resource: 1}))
             if i % batch_size == 0 and i > 0:
                 end = time.time()
-                sleep_time = (batch_size / target_throughput) - (end - start2)
+                if end - round_start > ROUND_TIME:
+                    print("Getting round", round_number)
+                    ray.get(batch)
+                    latencies.append((len(batch), time.time() - round_start))
+                    batch = []
+                    round_start = time.time()
+                    batch_start = time.time()
+                    round_number += 1
+                    if round_number >= num_rounds:
+                        break
+
+                end = time.time()
+                sleep_time = (batch_size / target_throughput) - (end - batch_start)
                 if sleep_time > 0.00003:
                     time.sleep(sleep_time)
-                start2 = time.time()
-                if end - start >= experiment_time:
-                    break
-
-            if i % 10000 == 0 and i > 0:
-                end = time.time()
-                print("push, throughput round ", i / 10000, ":", 10000 / (end - start1))
-                start1 = end
+                batch_start = time.time()
 
             i += 1
 
         time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
         print("push, end " + time_str)
 
-        ray.get(self.b.get_sum.remote())
-        end = time.time()
-        return i, end - start
-
-class B(object):
-    def __init__(self):
-        print("Actor B start...")
-        self.sum = 0
-        #import yep
-        #yep.start('actorB.prof')
-
-    def ready(self):
-        time.sleep(1)
-        return True
-
-    def f(self):
-        return
-
-    def get_sum(self):
-        #import yep
-        #yep.stop()
-        return self.sum
-
+        return latencies
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
@@ -124,11 +115,10 @@ if __name__ == "__main__":
                     receive_resource: 1
                     })(A)
                 actors.append(actor_cls.remote(send_resource))
-
     ray.get([actor.ready.remote() for actor in actors])
-    results = ray.get([actor.f.remote(args.target_throughput,
+    all_results = ray.get([actor.f.remote(args.target_throughput,
                                       args.experiment_time) for actor in
                                       actors])
-    num_items, total_time = zip(*results)
-    throughput = sum(num_items) / max(total_time)
-    print("DONE, target throughput:", args.target_throughput * len(actors), "total throughput:", throughput)
+    for results in all_results:
+        for i, result in enumerate(results):
+            print(i, result[0], result[1])

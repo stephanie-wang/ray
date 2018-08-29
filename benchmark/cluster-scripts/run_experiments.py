@@ -4,7 +4,7 @@ import subprocess
 import time
 import os
 
-EXPERIMENT_TIME = 60
+EXPERIMENT_TIME = 10
 SLEEP_TIME = 10
 NUM_TRIALS = 4
 
@@ -14,23 +14,23 @@ LINEAGE_CACHE_POLICIES = [
         "lineage-cache-k-flush",
         ]
 
-STEP_SIZE = 100
-TARGET_THROUGHPUTS = range(1000, 8000, STEP_SIZE)
-RAYLETS = [32]
-SHARDS = [1, 2, 4, 8, 16, 24, 32, 48, 64]
+TARGET_THROUGHPUTS = [3000]
+LEASE_FACTORS = [0.5, 1, 2, 4, 8, 16]
+RAYLETS = [1]
+SHARDS = [1]
 K = [100]
 
 
-def get_filename(num_raylets, lineage_cache_policy, max_lineage_size,
+def get_filename(lease_factor, num_raylets, lineage_cache_policy, max_lineage_size,
         gcs_delay, num_redis_shards, target_throughput, trial):
     if max_lineage_size is None:
-        filename = "{}-raylets-{}-policy-{}-gcs-{}-shards-{}-throughput{}.out".format(
-                num_raylets, lineage_cache_policy, gcs_delay, num_redis_shards,
-                target_throughput, trial)
-    else:
-        filename = "{}-raylets-{}-policy-{}-k-{}-gcs-{}-shards-{}-throughput{}.out".format(
-                num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay,
+        filename = "{}-lease-{}-raylets-{}-policy-{}-gcs-{}-shards-{}-throughput{}.out".format(
+                lease_factor, num_raylets, lineage_cache_policy, gcs_delay,
                 num_redis_shards, target_throughput, trial)
+    else:
+        filename = "{}-lease-{}-raylets-{}-policy-{}-k-{}-gcs-{}-shards-{}-throughput{}.out".format(
+                lease_factor, num_raylets, lineage_cache_policy, max_lineage_size,
+                gcs_delay, num_redis_shards, target_throughput, trial)
     return filename
 
 def get_csv_filename(lineage_cache_policy, max_lineage_size, gcs_delay):
@@ -120,8 +120,8 @@ def parse_all_experiments():
     for policy, gcs_delay in policies:
         parse_experiments(policy, 100, gcs_delay)
 
-def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards, target_throughput, trial):
-    filename = get_filename(num_raylets, lineage_cache_policy,
+def run_experiment(lease_factor, num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards, target_throughput, trial):
+    filename = get_filename(lease_factor, num_raylets, lineage_cache_policy,
                             max_lineage_size, gcs_delay, num_redis_shards,
                             target_throughput, trial)
     success = True
@@ -137,6 +137,7 @@ def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_dela
             str(target_throughput),
             filename,
             str(EXPERIMENT_TIME),
+            str(lease_factor),
             ]
     with open("job.out", 'a+') as f:
         pid = subprocess.Popen(command, stdout=f, stderr=f)
@@ -179,65 +180,23 @@ def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_dela
 
 def run_all_experiments():
     max_lineage_size = K[0]
-    max_throughputs = {
-            }
     policies = [
-            (0, 0),
             (0, -1),
-            (1, -1),
-            (2, -1),
             ]
-    for policy in policies:
-        max_throughputs[policy] = 0
-    for num_redis_shards in SHARDS:
-        for policy, gcs_delay in policies:
-            for num_raylets in RAYLETS:
-                for target_throughput in TARGET_THROUGHPUTS:
-                    # For the next highest number of shards, start at 500 less
-                    # than the throughput from the previous number of shards.
-                    if target_throughput < max_throughputs[(policy, gcs_delay)] - 5 * STEP_SIZE:
-                        continue
-                    # Run the trials.
-                    for trial in range(NUM_TRIALS):
-                        # If the experiment did not time out, check the logs to
-                        # make sure that the job was stable. Only increase the
-                        # maximum recorded throughput for this policy if the
-                        # job was stable.
-                        (throughput, _, _, _) = parse_experiment_throughput(num_raylets, policy,
-                                max_lineage_size, gcs_delay, num_redis_shards, target_throughput,
-                                trial)
-                        if throughput != -1:
-                            print("Experiment found, logged at {}".format(get_filename(num_raylets, policy,
-                                max_lineage_size, gcs_delay, num_redis_shards, target_throughput,
-                                trial)))
-                            success = True
-                            break
-
-                        # Run one trial. Returns true if the experiment did not
-                        # time out.
-                        success = run_experiment(num_raylets,
-                                policy, max_lineage_size, gcs_delay, num_redis_shards,
-                                target_throughput, trial)
-                        if success:
-                            break
-                    if success:
-                        # If the experiment did not time out, check the logs to
-                        # make sure that the job was stable. Only increase the
-                        # maximum recorded throughput for this policy if the
-                        # job was stable.
-                        (throughput, _, _, _) = parse_experiment_throughput(num_raylets, policy,
-                                max_lineage_size, gcs_delay, num_redis_shards, target_throughput,
-                                trial)
-                        success = (throughput != -1)
-                    # If the experiment was successful and the target
-                    # throughput is greater than it was before, then update the
-                    # maximum throughput.
-                    if success and target_throughput > max_throughputs[(policy, gcs_delay)]:
-                        max_throughputs[(policy, gcs_delay)] = target_throughput
-                    if not success:
-                        # If we're unsuccessful, then don't try any greater
-                        # target throughputs.
-                        break
+    for lease_factor in LEASE_FACTORS:
+        for num_redis_shards in SHARDS:
+            for policy, gcs_delay in policies:
+                for num_raylets in RAYLETS:
+                    for target_throughput in TARGET_THROUGHPUTS:
+                        # Run the trials.
+                        for trial in range(NUM_TRIALS):
+                            # Run one trial. Returns true if the experiment did not
+                            # time out.
+                            success = run_experiment(lease_factor, num_raylets,
+                                    policy, max_lineage_size, gcs_delay, num_redis_shards,
+                                    target_throughput, trial)
+                            if success:
+                                break
 
 
 if __name__ == '__main__':

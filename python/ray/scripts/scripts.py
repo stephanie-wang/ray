@@ -167,7 +167,7 @@ def cli():
     default=None,
     help="the maximum lineage size for the cache")
 @click.option(
-    "--lease-factor"
+    "--lease-factor",
     required=False,
     type=float,
     default=None,
