@@ -125,7 +125,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       reconstruction_policy_(
           io_service_,
           [this](const TaskID &task_id, int64_t reconstruction_attempt) { HandleTaskReconstruction(task_id, reconstruction_attempt); },
-          config.lease_factor * RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
+          2 * config.lease_factor * RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->client_table().GetLocalClientId(), gcs_client->task_lease_table(),
           std::make_shared<ObjectDirectory>(gcs_client),
           gcs_client_->task_reconstruction_log(),
