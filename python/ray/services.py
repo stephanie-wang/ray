@@ -1305,9 +1305,9 @@ def start_raylet_monitor(redis_address,
     """
     gcs_ip_address, gcs_port = redis_address.split(":")
     command = [RAYLET_MONITOR_EXECUTABLE, gcs_ip_address, gcs_port]
-    p = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
-    if cleanup:
-        all_processes[PROCESS_TYPE_MONITOR].append(p)
+    #p = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
+    #if cleanup:
+    #    all_processes[PROCESS_TYPE_MONITOR].append(p)
 
 
 def start_ray_processes(address_info=None,

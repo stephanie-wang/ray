@@ -16,10 +16,12 @@ def pong(submit_time):
     return time.time() - submit_time
 
 class A(object):
-    def __init__(self, ping_node_resource, pong_node_resource):
+    def __init__(self, ping_node_resource, pong_node_resource, group_size):
         print("Actor A start...")
-        self.b = ray.remote(resources={ping_node_resource: 1})(B).remote(pong_node_resource)
-        ray.get(self.b.ready.remote())
+        actor_cls = ray.remote(resources={ping_node_resource: 1})(B)
+        self.b = [actor_cls.remote(pong_node_resource) for _ in
+                range(group_size)]
+        ray.get([b.ready.remote() for b in self.b])
 
     def ready(self):
         time.sleep(1)
@@ -33,8 +35,10 @@ class A(object):
         batch_size = BATCH_SIZE
         if target_throughput < batch_size:
             batch_size = int(target_throughput)
+        batch_size //= len(self.b)
+        target_throughput //= len(self.b)
         while True:
-            self.b.ping.remote(time.time())
+            [b.ping.remote(time.time()) for b in self.b]
             if i % batch_size == 0 and i > 0:
                 end = time.time()
                 sleep_time = (batch_size / target_throughput) - (end - start2)
@@ -45,7 +49,9 @@ class A(object):
                     break
             i += 1
 
-        return ray.get(self.b.get_sum.remote())
+        latencies = ray.get([b.get_sum.remote() for b in self.b])
+        latencies = [max(latency) for latency in zip(*latencies)]
+        return latencies
 
 class B(object):
     def __init__(self, node_resource):
@@ -84,6 +90,8 @@ if __name__ == "__main__":
     parser.add_argument('--policy', type=int, default=0)
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--max-lineage-size', type=str)
+    parser.add_argument('--group-size', type=int, default=1)
+    parser.add_argument('--sample', action='store_true')
     args = parser.parse_args()
 
     if args.pingpong:
@@ -115,20 +123,29 @@ if __name__ == "__main__":
             actor_cls = ray.remote(resources={
                 send_resource: 1,
                 })(A)
-            actors.append(actor_cls.remote(receive_resource, send_resource))
+            actors.append(actor_cls.remote(receive_resource, send_resource, args.group_size))
 
             if args.pingpong:
                 actor_cls = ray.remote(resources={
                     receive_resource: 1
                     })(A)
-                actors.append(actor_cls.remote(send_resource, receive_resource))
+                actors.append(actor_cls.remote(send_resource, receive_resource, args.group_size))
 
     total_time = ray.get([actor.ready.remote() for actor in actors])
-    latencies = ray.get([actor.f.remote(
-        args.target_throughput,
-        args.experiment_time) for actor in actors])
-    latencies = [latency[len(latency) // 4 : 3 * len(latency) // 4] for latency in latencies]
+    if args.sample:
+        for actor in actors[:-1]:
+            actor.f.remote(args.target_throughput, args.experiment_time)
+        latencies = ray.get([actors[-1].f.remote(10, args.experiment_time)])
+    else:
+        latencies = ray.get([actor.f.remote(
+            args.target_throughput,
+            args.experiment_time) for actor in actors])
     for latency in latencies:
-        print("DONE, average latency:", sum(latency) / len(latency))
-        for point in latency:
-            print(point)
+        if args.sample:
+            print(','.join([
+                str(gcs_delay_ms),
+                str(min(latency)),
+                str(args.num_shards),
+                str(args.target_throughput)]))
+        else:
+            print("DONE, average latency:", sum(latency) / len(latency))

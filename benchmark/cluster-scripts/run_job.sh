@@ -5,7 +5,7 @@ GCS_DELAY_MS=$4
 NUM_REDIS_SHARDS=$5
 THROUGHPUT=$6
 OUT_FILENAME=$7
-EXPERIMENT_TIME=${8:-60}
+GROUP_SIZE=${8:-2}
 
 HEAD_IP=$(head -n 1 workers.txt)
 WORKER_IPS=$(tail -n $(( $NUM_RAYLETS * 2 )) workers.txt)
@@ -15,7 +15,7 @@ then
 	echo "Running job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, throughput $THROUGHPUT, and $NUM_REDIS_SHARDS Redis shards..."
 elif [ $# -eq 8 ]
 then
-	echo "Running $EXPERIMENT_TIME s job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, throughput $THROUGHPUT, and $NUM_REDIS_SHARDS Redis shards..."
+	echo "Running job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, throughput $THROUGHPUT, and $NUM_REDIS_SHARDS Redis shards, $GROUP_SIZE group size..."
 else
     echo "Usage: ./run_jobs.sh <num raylets> <lineage policy> <max lineage size> <GCS delay> <num redis shards> <throughput> <out filename>"
     exit
@@ -28,8 +28,8 @@ fi
 sleep 5
 
 echo "Starting job..."
-if [ $THROUGHPUT = 0 ]; then
-    python ~/ray/benchmark/latency_microbenchmark.py --redis-address $HEAD_IP --num-raylets $NUM_RAYLETS 2>&1 | tee $OUT_FILENAME
-else
-    python ~/ray/benchmark/actor_microbenchmark.py --target-throughput $(( $THROUGHPUT / 2 )) --redis-address $HEAD_IP --num-raylets $NUM_RAYLETS --experiment-time $EXPERIMENT_TIME --num-workers 2 --pingpong 2>&1 | tee $OUT_FILENAME
+GCS_ARG=""
+if [ $GCS_DELAY_MS = 0 ]; then
+    GCS_ARG="--gcs"
 fi
+python ~/ray/benchmark/latency_microbenchmark.py --redis-address $HEAD_IP --num-raylets $NUM_RAYLETS --group-size $GROUP_SIZE --target-throughput $THROUGHPUT --num-shards $NUM_REDIS_SHARDS $GCS_ARG --sample 2>&1 | tee -a $OUT_FILENAME
