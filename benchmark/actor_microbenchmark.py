@@ -7,14 +7,35 @@ import time
 import datetime
 import time
 import argparse
+import subprocess
 
 BATCH_SIZE = 100
-ROUND_TIME = 1
+ROUND_TIME = 0.1
 NUM_ROUNDS = 60
 
 @ray.remote
 def foo():
     return 1
+
+def stop_node(local):
+    if local:
+        p = ray.services.all_processes[ray.services.PROCESS_TYPE_RAYLET][-1]
+        ray.services.kill_process(p)
+    else:
+        with open("/home/ubuntu/ray/benchmark/cluster-scripts/workers.txt", 'r') as f:
+            for line in f.readlines():
+                node = line.strip()
+        print("Killing node", node)
+        command = [
+                "ssh",
+                '-o', 'StrictHostKeyChecking=no',
+                "-i", "/home/ubuntu/devenv-key.pem",
+                node,
+                "PATH=/home/ubuntu/anaconda3/bin/:$PATH", "ray", "stop",
+                ]
+        print(command)
+        with open("/tmp/worker.out", 'a+') as f:
+            subprocess.Popen(command, stdout=f, stderr=f)
 
 class A(object):
     def __init__(self, node_resource):
@@ -25,7 +46,7 @@ class A(object):
         time.sleep(1)
         return True
 
-    def f(self, target_throughput, experiment_time):
+    def f(self, target_throughput, experiment_time, test_failure, local):
         time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
         print("push, start " + time_str)
         i = 0
@@ -47,11 +68,14 @@ class A(object):
                     ray.get(batch)
                     latencies.append((len(batch), time.time() - round_start))
                     batch = []
-                    round_start = time.time()
-                    batch_start = time.time()
                     round_number += 1
                     if round_number >= num_rounds:
                         break
+                    if round_number == num_rounds // 2 and test_failure:
+                        stop_node(local)
+
+                    round_start = time.time()
+                    batch_start = time.time()
 
                 end = time.time()
                 sleep_time = (batch_size / target_throughput) - (end - batch_start)
@@ -66,6 +90,7 @@ class A(object):
 
         return latencies
 
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument('--target-throughput', type=int, default=3000)
@@ -78,6 +103,7 @@ if __name__ == "__main__":
     parser.add_argument('--policy', type=int, default=0)
     parser.add_argument('--max-lineage-size', type=int, default=None)
     parser.add_argument('--redis-address', type=str)
+    parser.add_argument('--failure', action='store_true')
     args = parser.parse_args()
 
     if args.pingpong:
@@ -116,9 +142,11 @@ if __name__ == "__main__":
                     })(A)
                 actors.append(actor_cls.remote(send_resource))
     ray.get([actor.ready.remote() for actor in actors])
-    all_results = ray.get([actor.f.remote(args.target_throughput,
-                                      args.experiment_time) for actor in
-                                      actors])
+    all_results = [actor.f.remote(args.target_throughput,
+                                  args.experiment_time,
+                                  args.failure,
+                                  args.redis_address is None) for actor in actors]
+    all_results = ray.get(all_results)
     for results in all_results:
         for i, result in enumerate(results):
             print(i, result[0], result[1])

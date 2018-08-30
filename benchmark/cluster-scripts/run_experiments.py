@@ -6,7 +6,7 @@ import os
 
 EXPERIMENT_TIME = 10
 SLEEP_TIME = 10
-NUM_TRIALS = 4
+NUM_TRIALS = 90
 
 LINEAGE_CACHE_POLICIES = [
         "lineage-cache",
@@ -15,14 +15,14 @@ LINEAGE_CACHE_POLICIES = [
         ]
 
 TARGET_THROUGHPUTS = [3000]
-LEASE_FACTORS = [0.5, 1, 2, 4, 8, 16]
+LEASE_FACTORS = [0.1, 0.25, 0.5, 1, 2, 4, 8, 16]
 RAYLETS = [1]
 SHARDS = [1]
 K = [100]
 
 
 def get_filename(lease_factor, num_raylets, lineage_cache_policy, max_lineage_size,
-        gcs_delay, num_redis_shards, target_throughput, trial):
+        gcs_delay, num_redis_shards, target_throughput, trial, test_failure):
     if max_lineage_size is None:
         filename = "{}-lease-{}-raylets-{}-policy-{}-gcs-{}-shards-{}-throughput{}.out".format(
                 lease_factor, num_raylets, lineage_cache_policy, gcs_delay,
@@ -31,99 +31,86 @@ def get_filename(lease_factor, num_raylets, lineage_cache_policy, max_lineage_si
         filename = "{}-lease-{}-raylets-{}-policy-{}-k-{}-gcs-{}-shards-{}-throughput{}.out".format(
                 lease_factor, num_raylets, lineage_cache_policy, max_lineage_size,
                 gcs_delay, num_redis_shards, target_throughput, trial)
+    if test_failure:
+        filename = "failure-" + filename
     return filename
 
-def get_csv_filename(lineage_cache_policy, max_lineage_size, gcs_delay):
-    if gcs_delay != -1:
-        filename = "gcs.csv"
-    elif max_lineage_size is None:
-        filename = "{}.csv".format(LINEAGE_CACHE_POLICIES[lineage_cache_policy])
-    else:
-        filename = "{}-{}.csv".format(LINEAGE_CACHE_POLICIES[lineage_cache_policy], max_lineage_size)
-    return filename
+def get_csv_filename():
+    return "lease-reconstructions.csv"
 
-def parse_experiment_throughput(num_raylets, lineage_cache_policy,
-        max_lineage_size, gcs_delay, num_redis_shards, target_throughput,
-        trial):
-    filename = get_filename(num_raylets, lineage_cache_policy,
+def parse_experiment_throughput(lease_factor, num_raylets,
+        lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards,
+        target_throughput, trial):
+    filename = get_filename(lease_factor, num_raylets, lineage_cache_policy,
             max_lineage_size, gcs_delay, num_redis_shards, target_throughput, trial)
-    lineage_overloaded = False
-    queue_overloaded = False
-    timed_out = False
 
+    num_submissions = 0
+    num_reconstructions = 0
+    reconstruction_header = False
     try:
         with open(filename, 'r') as f:
-            header = f.readline()
-            if not header.startswith('DONE'):
-                timed_out = True
-                return -1, lineage_overloaded, queue_overloaded, timed_out
-            throughput = float(header.split()[6])
-            line = f.readline()
-            while line:
-                if "Lineage" in line:
-                    lineage_overloaded = True
-                    throughput = -1
-                elif "Queue" in line:
-                    queue_overloaded = True
-                    throughput = -1
-                line = f.readline()
-        return throughput, lineage_overloaded, queue_overloaded, timed_out
+            for line in f.readlines():
+                if reconstruction_header:
+                    num_reconstructions += int(line)
+                elif "RECONSTRUCTIONS" in line:
+                    reconstruction_header = True
+                else:
+                    num_submissions += int(line.split(' ')[1])
     except:
-        return -1, lineage_overloaded, queue_overloaded, timed_out
+        pass
 
-def parse_experiments(lineage_cache_policy, max_lineage_size, gcs_delay):
-    filename = get_csv_filename(lineage_cache_policy, max_lineage_size, gcs_delay)
-    with open(filename, 'w') as f:
-        fieldnames = [
-            'num_shards',
-            'num_raylets',
-            'target_throughput',
-            'throughput',
-            'lineage',
-            'queue',
-            'timed_out',
+    if reconstruction_header:
+        return num_submissions, num_reconstructions
+    else:
+        return -1, -1
+
+
+def parse_experiments(writer, lease_factor):
+    max_lineage_size = K[0]
+    policies = [
+            (0, -1),
             ]
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
+    num_raylets = RAYLETS[0]
+    num_redis_shards = SHARDS[0]
+    policy = 0
+    gcs_delay = -1
+    max_lineage_size = K[0]
+    target_throughput = TARGET_THROUGHPUTS[0]
+    lease = int(1000 * lease_factor)
 
-        for num_redis_shards in SHARDS:
-            for num_raylets in RAYLETS:
-                for target_throughput in TARGET_THROUGHPUTS:
-                    trial = 0
-                    (throughput, lineage_overloaded, queue_overloaded, timed_out) = parse_experiment_throughput(num_raylets,
-                            lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards,
-                            target_throughput, trial)
-                    while throughput == -1 and trial < NUM_TRIALS:
-                        trial += 1
-                        (throughput, lineage_overloaded, queue_overloaded, timed_out) = parse_experiment_throughput(num_raylets,
-                                lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards,
-                                target_throughput, trial)
-                    writer.writerow({
-                        'num_shards': num_redis_shards,
-                        'num_raylets': num_raylets,
-                        'target_throughput': target_throughput * num_raylets,
-                        'throughput': throughput,
-                        'lineage': lineage_overloaded,
-                        'queue': queue_overloaded,
-                        'timed_out': timed_out,
-                        })
+    for trial in range(NUM_TRIALS):
+        (num_submitted, num_reconstructions) = parse_experiment_throughput(
+                lease_factor, num_raylets, policy, max_lineage_size, gcs_delay,
+                num_redis_shards, target_throughput, trial)
+        writer.writerow({
+            'lease': lease,
+            'num_submitted': num_submitted,
+            'num_reconstructions': num_reconstructions,
+            })
 
 def parse_all_experiments():
     max_throughputs = {
             }
-    policies = [
-            (0, -1),
-            (1, -1),
-            (2, -1),
-            (0, 0),
-            ]
-    for policy, gcs_delay in policies:
-        parse_experiments(policy, 100, gcs_delay)
 
-def run_experiment(lease_factor, num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards, target_throughput, trial):
+    filename = get_csv_filename()
+    f = open(filename, 'w')
+    fieldnames = [
+            'lease',
+            'num_submitted',
+            'num_reconstructions',
+        ]
+    writer = csv.DictWriter(f, fieldnames=fieldnames)
+    writer.writeheader()
+
+    for lease_factor in LEASE_FACTORS:
+        parse_experiments(writer, lease_factor)
+
+def run_experiment(lease_factor, num_raylets, lineage_cache_policy,
+        max_lineage_size, gcs_delay, num_redis_shards, target_throughput,
+        trial, test_failure):
     filename = get_filename(lease_factor, num_raylets, lineage_cache_policy,
                             max_lineage_size, gcs_delay, num_redis_shards,
-                            target_throughput, trial)
+                            target_throughput, trial, test_failure)
     success = True
     print("Running experiment, logging to {}".format(filename))
     command = [
@@ -139,6 +126,8 @@ def run_experiment(lease_factor, num_raylets, lineage_cache_policy, max_lineage_
             str(EXPERIMENT_TIME),
             str(lease_factor),
             ]
+    if test_failure:
+        command.append("--failure")
     with open("job.out", 'a+') as f:
         pid = subprocess.Popen(command, stdout=f, stderr=f)
         start = time.time()
@@ -178,25 +167,25 @@ def run_experiment(lease_factor, num_raylets, lineage_cache_policy, max_lineage_
 
     return success
 
-def run_all_experiments():
+def run_all_experiments(test_failure):
     max_lineage_size = K[0]
     policies = [
             (0, -1),
             ]
+    num_raylets = RAYLETS[0]
+    num_redis_shards = SHARDS[0]
+    policy = 0
+    gcs_delay = -1
+    max_lineage_size = K[0]
+    target_throughput = TARGET_THROUGHPUTS[0]
     for lease_factor in LEASE_FACTORS:
-        for num_redis_shards in SHARDS:
-            for policy, gcs_delay in policies:
-                for num_raylets in RAYLETS:
-                    for target_throughput in TARGET_THROUGHPUTS:
-                        # Run the trials.
-                        for trial in range(NUM_TRIALS):
-                            # Run one trial. Returns true if the experiment did not
-                            # time out.
-                            success = run_experiment(lease_factor, num_raylets,
-                                    policy, max_lineage_size, gcs_delay, num_redis_shards,
-                                    target_throughput, trial)
-                            if success:
-                                break
+        # Run the trials.
+        for trial in range(NUM_TRIALS):
+            # Run one trial. Returns true if the experiment did not
+            # time out.
+            run_experiment(lease_factor, num_raylets, policy,
+                    max_lineage_size, gcs_delay,
+                    num_redis_shards, target_throughput, trial, test_failure)
 
 
 if __name__ == '__main__':
@@ -204,10 +193,11 @@ if __name__ == '__main__':
     parser.add_argument('--target-throughput', type=int, default=3000)
     parser.add_argument('--parse', action='store_true')
     parser.add_argument('--run', action='store_true')
+    parser.add_argument('--failure', action='store_true')
     args = parser.parse_args()
 
     if args.run:
-        run_all_experiments()
+        run_all_experiments(args.failure)
 
     if args.parse:
         parse_all_experiments()
