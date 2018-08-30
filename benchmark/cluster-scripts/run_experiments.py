@@ -157,8 +157,9 @@ def run_all_experiments():
     filename = get_filename()
     max_lineage_size = K[0]
     policies = [
-            (0, 0),
-            (0, -1),
+            (0, -2),
+            #(0, 0),
+            #(0, -1),
             ]
     for num_redis_shards in SHARDS:
         for policy, gcs_delay in policies:

@@ -129,19 +129,19 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           gcs_client_->client_table().GetLocalClientId(), gcs_client->task_lease_table(),
           std::make_shared<ObjectDirectory>(gcs_client),
           gcs_client_->task_reconstruction_log(),
-          /*disabled=*/false),
+          /*disabled=*/(config.gcs_delay_ms == -2)),
       task_dependency_manager_(
           object_manager, reconstruction_policy_, io_service,
           gcs_client_->client_table().GetLocalClientId(),
           RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client->task_lease_table(),
-          /*disabled=*/false),
+          /*disabled=*/(config.gcs_delay_ms == -2)),
       lineage_cache_(InitLineageCache(config.lineage_cache_policy,
                                       gcs_client_->client_table().GetLocalClientId(),
                                       gcs_client->raylet_task_table(),
                                       gcs_client->raylet_task_table(),
                                       config.max_lineage_size,
-                                      /*disabled=*/(config.gcs_delay_ms >= 0))),
+                                      /*disabled=*/(config.gcs_delay_ms >= 0 || config.gcs_delay_ms == -2))),
       remote_clients_(),
       remote_server_connections_(),
       actor_registry_(),
@@ -1498,7 +1498,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   Lineage uncommitted_lineage;
   // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
   // mode, remove the uncommitted entries from the lineage cache.
-  if (gcs_delay_ms_ >= 0) {
+  if (gcs_delay_ms_ >= 0 || gcs_delay_ms_ == -2) {
     // TODO(swang): Don't get the uncommitted lineage for these tasks.
     RAY_CHECK(uncommitted_lineage.SetEntry(task, GcsStatus::UNCOMMITTED_WAITING));
   } else {
