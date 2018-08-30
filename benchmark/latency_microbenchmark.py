@@ -91,7 +91,8 @@ if __name__ == "__main__":
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--max-lineage-size', type=str)
     parser.add_argument('--group-size', type=int, default=1)
-    parser.add_argument('--sample', action='store_true')
+    parser.add_argument('--sample-remote', action='store_true')
+    parser.add_argument('--sample-local', action='store_true')
     args = parser.parse_args()
 
     if args.pingpong:
@@ -120,6 +121,10 @@ if __name__ == "__main__":
         for _ in range(args.num_workers):
             send_resource = "Node{}".format(node * 2)
             receive_resource = "Node{}".format(node * 2 + 1)
+
+            if args.sample_local and node == args.num_raylets - 1:
+                receive_resource = send_resource
+
             actor_cls = ray.remote(resources={
                 send_resource: 1,
                 })(A)
@@ -132,7 +137,7 @@ if __name__ == "__main__":
                 actors.append(actor_cls.remote(send_resource, receive_resource, args.group_size))
 
     total_time = ray.get([actor.ready.remote() for actor in actors])
-    if args.sample:
+    if args.sample_remote or args.sample_local:
         for actor in actors[:-1]:
             actor.f.remote(args.target_throughput, args.experiment_time)
         latencies = ray.get([actors[-1].f.remote(10, args.experiment_time)])
@@ -141,11 +146,19 @@ if __name__ == "__main__":
             args.target_throughput,
             args.experiment_time) for actor in actors])
     for latency in latencies:
-        if args.sample:
-            print(','.join([
-                str(gcs_delay_ms),
-                str(min(latency)),
-                str(args.num_shards),
-                str(args.target_throughput)]))
+        if args.sample_remote or args.sample_local:
+            line = [
+                gcs_delay_ms,
+                min(latency),
+                args.num_shards,
+                args.target_throughput
+                ]
+            if args.sample_local:
+                line.append(0)
+            else:
+                line.append(1)
+            print(','.join([str(field) for field in line]))
         else:
             print("DONE, average latency:", sum(latency) / len(latency))
+            for point in latency:
+                print(point)

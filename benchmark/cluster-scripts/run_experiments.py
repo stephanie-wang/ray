@@ -6,7 +6,7 @@ import os
 
 EXPERIMENT_TIME = 60
 SLEEP_TIME = 10
-NUM_TRIALS = 10
+NUM_TRIALS = 100
 
 LINEAGE_CACHE_POLICIES = [
         "lineage-cache",
@@ -17,7 +17,7 @@ LINEAGE_CACHE_POLICIES = [
 STEP_SIZE = 100
 TARGET_THROUGHPUTS = [2000]
 RAYLETS = [32]
-SHARDS = [1, 2, 4, 16]
+SHARDS = [1, 2, 4, 8, 16]
 K = [100]
 
 
@@ -111,7 +111,7 @@ def parse_all_experiments():
     for policy, gcs_delay in policies:
         parse_experiments(policy, 100, gcs_delay)
 
-def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards, target_throughput, trial):
+def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_delay, num_redis_shards, target_throughput, trial, test_local):
     filename = get_filename()
     success = True
     print("Running experiment, logging to {}".format(filename))
@@ -126,6 +126,11 @@ def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_dela
             str(target_throughput),
             filename,
             ]
+    if test_local:
+        command.append("local")
+    else:
+        command.append("remote")
+
     with open("job.out", 'a+') as f:
         pid = subprocess.Popen(command, stdout=f, stderr=f)
         start = time.time()
@@ -165,7 +170,18 @@ def run_all_experiments():
                         # time out.
                         run_experiment(num_raylets, policy, max_lineage_size,
                                 gcs_delay, num_redis_shards, target_throughput,
-                                trial)
+                                trial, True)
+    for num_redis_shards in SHARDS:
+        for policy, gcs_delay in policies:
+            for num_raylets in RAYLETS:
+                for target_throughput in TARGET_THROUGHPUTS:
+                    # Run the trials.
+                    for trial in range(NUM_TRIALS):
+                        # Run one trial. Returns true if the experiment did not
+                        # time out.
+                        run_experiment(num_raylets, policy, max_lineage_size,
+                                gcs_delay, num_redis_shards, target_throughput,
+                                trial, False)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
