@@ -158,12 +158,35 @@ void ReconstructionPolicy::HandleTaskLeaseExpired(const TaskID &task_id) {
   SetTaskTimeout(it, initial_reconstruction_timeout_ms_);
 }
 
+void ReconstructionPolicy::HandleNodeRemoved(const ClientID &node_id) {
+  const auto task_ids = task_leases_[node_id];
+  for (const auto &task_id : task_ids) {
+    HandleTaskLeaseNotification(task_id, ClientID::nil(), 0);
+  }
+
+  RAY_CHECK(task_leases_[node_id].empty());
+  task_leases_.erase(node_id);
+}
+
 void ReconstructionPolicy::HandleTaskLeaseNotification(const TaskID &task_id,
+                                                       const ClientID &node_id,
                                                        int64_t lease_timeout_ms) {
   auto it = listening_tasks_.find(task_id);
   if (it == listening_tasks_.end()) {
     // We are no longer listening for this task, so ignore the notification.
     return;
+  }
+
+  if (node_id != it->second.node_id) {
+    if (!it->second.node_id.is_nil()) {
+      auto erased = task_leases_[it->second.node_id].erase(task_id);
+      RAY_CHECK(erased);
+    }
+    it->second.node_id = node_id;
+    if (!it->second.node_id.is_nil()) {
+      auto inserted = task_leases_[it->second.node_id].insert(task_id);
+      RAY_CHECK(inserted.second);
+    }
   }
 
   if (lease_timeout_ms == 0) {

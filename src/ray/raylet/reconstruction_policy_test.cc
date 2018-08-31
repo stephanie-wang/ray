@@ -143,11 +143,13 @@ class ReconstructionPolicyTest : public ::testing::Test {
     mock_gcs_.Subscribe(
         [this](gcs::AsyncGcsClient *client, const TaskID &task_id,
                const TaskLeaseDataT &task_lease) {
+          const ClientID node_manager_id = ClientID::from_binary(task_lease.node_manager_id);
           reconstruction_policy_->HandleTaskLeaseNotification(task_id,
+              node_manager_id,
                                                               task_lease.timeout);
         },
         [this](gcs::AsyncGcsClient *client, const TaskID &task_id) {
-          reconstruction_policy_->HandleTaskLeaseNotification(task_id, 0);
+          reconstruction_policy_->HandleTaskLeaseNotification(task_id, ClientID::nil(), 0);
         });
   }
 
@@ -320,6 +322,36 @@ TEST_F(ReconstructionPolicyTest, TestReconstructionContinuallySuppressed) {
   CancelPeriodicTimer();
   // Run the test again.
   Run(reconstruction_timeout_ms_ * 1.1);
+  // Check that this time, reconstruction is triggered.
+  ASSERT_EQ(reconstructed_tasks_[task_id], 1);
+}
+
+TEST_F(ReconstructionPolicyTest, TestReconstructionTriggered) {
+  TaskID task_id = TaskID::from_random();
+  task_id = FinishTaskId(task_id);
+  ObjectID object_id = ComputeReturnId(task_id, 1);
+
+  // Listen for an object.
+  reconstruction_policy_->ListenAndMaybeReconstruct(object_id, false);
+  // Send the reconstruction manager heartbeats about the object.
+  ClientID node_id = ClientID::from_random();
+  SetPeriodicTimer(reconstruction_timeout_ms_ / 2, [this, task_id, node_id]() {
+    auto task_lease_data = std::make_shared<TaskLeaseDataT>();
+    task_lease_data->node_manager_id = node_id.binary();
+    task_lease_data->acquired_at = current_sys_time_ms();
+    task_lease_data->timeout = reconstruction_timeout_ms_;
+    mock_gcs_.Add(DriverID::nil(), task_id, task_lease_data);
+  });
+  // Run the test for much longer than the reconstruction timeout.
+  Run(reconstruction_timeout_ms_ * 2);
+  // Check that reconstruction is suppressed.
+  ASSERT_TRUE(reconstructed_tasks_.empty());
+
+  reconstruction_policy_->HandleNodeRemoved(ClientID::from_random());
+  Run(0);
+  ASSERT_EQ(reconstructed_tasks_[task_id], 0);
+  reconstruction_policy_->HandleNodeRemoved(node_id);
+  Run(0);
   // Check that this time, reconstruction is triggered.
   ASSERT_EQ(reconstructed_tasks_[task_id], 1);
 }

@@ -70,7 +70,9 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
   /// \param lease_timeout_ms After this timeout, the task's lease is
   /// guaranteed to be expired. If a second notification is not received within
   /// this timeout, then objects that the task creates may be reconstructed.
-  void HandleTaskLeaseNotification(const TaskID &task_id, int64_t lease_timeout_ms);
+  void HandleTaskLeaseNotification(const TaskID &task_id, const ClientID &node_id, int64_t lease_timeout_ms);
+
+  void HandleNodeRemoved(const ClientID &node_id);
 
  private:
   struct ReconstructionTask {
@@ -78,7 +80,8 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
         : expires_at(INT64_MAX),
           subscribed(false),
           reconstruction_attempt(0),
-          reconstruction_timer(new boost::asio::deadline_timer(io_service)) {}
+          reconstruction_timer(new boost::asio::deadline_timer(io_service)),
+          node_id(ClientID::nil()) {}
 
     // The objects created by this task that we are listening for notifications for.
     std::unordered_set<ObjectID> created_objects;
@@ -92,6 +95,7 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
     // The task's reconstruction timer. If this expires before a lease
     // notification is received, then the task will be reconstructed.
     std::unique_ptr<boost::asio::deadline_timer> reconstruction_timer;
+    ClientID node_id;
   };
 
   /// Set the reconstruction timer for a task. If no task lease notifications
@@ -136,6 +140,7 @@ class ReconstructionPolicy : public ReconstructionPolicyInterface {
   gcs::LogInterface<TaskID, TaskReconstructionData> &task_reconstruction_log_;
   /// The tasks that we are currently subscribed to in the GCS.
   std::unordered_map<TaskID, ReconstructionTask> listening_tasks_;
+  std::unordered_map<ClientID, std::unordered_set<TaskID>> task_leases_;
   bool disabled_;
 };
 

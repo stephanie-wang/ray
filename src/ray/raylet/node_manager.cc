@@ -186,18 +186,18 @@ ray::Status NodeManager::RegisterGcs() {
     if (gcs_client_->client_table().IsRemoved(node_manager_id)) {
       // The node manager that added the task lease is already removed. The
       // lease is considered inactive.
-      reconstruction_policy_.HandleTaskLeaseNotification(task_id, 0);
+      reconstruction_policy_.HandleTaskLeaseNotification(task_id, ClientID::nil(), 0);
     } else {
       // NOTE(swang): The task_lease.timeout is an overestimate of the lease's
       // expiration period since the entry may have been in the GCS for some
       // time already. For a more accurate estimate, the age of the entry in
       // the GCS should be subtracted from task_lease.timeout.
-      reconstruction_policy_.HandleTaskLeaseNotification(task_id, task_lease.timeout);
+      reconstruction_policy_.HandleTaskLeaseNotification(task_id, node_manager_id, task_lease.timeout);
     }
   };
   const auto task_lease_empty_callback = [this](gcs::AsyncGcsClient *client,
                                                 const TaskID &task_id) {
-    reconstruction_policy_.HandleTaskLeaseNotification(task_id, 0);
+    reconstruction_policy_.HandleTaskLeaseNotification(task_id, ClientID::nil(), 0);
   };
   RAY_RETURN_NOT_OK(gcs_client_->task_lease_table().Subscribe(
       JobID::nil(), gcs_client_->client_table().GetLocalClientId(),
@@ -385,6 +385,8 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
 
   // Remove the remote server connection.
   remote_server_connections_.erase(client_id);
+
+  reconstruction_policy_.HandleNodeRemoved(client_id);
 }
 
 void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &client_id,
