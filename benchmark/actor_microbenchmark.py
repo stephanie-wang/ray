@@ -10,8 +10,7 @@ import argparse
 import subprocess
 
 BATCH_SIZE = 100
-ROUND_TIME = 0.1
-NUM_ROUNDS = 60
+ROUND_TIME = 0.25
 
 @ray.remote
 def foo():
@@ -58,7 +57,7 @@ class A(object):
         round_start = time.time()
         batch_start = time.time()
         round_number = 0
-        num_rounds = experiment_time / ROUND_TIME
+        start = time.time()
         while True:
             batch.append(foo._submit(args=[], resources={self.node_resource: 1}))
             if i % batch_size == 0 and i > 0:
@@ -69,10 +68,11 @@ class A(object):
                     latencies.append((len(batch), time.time() - round_start))
                     batch = []
                     round_number += 1
-                    if round_number >= num_rounds:
-                        break
-                    if round_number == num_rounds // 2 and test_failure:
+                    if time.time() - start >= experiment_time / 2 and test_failure:
                         stop_node(local)
+                        test_failure = True
+                    if time.time() - start >= experiment_time:
+                        break
 
                     round_start = time.time()
                     batch_start = time.time()
