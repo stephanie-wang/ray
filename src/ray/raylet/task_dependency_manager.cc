@@ -234,18 +234,18 @@ void TaskDependencyManager::TaskPending(const Task &task) {
     }
 
     // Acquire the lease for the task's execution in the global lease table.
-    //AcquireTaskLease(task_id);
-    auto period = boost::posix_time::milliseconds(inserted.first->second.lease_period / 2);
-    inserted.first->second.lease_timer->expires_from_now(period);
-    inserted.first->second.lease_timer->async_wait(
-        [this, task_id](const boost::system::error_code &error) {
-          if (!error) {
-            AcquireTaskLease(task_id);
-          } else {
-            // Check that the error was due to the timer being canceled.
-            RAY_CHECK(error == boost::asio::error::operation_aborted);
-          }
-        });
+    AcquireTaskLease(task_id);
+    //auto period = boost::posix_time::milliseconds(inserted.first->second.lease_period / 2);
+    //inserted.first->second.lease_timer->expires_from_now(period);
+    //inserted.first->second.lease_timer->async_wait(
+    //    [this, task_id](const boost::system::error_code &error) {
+    //      if (!error) {
+    //        AcquireTaskLease(task_id);
+    //      } else {
+    //        // Check that the error was due to the timer being canceled.
+    //        RAY_CHECK(error == boost::asio::error::operation_aborted);
+    //      }
+    //    });
 
   }
 }
