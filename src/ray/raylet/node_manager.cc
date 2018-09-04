@@ -663,6 +663,7 @@ void NodeManager::ProcessClientMessage(
     TaskExecutionSpecification task_execution_spec(
         from_flatbuf(*message->execution_dependencies()));
     TaskSpecification task_spec(*message->task_spec());
+    task_execution_spec.SetLastTimestamp(current_sys_time_ms());
     Task task(task_execution_spec, task_spec);
     // Submit the task to the local scheduler. Since the task was submitted
     // locally, there is no uncommitted lineage.
@@ -836,6 +837,7 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpec().NumForwards();
+    RAY_LOG(INFO) << "Task received after " << current_sys_time_ms() - task.GetTaskExecutionSpec().LastTimestamp() << "ms";
     SubmitTask(task, uncommitted_lineage, /* forwarded = */ true);
   } break;
   case protocol::MessageType::DisconnectClient: {

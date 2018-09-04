@@ -13,8 +13,8 @@ BATCH_SIZE = 100
 ROUND_TIME = 0.25
 
 @ray.remote
-def foo():
-    return 1
+def foo(submit_time):
+    return time.time() - submit_time
 
 def stop_node(local):
     if local:
@@ -59,12 +59,14 @@ class A(object):
         round_number = 0
         start = time.time()
         while True:
-            batch.append(foo._submit(args=[], resources={self.node_resource: 1}))
+            batch.append(foo._submit(args=[time.time()], resources={self.node_resource: 1}))
             if i % batch_size == 0 and i > 0:
                 end = time.time()
                 if end - round_start > ROUND_TIME:
                     print("Getting round", round_number)
-                    ray.get(batch)
+                    batch_latencies = ray.get(batch)
+                    for latency in batch_latencies:
+                        print(latency)
                     latencies.append((len(batch), time.time() - round_start))
                     batch = []
                     round_number += 1
