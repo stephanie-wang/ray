@@ -29,14 +29,10 @@ fi
 sleep 5
 
 echo "Starting job..."
-GCS_ARG=""
-if [ $GCS_DELAY_MS = 0 ]; then
-    GCS_ARG="--gcs"
-fi
 
 SAMPLE_ARG=""
 if [ $SAMPLE = "local" ] || [ $SAMPLE = "remote" ]; then
     SAMPLE_ARG="--sample-$SAMPLE"
 fi
 
-python ~/ray/benchmark/latency_microbenchmark.py --redis-address $HEAD_IP --num-raylets $NUM_RAYLETS --group-size $GROUP_SIZE --target-throughput $THROUGHPUT --num-shards $NUM_REDIS_SHARDS $GCS_ARG $SAMPLE_ARG 2>&1 | tee -a $OUT_FILENAME
+python ~/ray/benchmark/latency_microbenchmark.py --redis-address $HEAD_IP --num-raylets $NUM_RAYLETS --group-size $GROUP_SIZE --target-throughput $THROUGHPUT --num-shards $NUM_REDIS_SHARDS --gcs-delay-ms $GCS_DELAY_MS $SAMPLE_ARG 2>&1 | tee -a $OUT_FILENAME

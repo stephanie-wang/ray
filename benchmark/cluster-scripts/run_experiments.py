@@ -4,8 +4,8 @@ import subprocess
 import time
 import os
 
-EXPERIMENT_TIME = 60
-SLEEP_TIME = 10
+EXPERIMENT_TIME = 90
+SLEEP_TIME = 1
 NUM_TRIALS = 100
 
 LINEAGE_CACHE_POLICIES = [
@@ -14,10 +14,9 @@ LINEAGE_CACHE_POLICIES = [
         "lineage-cache-k-flush",
         ]
 
-STEP_SIZE = 100
-TARGET_THROUGHPUTS = [2000]
+TARGET_THROUGHPUTS = [250] + list(range(500, 3000, 500))
 RAYLETS = [32]
-SHARDS = [1, 2, 4, 8, 16]
+SHARDS = [1, 4]
 K = [100]
 
 
@@ -137,10 +136,13 @@ def run_experiment(num_raylets, lineage_cache_policy, max_lineage_size, gcs_dela
 
         time.sleep(SLEEP_TIME)
         sleep_time = SLEEP_TIME
+        i = 0
         while pid.poll() is None and (time.time() - start) < EXPERIMENT_TIME:
-            print("job took", sleep_time, "so far. Sleeping...")
+            if i % 10 == 0:
+                print("job took", sleep_time, "so far. Sleeping...")
             sleep_time += SLEEP_TIME
             time.sleep(SLEEP_TIME)
+            i += 1
 
         if pid.poll() is None:
             pid.kill()
@@ -158,31 +160,25 @@ def run_all_experiments():
     max_lineage_size = K[0]
     policies = [
             (0, -2),
-            #(0, 0),
-            #(0, -1),
+            (0, 0),
+            (0, -1),
             ]
-    for num_redis_shards in SHARDS:
-        for policy, gcs_delay in policies:
-            for num_raylets in RAYLETS:
-                for target_throughput in TARGET_THROUGHPUTS:
-                    # Run the trials.
-                    for trial in range(NUM_TRIALS):
-                        # Run one trial. Returns true if the experiment did not
-                        # time out.
-                        run_experiment(num_raylets, policy, max_lineage_size,
-                                gcs_delay, num_redis_shards, target_throughput,
-                                trial, True)
-    for num_redis_shards in SHARDS:
-        for policy, gcs_delay in policies:
-            for num_raylets in RAYLETS:
-                for target_throughput in TARGET_THROUGHPUTS:
-                    # Run the trials.
-                    for trial in range(NUM_TRIALS):
+    # Run the trials.
+    for trial in range(NUM_TRIALS):
+        for num_redis_shards in SHARDS:
+            for target_throughput in TARGET_THROUGHPUTS:
+                for policy, gcs_delay in policies:
+                    for num_raylets in RAYLETS:
                         # Run one trial. Returns true if the experiment did not
                         # time out.
                         run_experiment(num_raylets, policy, max_lineage_size,
                                 gcs_delay, num_redis_shards, target_throughput,
                                 trial, False)
+                        # Run one trial. Returns true if the experiment did not
+                        # time out.
+                        run_experiment(num_raylets, policy, max_lineage_size,
+                                gcs_delay, num_redis_shards, target_throughput,
+                                trial, True)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()

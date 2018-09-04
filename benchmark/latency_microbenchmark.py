@@ -10,6 +10,12 @@ import argparse
 import numpy as np
 
 BATCH_SIZE = 100
+CAPACITIES = {
+        1: 600,
+        2: 800,
+        4: 1000,
+        }
+WAVE_UP_TIME = 2
 
 @ray.remote
 def pong(submit_time):
@@ -27,30 +33,66 @@ class A(object):
         time.sleep(1)
         return True
 
-    def f(self, target_throughput, experiment_time):
+    def f(self, target_throughput, experiment_time, square, num_shards, sample):
         time_str = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S:%f')
         start = time.time()
         start2 = time.time()
         i = 0
+
+        wave_start = time.time()
+        wave_up_time = WAVE_UP_TIME
+        wave_down_time = 0
+        capacity = CAPACITIES[num_shards]
+        if square:
+            if target_throughput > capacity:
+                experiment_time *= target_throughput / capacity
+                wave_down_time = wave_up_time * (target_throughput / capacity) - wave_up_time
+        print("wave:", wave_down_time, wave_up_time, "experiment_time:", experiment_time)
+
         batch_size = BATCH_SIZE
         if target_throughput < batch_size:
             batch_size = int(target_throughput)
         batch_size //= len(self.b)
         target_throughput //= len(self.b)
+
         while True:
+            if sample:
+                time.sleep(wave_up_time / 2)
+
             [b.ping.remote(time.time()) for b in self.b]
-            if i % batch_size == 0 and i > 0:
+
+            if sample:
+                sleep_time = (
+                        (wave_up_time + wave_down_time) -
+                        (time.time() - wave_start))
+                if sleep_time > 0:
+                    time.sleep(sleep_time)
+                wave_start = time.time()
+                if time.time() - start >= experiment_time:
+                    break
+
+            elif i % batch_size == 0 and i > 0:
                 end = time.time()
                 sleep_time = (batch_size / target_throughput) - (end - start2)
                 if sleep_time > 0.00003:
                     time.sleep(sleep_time)
+                # We reached the end of a wave. Sleep for another wave, then
+                # start again.
+                if time.time() - wave_start >= wave_up_time:
+                    print("wave down", time.time())
+                    sleep_time = ((wave_up_time + wave_down_time) -
+                            (time.time() - wave_start))
+                    if sleep_time > 0:
+                        time.sleep(sleep_time)
+                    print("wave up", time.time())
+                    wave_start = time.time()
                 start2 = time.time()
-                if end - start >= experiment_time:
+                if time.time() - start >= experiment_time:
                     break
             i += 1
 
         latencies = ray.get([b.get_sum.remote() for b in self.b])
-        latencies = [max(latency) for latency in zip(*latencies)]
+        latencies = [min(latency) for latency in zip(*latencies)]
         return latencies
 
 class B(object):
@@ -86,7 +128,7 @@ if __name__ == "__main__":
     parser.add_argument('--pingpong', action='store_true')
     parser.add_argument('--num-raylets', type=int, default=1)
     parser.add_argument('--num-shards', type=int, default=None)
-    parser.add_argument('--gcs', action='store_true')
+    parser.add_argument('--gcs-delay-ms', type=int, required=True)
     parser.add_argument('--policy', type=int, default=0)
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--max-lineage-size', type=str)
@@ -98,17 +140,13 @@ if __name__ == "__main__":
     if args.pingpong:
         args.target_throughput //= 2
 
-    gcs_delay_ms = -1
-    if args.gcs:
-        gcs_delay_ms = 0
-
     if args.redis_address is None:
         ray.worker._init(start_ray_local=True, use_raylet=True, num_local_schedulers=args.num_raylets * 2,
                          resources=[
                             {
                                 "Node{}".format(i): args.num_workers,
                             } for i in range(args.num_raylets * 2)],
-                         gcs_delay_ms=gcs_delay_ms,
+                         gcs_delay_ms=args.gcs_delay_ms,
                          num_redis_shards=args.num_shards,
                          lineage_cache_policy=args.policy,
                          num_workers=args.num_workers,
@@ -139,17 +177,30 @@ if __name__ == "__main__":
     total_time = ray.get([actor.ready.remote() for actor in actors])
     if args.sample_remote or args.sample_local:
         for actor in actors[:-1]:
-            actor.f.remote(args.target_throughput, args.experiment_time)
-        latencies = ray.get([actors[-1].f.remote(10, args.experiment_time)])
+            actor.f.remote(
+                    args.target_throughput,
+                    args.experiment_time,
+                    True,
+                    args.num_shards,
+                    False)
+        latencies = ray.get([actors[-1].f.remote(
+            args.target_throughput,
+            args.experiment_time,
+            True,
+            args.num_shards, True)])
     else:
         latencies = ray.get([actor.f.remote(
             args.target_throughput,
-            args.experiment_time) for actor in actors])
+            args.experiment_time,
+            True,
+            args.num_shards,
+            False) for actor in actors])
     for latency in latencies:
         if args.sample_remote or args.sample_local:
             line = [
-                gcs_delay_ms,
+                args.gcs_delay_ms,
                 min(latency),
+                sum(latency) / len(latency),
                 args.num_shards,
                 args.target_throughput
                 ]
