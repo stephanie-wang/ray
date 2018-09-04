@@ -16,6 +16,13 @@ ROUND_TIME = 0.25
 def foo(submit_time):
     return time.time() - submit_time
 
+class B(object):
+    def __init__(self):
+        pass
+
+    def foo(self, submit_time):
+        return time.time() - submit_time
+
 def stop_node(local):
     if local:
         p = ray.services.all_processes[ray.services.PROCESS_TYPE_RAYLET][-1]
@@ -37,9 +44,15 @@ def stop_node(local):
             subprocess.Popen(command, stdout=f, stderr=f)
 
 class A(object):
-    def __init__(self, node_resource):
+    def __init__(self, node_resource, use_actor):
         print("Actor A start...")
         self.node_resource = node_resource
+        self.use_actor = use_actor
+        if self.use_actor:
+            actor_cls = ray.remote(resources={
+                node_resource: 1,
+                })(B)
+            self.b = actor_cls.remote()
 
     def ready(self):
         time.sleep(1)
@@ -59,7 +72,11 @@ class A(object):
         round_number = 0
         start = time.time()
         while True:
-            batch.append(foo._submit(args=[time.time()], resources={self.node_resource: 1}))
+            if self.use_actor:
+                batch.append(self.b.foo.remote(time.time()))
+            else:
+                batch.append(foo._submit(args=[time.time()], resources={self.node_resource: 1}))
+
             if i % batch_size == 0 and i > 0:
                 end = time.time()
                 if end - round_start > ROUND_TIME:
@@ -106,6 +123,7 @@ if __name__ == "__main__":
     parser.add_argument('--max-lineage-size', type=int, default=None)
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--failure', action='store_true')
+    parser.add_argument('--use-actor', action='store_true')
     args = parser.parse_args()
 
     if args.pingpong:
@@ -136,13 +154,13 @@ if __name__ == "__main__":
             actor_cls = ray.remote(resources={
                 send_resource: 1,
                 })(A)
-            actors.append(actor_cls.remote(receive_resource))
+            actors.append(actor_cls.remote(receive_resource, args.use_actor))
 
             if args.pingpong:
                 actor_cls = ray.remote(resources={
                     receive_resource: 1
                     })(A)
-                actors.append(actor_cls.remote(send_resource))
+                actors.append(actor_cls.remote(send_resource, args.use_actor))
     ray.get([actor.ready.remote() for actor in actors])
     all_results = [actor.f.remote(args.target_throughput,
                                   args.experiment_time,
