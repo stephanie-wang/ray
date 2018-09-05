@@ -660,6 +660,7 @@ void NodeManager::ProcessClientMessage(
     auto message = flatbuffers::GetRoot<protocol::SubmitTaskRequest>(message_data);
     TaskExecutionSpecification task_execution_spec(
         from_flatbuf(*message->execution_dependencies()));
+    task_execution_spec.SetLastTimestamp(current_sys_time_ms());
     TaskSpecification task_spec(*message->task_spec());
     Task task(task_execution_spec, task_spec);
     // Submit the task to the local scheduler. Since the task was submitted
@@ -1230,9 +1231,14 @@ void NodeManager::AssignTask(Task &task) {
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb));
                                               //fbb.CreateVector(resource_id_set_flatbuf));
   fbb.Finish(message);
+  auto start = current_sys_time_ms();
   auto status = worker->Connection()->WriteMessage(
       static_cast<int64_t>(protocol::MessageType::ExecuteTask), fbb.GetSize(),
       fbb.GetBufferPointer());
+  auto end = current_sys_time_ms();
+  if ((end - start) > 10) {
+    RAY_LOG(WARNING) << "AssignTask WriteMessage took " << end - start;
+  }
   if (status.ok()) {
     // We started running the task, so the task is ready to write to GCS.
     if (!lineage_cache_->AddReadyTask(task)) {
@@ -1557,9 +1563,14 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   }
 
   auto &server_conn = it->second;
+  auto start = current_sys_time_ms();
   auto status = server_conn.WriteMessage(
       static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
       fbb.GetBufferPointer());
+  auto end = current_sys_time_ms();
+  if ((end - start) > 10) {
+    RAY_LOG(WARNING) << "ForwardTask WriteMessage took " << end - start;
+  }
   if (status.ok()) {
     // If we were able to forward the task, remove the forwarded task from the
     // lineage cache since the receiving node is now responsible for writing
