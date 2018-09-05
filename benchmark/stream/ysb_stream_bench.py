@@ -223,12 +223,9 @@ def ping(time_to_sleep=0.01):
 
 @ray.remote
 def warmup(*args):
-    #x = np.ones(10 ** 8)
-    # for _ in range(100):
-    #     print(_)
-    #     ray.put(x)
-    for arg in args:
-        pass
+    x = np.ones(10 ** 8)
+    for _ in range(100):
+        ray.put(x)
 
 
 def to_list(json_object):
