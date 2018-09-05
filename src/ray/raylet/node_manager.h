@@ -95,6 +95,7 @@ class NodeManager {
                   bool forwarded = false);
   /// Assign a task. The task is assumed to not be queued in local_queues_.
   void AssignTask(Task &task);
+  void HandleTaskAssigned(const ray::Status &status, Task &task, std::shared_ptr<Worker> &worker);
   /// Handle a worker finishing its assigned task.
   void FinishAssignedTask(Worker &worker);
   /// Perform a placement decision on placeable tasks.

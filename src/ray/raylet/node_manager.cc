@@ -1232,13 +1232,22 @@ void NodeManager::AssignTask(Task &task) {
                                               //fbb.CreateVector(resource_id_set_flatbuf));
   fbb.Finish(message);
   auto start = current_sys_time_ms();
-  auto status = worker->Connection()->WriteMessage(
+  auto worker_ref = std::weak_ptr<Worker>(worker);
+  worker->Connection()->WriteMessageAsync(
       static_cast<int64_t>(protocol::MessageType::ExecuteTask), fbb.GetSize(),
-      fbb.GetBufferPointer());
-  auto end = current_sys_time_ms();
-  if ((end - start) > 10) {
-    RAY_LOG(WARNING) << "AssignTask WriteMessage took " << end - start;
-  }
+      fbb.GetBufferPointer(), [this, task, worker_ref, start](const ray::Status &status) mutable {
+        auto worker = worker_ref.lock();
+        RAY_CHECK(worker);
+        HandleTaskAssigned(status, task, worker);
+        auto end = current_sys_time_ms();
+        if ((end - start) > 10) {
+          RAY_LOG(WARNING) << "AssignTask WriteMessage took " << end - start;
+        }
+      });
+}
+
+void NodeManager::HandleTaskAssigned(const ray::Status &status, Task &task, std::shared_ptr<Worker> &worker) {
+  const auto &spec = task.GetTaskSpecification();
   if (status.ok()) {
     // We started running the task, so the task is ready to write to GCS.
     if (!lineage_cache_->AddReadyTask(task)) {
