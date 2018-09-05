@@ -280,7 +280,6 @@ class Reducer(object):
         """
         # (campaign_id, window) --> count
         self.clear()
-        print("HELLO")
 
     def __ray_save__(self):
         checkpoint = pickle.dumps({
@@ -331,7 +330,6 @@ class Reducer(object):
         """
         Clear all data structures.
         """
-        print("clearing")
         self.seen = defaultdict(int)
         self.latencies = defaultdict(int)
         self.calls = 0
@@ -372,7 +370,7 @@ if __name__ == '__main__':
     parser.add_argument('--target-throughput', type=int, default=1e5)
     parser.add_argument('--test-throughput', action='store_true')
     parser.add_argument('--time-slice-ms', type=int, default=100)
-    parser.add_argument('--warmup-time', type=int, default=60)
+    parser.add_argument('--warmup-time', type=int, default=10)
     args = parser.parse_args()
 
     checkpoint = args.actor_checkpointing
@@ -434,6 +432,8 @@ if __name__ == '__main__':
     reducers = [init_actor(i, node_resources, Reducer, checkpoint) for i in range(num_reducers)]
     # Make sure the reducers are initialized.
     ray.get([reducer.clear.remote() for reducer in reducers])
+    print("...finished initializing reducers:", len(reducers))
+
     print("Placing dependencies on nodes...")
     ray_warmup(node_resources, gen_deps)
 
@@ -441,12 +441,12 @@ if __name__ == '__main__':
         time_to_sleep = BATCH_SIZE_SEC
 
         print("Warming up...")
-        #start_time = time.time()
-        #end_time = start_time + warmup_time
+        start_time = time.time()
+        end_time = start_time + warmup_time
 
-        #while time.time() < end_time:
-        #    submit_tasks()
-        #    time.sleep(time_to_sleep)
+        while time.time() < end_time:
+            submit_tasks()
+            time.sleep(time_to_sleep)
 
         print("Clearing reducers...")
         time.sleep(5) # TODO non-deterministic, fix

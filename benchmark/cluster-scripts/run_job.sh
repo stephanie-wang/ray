@@ -1,5 +1,5 @@
 NUM_RAYLETS=$1
-THROUGHPUT=$2
+THROUGHPUT=${2:-100000}
 EXPERIMENT_TIME=$3
 
 LINEAGE_POLICY=0
@@ -31,4 +31,4 @@ sleep 5
 
 echo "Starting job..."
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT
