@@ -878,7 +878,7 @@ void NodeManager::ScheduleTasks() {
       const auto task = local_queues_.RemoveTask(task_id);
       // Attempt to forward the task. If this fails to forward the task,
       // the task will be resubmit locally.
-      ForwardTaskOrResubmit(task, client_id);
+      RAY_CHECK_OK(ForwardTask(task, client_id));
     }
   }
 
@@ -1034,7 +1034,7 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
         } else {
           // Attempt to forward the task. If this fails to forward the task,
           // the task will be resubmit locally.
-          ForwardTaskOrResubmit(task, node_manager_id);
+          RAY_CHECK_OK(ForwardTask(task, node_manager_id));
         }
       }
     } else {
@@ -1471,14 +1471,95 @@ void NodeManager::HandleObjectMissing(const ObjectID &object_id) {
   }
 }
 
-void NodeManager::ForwardTaskOrResubmit(const Task &task,
-                                        const ClientID &node_manager_id) {
-  /// TODO(rkn): Should we check that the node manager is remote and not local?
-  /// TODO(rkn): Should we check if the remote node manager is known to be dead?
-  const TaskID task_id = task.GetTaskSpecification().TaskId();
+ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
+  const auto &spec = task.GetTaskSpecification();
+  auto task_id = spec.TaskId();
 
-  // Attempt to forward the task.
-  if (!ForwardTask(task, node_manager_id).ok()) {
+  Lineage uncommitted_lineage;
+  // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
+  // mode, remove the uncommitted entries from the lineage cache.
+  if (gcs_delay_ms_ >= 0) {
+    // TODO(swang): Don't get the uncommitted lineage for these tasks.
+    RAY_CHECK(uncommitted_lineage.SetEntry(task, GcsStatus::UNCOMMITTED_WAITING));
+  } else {
+    // Get and serialize the task's unforwarded, uncommitted lineage.
+    uncommitted_lineage = lineage_cache_->GetUncommittedLineage(task_id, node_id);
+  }
+
+  Task &lineage_cache_entry_task =
+      uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
+
+  // Increment forward count for the forwarded task.
+  lineage_cache_entry_task.IncrementNumForwards();
+
+  flatbuffers::FlatBufferBuilder fbb;
+  auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
+  fbb.Finish(request);
+
+  RAY_LOG(DEBUG) << "Forwarding task " << task_id << " to " << node_id << " spillback="
+                 << lineage_cache_entry_task.GetTaskExecutionSpec().NumForwards();
+
+  auto client_info = gcs_client_->client_table().GetClient(node_id);
+
+  // Lookup remote server connection for this node_id and use it to send the request.
+  auto it = remote_server_connections_.find(node_id);
+  if (it == remote_server_connections_.end()) {
+    // TODO(atumanov): caller must handle failure to ensure tasks are not lost.
+    RAY_LOG(INFO) << "No NodeManager connection found for GCS client id " << node_id;
+    return ray::Status::IOError("NodeManager connection not found");
+  }
+
+  auto &server_conn = it->second;
+  auto start = current_sys_time_ms();
+  server_conn.WriteMessageAsync(
+      static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
+      fbb.GetBufferPointer(), [this, task, node_id, start](const ray::Status &status) {
+        HandleTaskForwarded(status, task, node_id);
+        auto end = current_sys_time_ms();
+        if ((end - start) > 10) {
+          RAY_LOG(WARNING) << "ForwardTask WriteMessage took " << end - start;
+        }
+      });
+  return ray::Status::OK();
+}
+
+void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &task, const ClientID &node_manager_id) {
+  TaskID task_id = task.GetTaskSpecification().TaskId();
+  if (status.ok()) {
+    // If we were able to forward the task, remove the forwarded task from the
+    // lineage cache since the receiving node is now responsible for writing
+    // the task to the GCS.
+    if (!lineage_cache_->RemoveWaitingTask(task_id)) {
+      RAY_LOG(WARNING) << "Task " << task_id << " already removed from the lineage "
+                                                "cache. This is most likely due to "
+                                                "reconstruction.";
+    }
+    // Mark as forwarded so that the task and its lineage is not re-forwarded
+    // in the future to the receiving node.
+    lineage_cache_->MarkTaskAsForwarded(task_id, node_manager_id);
+
+    // Notify the task dependency manager that we are no longer responsible
+    // for executing this task.
+    task_dependency_manager_.TaskCanceled(task_id);
+    // Preemptively push any local arguments to the receiving node. For now, we
+    // only do this with actor tasks, since actor tasks must be executed by a
+    // specific process and therefore have affinity to the receiving node.
+    if (task.GetTaskSpecification().IsActorTask()) {
+      // Iterate through the object's arguments. NOTE(swang): We do not include
+      // the execution dependencies here since those cannot be transferred
+      // between nodes.
+      for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
+        int count = task.GetTaskSpecification().ArgIdCount(i);
+        for (int j = 0; j < count; j++) {
+          ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
+          // If the argument is local, then push it to the receiving node.
+          if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
+            object_manager_.Push(argument_id, node_manager_id);
+          }
+        }
+      }
+    }
+  } else {
     RAY_LOG(INFO) << "Failed to forward task " << task_id << " to node manager "
                   << node_manager_id;
     // Mark the failed task as pending to let other raylets know that we still
@@ -1522,91 +1603,6 @@ void NodeManager::ForwardTaskOrResubmit(const Task &task,
     //  ScheduleTasks();
     //}
   }
-}
-
-ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) {
-  const auto &spec = task.GetTaskSpecification();
-  auto task_id = spec.TaskId();
-
-  Lineage uncommitted_lineage;
-  // NOTE(swang): For benchmarking purposes only. If we're in write-to-GCS
-  // mode, remove the uncommitted entries from the lineage cache.
-  if (gcs_delay_ms_ >= 0) {
-    // TODO(swang): Don't get the uncommitted lineage for these tasks.
-    RAY_CHECK(uncommitted_lineage.SetEntry(task, GcsStatus::UNCOMMITTED_WAITING));
-  } else {
-    // Get and serialize the task's unforwarded, uncommitted lineage.
-    uncommitted_lineage = lineage_cache_->GetUncommittedLineage(task_id, node_id);
-  }
-
-  Task &lineage_cache_entry_task =
-      uncommitted_lineage.GetEntryMutable(task_id)->TaskDataMutable();
-
-  // Increment forward count for the forwarded task.
-  lineage_cache_entry_task.IncrementNumForwards();
-
-  flatbuffers::FlatBufferBuilder fbb;
-  auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
-  fbb.Finish(request);
-
-  RAY_LOG(DEBUG) << "Forwarding task " << task_id << " to " << node_id << " spillback="
-                 << lineage_cache_entry_task.GetTaskExecutionSpec().NumForwards();
-
-  auto client_info = gcs_client_->client_table().GetClient(node_id);
-
-  // Lookup remote server connection for this node_id and use it to send the request.
-  auto it = remote_server_connections_.find(node_id);
-  if (it == remote_server_connections_.end()) {
-    // TODO(atumanov): caller must handle failure to ensure tasks are not lost.
-    RAY_LOG(INFO) << "No NodeManager connection found for GCS client id " << node_id;
-    return ray::Status::IOError("NodeManager connection not found");
-  }
-
-  auto &server_conn = it->second;
-  auto start = current_sys_time_ms();
-  auto status = server_conn.WriteMessage(
-      static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
-      fbb.GetBufferPointer());
-  auto end = current_sys_time_ms();
-  if ((end - start) > 10) {
-    RAY_LOG(WARNING) << "ForwardTask WriteMessage took " << end - start;
-  }
-  if (status.ok()) {
-    // If we were able to forward the task, remove the forwarded task from the
-    // lineage cache since the receiving node is now responsible for writing
-    // the task to the GCS.
-    if (!lineage_cache_->RemoveWaitingTask(task_id)) {
-      RAY_LOG(WARNING) << "Task " << task_id << " already removed from the lineage "
-                                                "cache. This is most likely due to "
-                                                "reconstruction.";
-    }
-    // Mark as forwarded so that the task and its lineage is not re-forwarded
-    // in the future to the receiving node.
-    lineage_cache_->MarkTaskAsForwarded(task_id, node_id);
-
-    // Notify the task dependency manager that we are no longer responsible
-    // for executing this task.
-    task_dependency_manager_.TaskCanceled(task_id);
-    // Preemptively push any local arguments to the receiving node. For now, we
-    // only do this with actor tasks, since actor tasks must be executed by a
-    // specific process and therefore have affinity to the receiving node.
-    if (spec.IsActorTask()) {
-      // Iterate through the object's arguments. NOTE(swang): We do not include
-      // the execution dependencies here since those cannot be transferred
-      // between nodes.
-      for (int i = 0; i < spec.NumArgs(); ++i) {
-        int count = spec.ArgIdCount(i);
-        for (int j = 0; j < count; j++) {
-          ObjectID argument_id = spec.ArgId(i, j);
-          // If the argument is local, then push it to the receiving node.
-          if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
-            object_manager_.Push(argument_id, node_id);
-          }
-        }
-      }
-    }
-  }
-  return status;
 }
 
 void GetDuplicateActorTasksFromList(

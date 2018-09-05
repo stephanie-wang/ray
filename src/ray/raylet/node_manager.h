@@ -104,15 +104,10 @@ class NodeManager {
   /// Resubmit a task for execution. This is a task that was previously already
   /// submitted to a raylet but which must now be re-executed.
   void ResubmitTask(const Task &task);
-  /// Attempt to forward a task to a remote different node manager. If this
-  /// fails, the task will be resubmit locally.
-  ///
-  /// \param task The task in question.
-  /// \param node_manager_id The ID of the remote node manager.
-  void ForwardTaskOrResubmit(const Task &task, const ClientID &node_manager_id);
   /// Forward a task to another node to execute. The task is assumed to not be
   /// queued in local_queues_.
   ray::Status ForwardTask(const Task &task, const ClientID &node_id);
+  void HandleTaskForwarded(const ray::Status &status, const Task &task, const ClientID &client_id);
   /// Dispatch locally scheduled tasks. This attempts the transition from "scheduled" to
   /// "running" task state.
   void DispatchTasks();
