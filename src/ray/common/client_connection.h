@@ -2,6 +2,7 @@
 #define RAY_COMMON_CLIENT_CONNECTION_H
 
 #include <memory>
+#include <list>
 
 #include <boost/asio.hpp>
 #include <boost/asio/error.hpp>
@@ -39,6 +40,10 @@ class ServerConnection {
   /// \return Status.
   ray::Status WriteMessage(int64_t type, int64_t length, const uint8_t *message);
 
+
+  void WriteMessageAsync(int64_t type, int64_t length, const uint8_t *message,
+      const std::function<void(const ray::Status&)> &handler);
+
   /// Write a buffer to this connection.
   ///
   /// \param buffer The buffer.
@@ -53,8 +58,22 @@ class ServerConnection {
                   boost::system::error_code &ec);
 
  protected:
+  struct WriteBufferData {
+    int64_t write_version;
+    int64_t write_type;
+    uint64_t write_length;
+    std::vector<uint8_t> write_message;
+    std::function<void(const ray::Status&)> handler;
+  };
+
   /// The socket connection to the server.
   boost::asio::basic_stream_socket<T> socket_;
+  std::list<std::shared_ptr<WriteBufferData>> write_queue_;
+  bool writing_;
+  size_t max_messages_;
+
+ private:
+  void WriteSome();
 };
 
 template <typename T>
