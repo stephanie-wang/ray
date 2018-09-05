@@ -5,4 +5,4 @@ NUM_REDIS_SHARDS=$4
 
 export PATH=/home/ubuntu/anaconda3/bin/:$PATH
 
-ray start --num-workers 0 --use-raylet --head --redis-port=6379 --gcs-delay-ms $GCS_DELAY_MS --num-redis-shards $NUM_REDIS_SHARDS --lineage-cache-policy=$LINEAGE_POLICY --max-lineage-size=$MAX_LINEAGE_SIZE
+ray start --num-workers 0 --use-raylet --head --redis-port=6379 --gcs-delay-ms $GCS_DELAY_MS --num-redis-shards $NUM_REDIS_SHARDS --lineage-cache-policy=$LINEAGE_POLICY --max-lineage-size=$MAX_LINEAGE_SIZE --resources='{"Node0": 1}'

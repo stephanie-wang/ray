@@ -1,11 +1,11 @@
-NUM_RAYLETS=$1
+NUM_RAYLETS=$(( $1 - 1 ))
 LINEAGE_POLICY=$2
 MAX_LINEAGE_SIZE=$3
 GCS_DELAY_MS=$4
 NUM_REDIS_SHARDS=$5
 
 HEAD_IP=$(head -n 1 workers.txt)
-WORKER_IPS=$(tail -n $(( $NUM_RAYLETS * 2 )) workers.txt)
+WORKER_IPS=$(tail -n $NUM_RAYLETS workers.txt)
 
 if [ $# -eq 5 ]
 then
