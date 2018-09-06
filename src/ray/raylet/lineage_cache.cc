@@ -233,7 +233,7 @@ bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   // should be marked as UNCOMMITTED_READY once the task starts execution.
   uint64_t end = current_time_ms();
   uint64_t interval = end - start;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+  if (interval > 10) {
     RAY_LOG(WARNING) << "HANDLER: LineageCache::AddWaitingTask took " << interval << "ms "
         << uncommitted_lineage.GetEntries().size() << " entries";
   }
@@ -376,7 +376,7 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id,
   }
   uint64_t end = current_time_ms();
   uint64_t interval = end - start;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+  if (interval > 10) {
     RAY_LOG(WARNING) << "HANDLER: LineageCache::GetUncommittedLineage took " << interval << "ms "
         << uncommitted_lineage.GetEntries().size() << " entries";
   }
@@ -437,7 +437,7 @@ bool LineageCache::FlushTask(const TaskID &task_id) {
   }
   uint64_t end = current_time_ms();
   uint64_t interval = end - start;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+  if (interval > 10) {
     RAY_LOG(WARNING) << "HANDLER: LineageCache::FlushTask took " << interval << "ms";
   }
   return all_arguments_committed;

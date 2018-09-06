@@ -80,7 +80,7 @@ bool CheckDuplicateActorTask(
 void LogHandlerDelay(uint64_t start_ms, const std::string &operation, const TaskID &task_id, const ActorID &actor_id) {
   uint64_t end_ms = current_time_ms();
   uint64_t interval = end_ms - start_ms;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+  if (interval > 10) {
     RAY_LOG(WARNING) << "HANDLER: " << operation << " on task " << task_id
                      << " for actor " << actor_id << " took " << interval << " ms ";
   }
