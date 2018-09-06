@@ -2,6 +2,7 @@
 
 #include "common_protocol.h"
 #include "ray/gcs/client.h"
+#include "ray/util/util.h"
 
 namespace {
 
@@ -29,6 +30,15 @@ std::string GetTableAddCommand(const ray::gcs::CommandType command_type) {
   }
 }
 
+void LogHandlerDelay(uint64_t start_ms, const std::string &operation, const TablePrefix &prefix) {
+  uint64_t end_ms = current_time_ms();
+  uint64_t interval = end_ms - start_ms;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_LOG(WARNING) << operation << " to GCS table  " << static_cast<int>(prefix)
+                     << " took " << interval << " ms ";
+  }
+}
+
 }  // namespace
 
 namespace ray {
@@ -39,9 +49,11 @@ template <typename ID, typename Data>
 Status Log<ID, Data>::Append(const JobID &job_id, const ID &id,
                              std::shared_ptr<DataT> &dataT, const WriteCallback &done) {
   auto callback = [this, id, dataT, done](const std::string &data) {
+    auto start = current_time_ms();
     if (done != nullptr) {
       (done)(client_, id, *dataT);
     }
+    LogHandlerDelay(start, "Append", prefix_);
     return true;
   };
   flatbuffers::FlatBufferBuilder fbb;
@@ -57,6 +69,7 @@ Status Log<ID, Data>::AppendAt(const JobID &job_id, const ID &id,
                                std::shared_ptr<DataT> &dataT, const WriteCallback &done,
                                const WriteCallback &failure, int log_length) {
   auto callback = [this, id, dataT, done, failure](const std::string &data) {
+    auto start = current_time_ms();
     if (data.empty()) {
       if (done != nullptr) {
         (done)(client_, id, *dataT);
@@ -66,6 +79,7 @@ Status Log<ID, Data>::AppendAt(const JobID &job_id, const ID &id,
         (failure)(client_, id, *dataT);
       }
     }
+    LogHandlerDelay(start, "AppendAt", prefix_);
     return true;
   };
   flatbuffers::FlatBufferBuilder fbb;
@@ -79,6 +93,7 @@ Status Log<ID, Data>::AppendAt(const JobID &job_id, const ID &id,
 template <typename ID, typename Data>
 Status Log<ID, Data>::Lookup(const JobID &job_id, const ID &id, const Callback &lookup) {
   auto callback = [this, id, lookup](const std::string &data) {
+    auto start = current_time_ms();
     if (lookup != nullptr) {
       std::vector<DataT> results;
       if (!data.empty()) {
@@ -93,6 +108,7 @@ Status Log<ID, Data>::Lookup(const JobID &job_id, const ID &id, const Callback &
       }
       lookup(client_, id, results);
     }
+    LogHandlerDelay(start, "Lookup", prefix_);
     return true;
   };
   std::vector<uint8_t> nil;
@@ -107,6 +123,7 @@ Status Log<ID, Data>::Subscribe(const JobID &job_id, const ClientID &client_id,
   RAY_CHECK(subscribe_callback_index_ == -1)
       << "Client called Subscribe twice on the same table";
   auto callback = [this, subscribe, done](const std::string &data) {
+    auto start = current_time_ms();
     if (data.empty()) {
       // No notification data is provided. This is the callback for the
       // initial subscription request.
@@ -132,6 +149,7 @@ Status Log<ID, Data>::Subscribe(const JobID &job_id, const ClientID &client_id,
         subscribe(client_, id, results);
       }
     }
+    LogHandlerDelay(start, "Subscribe", prefix_);
     // We do not delete the callback after calling it since there may be
     // more subscription messages.
     return false;
@@ -168,9 +186,11 @@ template <typename ID, typename Data>
 Status Table<ID, Data>::Add(const JobID &job_id, const ID &id,
                             std::shared_ptr<DataT> &dataT, const WriteCallback &done) {
   auto callback = [this, id, dataT, done](const std::string &data) {
+    auto start = current_time_ms();
     if (done != nullptr) {
       (done)(client_, id, *dataT);
     }
+    LogHandlerDelay(start, "Add", prefix_);
     return true;
   };
   flatbuffers::FlatBufferBuilder fbb;
