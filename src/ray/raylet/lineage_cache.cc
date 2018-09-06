@@ -1,5 +1,7 @@
 #include "lineage_cache.h"
 
+#include "ray/util/util.h"
+
 namespace ray {
 
 namespace raylet {
@@ -199,6 +201,7 @@ void MergeLineageHelper(const TaskID &task_id, const Lineage &lineage_from,
 }
 
 bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_lineage) {
+  auto start = current_time_ms();
   if (disabled_) {
     return true;
   }
@@ -228,6 +231,12 @@ bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
 
   // Add the submitted task to the lineage cache as UNCOMMITTED_WAITING. It
   // should be marked as UNCOMMITTED_READY once the task starts execution.
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_LOG(WARNING) << "HANDLER: LineageCache::AddWaitingTask took " << interval << "ms "
+        << uncommitted_lineage.GetEntries().size() << " entries";
+  }
   return lineage_.SetEntry(task, GcsStatus::UNCOMMITTED_WAITING);
 }
 
@@ -347,6 +356,7 @@ void LineageCache::MarkTaskAsForwarded(const TaskID &task_id, const ClientID &no
 
 Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id,
                                             const ClientID &node_id) const {
+  uint64_t start = current_time_ms();
   Lineage uncommitted_lineage;
   // Add all uncommitted ancestors from the lineage cache to the uncommitted
   // lineage of the requested task.
@@ -364,10 +374,17 @@ Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id,
     RAY_CHECK(entry);
     RAY_CHECK(uncommitted_lineage.SetEntry(entry->TaskData(), entry->GetStatus()));
   }
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_LOG(WARNING) << "HANDLER: LineageCache::GetUncommittedLineage took " << interval << "ms "
+        << uncommitted_lineage.GetEntries().size() << " entries";
+  }
   return uncommitted_lineage;
 }
 
 bool LineageCache::FlushTask(const TaskID &task_id) {
+  uint64_t start = current_time_ms();
   auto entry = lineage_.GetEntry(task_id);
   RAY_CHECK(entry);
   RAY_CHECK(entry->GetStatus() == GcsStatus::UNCOMMITTED_READY);
@@ -417,6 +434,11 @@ bool LineageCache::FlushTask(const TaskID &task_id) {
     auto entry = lineage_.GetEntryMutable(task_id);
     RAY_CHECK(entry);
     RAY_CHECK(entry->SetStatus(GcsStatus::COMMITTING));
+  }
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_LOG(WARNING) << "HANDLER: LineageCache::FlushTask took " << interval << "ms";
   }
   return all_arguments_committed;
 }

@@ -3,6 +3,8 @@
 
 #include <chrono>
 
+#include <boost/asio/error.hpp>
+
 /// Return the number of milliseconds since the steady clock epoch. NOTE: The
 /// returned timestamp may be used for accurately measuring intervals but has
 /// no relation to wall clock time. It must not be used for synchronization
