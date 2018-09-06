@@ -77,6 +77,15 @@ bool CheckDuplicateActorTask(
   return false;
 };
 
+void LogHandlerDelay(uint64_t start_ms, const std::string &operation, const TaskID &task_id, const ActorID &actor_id) {
+  uint64_t end_ms = current_time_ms();
+  uint64_t interval = end_ms - start_ms;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_LOG(WARNING) << "HANDLER: " << operation << " on task " << task_id
+                     << " for actor " << actor_id << " took " << interval << " ms ";
+  }
+}
+
 }  // namespace
 
 namespace ray {
@@ -831,6 +840,7 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
                                             const uint8_t *message_data) {
   switch (static_cast<protocol::MessageType>(message_type)) {
   case protocol::MessageType::ForwardTaskRequest: {
+    uint64_t start = current_time_ms();
     auto message = flatbuffers::GetRoot<protocol::ForwardTaskRequest>(message_data);
     TaskID task_id = from_flatbuf(*message->task_id());
 
@@ -838,7 +848,9 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpec().NumForwards();
+    LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
     SubmitTask(task, uncommitted_lineage, /* forwarded = */ true);
+    LogHandlerDelay(start, "ForwardTaskRequest2", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
   } break;
   case protocol::MessageType::DisconnectClient: {
     // TODO(rkn): We need to do some cleanup here.
@@ -980,6 +992,7 @@ void NodeManager::FlushTask(const TaskID &task_id) {
 }
 
 void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_lineage, bool forwarded) {
+  uint64_t start = current_time_ms();
   const TaskSpecification &spec = task.GetTaskSpecification();
   const TaskID task_id = spec.TaskId();
   if (local_queues_.HasTask(task_id)) {
@@ -1081,6 +1094,7 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
       ScheduleTasks();
     }
   }
+  LogHandlerDelay(start, "_SubmitTask", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
 }
 
 void NodeManager::HandleWorkerBlocked(std::shared_ptr<Worker> worker) {
@@ -1159,6 +1173,7 @@ void NodeManager::HandleWorkerUnblocked(std::shared_ptr<Worker> worker) {
 }
 
 void NodeManager::EnqueuePlaceableTask(const Task &task) {
+  uint64_t start = current_time_ms();
   // Mark the task as pending. Once the task has finished execution, or once it
   // has been forwarded to another node, the task must be marked as canceled in
   // the TaskDependencyManager.
@@ -1179,9 +1194,11 @@ void NodeManager::EnqueuePlaceableTask(const Task &task) {
   } else {
     local_queues_.QueueWaitingTasks({task});
   }
+  LogHandlerDelay(start, "EnqueuePlaceableTask", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
 }
 
 void NodeManager::AssignTask(Task &task) {
+  uint64_t start = current_time_ms();
   const TaskSpecification &spec = task.GetTaskSpecification();
 
   // If this is an actor task, check that the new task has the correct counter.
@@ -1234,19 +1251,15 @@ void NodeManager::AssignTask(Task &task) {
   auto message = protocol::CreateGetTaskReply(fbb, spec.ToFlatbuffer(fbb));
                                               //fbb.CreateVector(resource_id_set_flatbuf));
   fbb.Finish(message);
-  auto start = current_sys_time_ms();
   auto worker_ref = std::weak_ptr<Worker>(worker);
   worker->Connection()->WriteMessageAsync(
       static_cast<int64_t>(protocol::MessageType::ExecuteTask), fbb.GetSize(),
-      fbb.GetBufferPointer(), [this, task, worker_ref, start](const ray::Status &status) mutable {
+      fbb.GetBufferPointer(), [this, task, worker_ref](const ray::Status &status) mutable {
         auto worker = worker_ref.lock();
         RAY_CHECK(worker);
         HandleTaskAssigned(status, task, worker);
-        auto end = current_sys_time_ms();
-        if ((end - start) > 10) {
-          RAY_LOG(WARNING) << "AssignTask WriteMessage took " << end - start;
-        }
       });
+  LogHandlerDelay(start, "AssignTask", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
 }
 
 void NodeManager::HandleTaskAssigned(const ray::Status &status, Task &task, std::shared_ptr<Worker> &worker) {
