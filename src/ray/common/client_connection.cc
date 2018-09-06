@@ -30,7 +30,7 @@ ServerConnection<T>::ServerConnection(boost::asio::basic_stream_socket<T> &&sock
     : socket_(std::move(socket)),
       write_queue_(),
       writing_(false),
-      max_messages_(10) {}
+      max_messages_(1) {}
 
 template <class T>
 Status ServerConnection<T>::WriteBuffer(
