@@ -288,9 +288,15 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
   auto message = object_manager_protocol::CreatePullRequestMessage(
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
   fbb.Finish(message);
+  uint64_t start = current_time_ms();
   Status status = conn->WriteMessage(
       static_cast<int64_t>(object_manager_protocol::MessageType::PullRequest),
       fbb.GetSize(), fbb.GetBufferPointer());
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_CHECK(false) << "PullSendRequest took " << interval << "ms";
+  }
   if (status.ok()) {
     connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn);
   }
