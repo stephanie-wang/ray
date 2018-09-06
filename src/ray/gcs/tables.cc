@@ -34,7 +34,7 @@ void LogHandlerDelay(uint64_t start_ms, const std::string &operation, const Tabl
   uint64_t end_ms = current_time_ms();
   uint64_t interval = end_ms - start_ms;
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_LOG(WARNING) << operation << " to GCS table  " << static_cast<int>(prefix)
+    RAY_LOG(WARNING) << "HANDLER: " << operation << " to GCS table " << static_cast<int>(prefix)
                      << " took " << interval << " ms ";
   }
 }

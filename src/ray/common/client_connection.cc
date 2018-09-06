@@ -10,11 +10,17 @@ namespace ray {
 
 ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
                        const std::string &ip_address_string, int port) {
+  uint64_t start = current_time_ms();
   boost::asio::ip::address ip_address =
       boost::asio::ip::address::from_string(ip_address_string);
   boost::asio::ip::tcp::endpoint endpoint(ip_address, port);
   boost::system::error_code error;
   socket.connect(endpoint, error);
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_LOG(WARNING) << "HANDLER: TcpConnect took " << interval << "ms";
+  }
   return boost_to_ray_status(error);
 }
 
@@ -268,7 +274,7 @@ void ClientConnection<T>::ProcessMessage(const boost::system::error_code &error)
   message_handler_(shared_ClientConnection_from_this(), read_type_, read_message_.data());
   uint64_t interval = current_time_ms() - start_ms;
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_LOG(WARNING) << "[" << debug_label_ << "]ProcessMessage with type " << read_type_
+    RAY_LOG(WARNING) << "HANDLER: [" << debug_label_ << "]ProcessMessage with type " << read_type_
                      << " took " << interval << " ms ";
     RAY_CHECK(read_type_ != 15);
   }

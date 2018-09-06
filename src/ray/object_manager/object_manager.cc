@@ -295,7 +295,7 @@ ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
   uint64_t end = current_time_ms();
   uint64_t interval = end - start;
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_CHECK(false) << "PullSendRequest took " << interval << "ms";
+    RAY_CHECK(false) << "HANDLER: PullSendRequest took " << interval << "ms";
   }
   if (status.ok()) {
     connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn);
@@ -636,9 +636,15 @@ std::shared_ptr<SenderConnection> ObjectManager::CreateSenderConnection(
       fbb, fbb.CreateString(client_id_.binary()), is_transfer);
   fbb.Finish(message);
   // Send synchronously.
+  uint64_t start = current_time_ms();
   RAY_CHECK_OK(conn->WriteMessage(
       static_cast<int64_t>(object_manager_protocol::MessageType::ConnectClient),
       fbb.GetSize(), fbb.GetBufferPointer()));
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+    RAY_CHECK(false) << "HANDLER: PullSendRequest took " << interval << "ms";
+  }
   // The connection is ready; return to caller.
   return conn;
 }
