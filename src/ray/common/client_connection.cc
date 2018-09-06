@@ -270,6 +270,7 @@ void ClientConnection<T>::ProcessMessage(const boost::system::error_code &error)
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
     RAY_LOG(WARNING) << "[" << debug_label_ << "]ProcessMessage with type " << read_type_
                      << " took " << interval << " ms ";
+    RAY_CHECK(read_type_ != 15);
   }
 }
 
