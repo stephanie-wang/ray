@@ -28,7 +28,7 @@ def ray_warmup(node_resources, *dependencies):
         warmups.append(warmup._submit(
             args=dependencies, 
             resources={node_resource: 1}))
-    ray.get(warmups)
+    ray.wait(warmups, num_returns=len(warmups))
 
 def submit_tasks():
     generated = []
@@ -210,7 +210,8 @@ def init_actor(node_index, node_resources, actor_cls, checkpoint, args=None):
         actor = ray.remote(
 		num_cpus=0,
                 resources={ node_resources[node_index]: 1, })(actor_cls).remote(*args)
-        # Take a checkpoint once every window.
+    ray.get(actor.clear.remote())
+    # Take a checkpoint once every window.
     actor.node_index = node_index
     return actor
 
@@ -265,8 +266,8 @@ def project_shuffle(num_ret_vals, *batches):
     """
     shuffled = [defaultdict(int) for _ in range(num_ret_vals)]
     for batch in batches:
+        window = ts_to_window(batch[0][EVENT_TIME])
         for e in batch:
-            window = ts_to_window(e[EVENT_TIME])
             cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
             shuffled[hash(cid) % num_ret_vals][(cid, window)] += 1
     return shuffled[0] if len(shuffled) == 1 else tuple(shuffled)
@@ -280,6 +281,7 @@ class Reducer(object):
         """
         # (campaign_id, window) --> count
         self.clear()
+        print("Initialized reducer, debug?", DEBUG)
 
     def __ray_save__(self):
         checkpoint = pickle.dumps({
@@ -342,16 +344,16 @@ class Reducer(object):
         Increment and store in dictionary
         """
         self.calls += 1
-        printed = False
         for partition in partitions:
             for key in partition:
                 self.seen[key] += partition[key]
                 self.count += partition[key]
                 latency = time.time() - key[1]
-                if DEBUG and a == 0 and (self.calls % 10 == 0):
-                    print(latency)
-                    printed = True
                 self.latencies[key] = max(self.latencies[key], latency)
+        if DEBUG and self.calls % 10 == 0:
+            for key, latency in self.latencies:
+                if latency > 0:
+                    print(latency)
 
 
 if __name__ == '__main__':
@@ -426,16 +428,20 @@ if __name__ == '__main__':
         ray.init(redis_address="{}:6379".format(args.redis_address), use_raylet=True)
     time.sleep(2)
 
+    print("Warming up...")
+    #ray_warmup(node_resources)
+
     print("Initializing generators...")
     gen_deps = init_generator(AD_TO_CAMPAIGN_MAP, time_slice_num_events)
     print("Initializing reducers...")
     reducers = [init_actor(i, node_resources, Reducer, checkpoint) for i in range(num_reducers)]
+    time.sleep(1)
     # Make sure the reducers are initialized.
     ray.get([reducer.clear.remote() for reducer in reducers])
     print("...finished initializing reducers:", len(reducers))
 
     print("Placing dependencies on nodes...")
-    ray_warmup(node_resources, gen_deps)
+    #ray_warmup(node_resources, gen_deps)
 
     try:
         time_to_sleep = BATCH_SIZE_SEC
@@ -450,7 +456,8 @@ if __name__ == '__main__':
 
         print("Clearing reducers...")
         time.sleep(5) # TODO non-deterministic, fix
-        ray.wait([reducer.clear.remote() for reducer in reducers])
+        ray.wait([reducer.clear.remote() for reducer in reducers],
+                 num_returns = len(reducers))
 
         print("Measuring...")
         start_time = time.time()
@@ -471,12 +478,12 @@ if __name__ == '__main__':
         print("Computing throughput...")
         compute_stats() 
     
-        print("Dumping...")
-        ray.global_state.chrome_tracing_dump(filename=args.dump)
-    
         print("Writing latencies...")
         write_latencies()
     
+        print("Dumping...")
+        ray.global_state.chrome_tracing_dump(filename=args.dump)
+
         print("Computing checkpoint overhead...")
         compute_checkpoint_overhead()
     
