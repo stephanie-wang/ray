@@ -194,7 +194,7 @@ class NodeManager {
   /// The lineage cache for the GCS object and task tables.
   std::unique_ptr<LineageCacheInterface> lineage_cache_;
   std::vector<ClientID> remote_clients_;
-  std::unordered_map<ClientID, TcpServerConnection> remote_server_connections_;
+  std::unordered_map<ClientID, std::shared_ptr<TcpServerConnection>> remote_server_connections_;
   /// A mapping from actor ID to registration information about that actor
   /// (including which node manager owns it).
   std::unordered_map<ActorID, ActorRegistration> actor_registry_;

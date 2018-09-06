@@ -19,6 +19,13 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 }
 
 template <class T>
+std::shared_ptr<ServerConnection<T>> ServerConnection<T>::Create(boost::asio::basic_stream_socket<T> &&socket) {
+  std::shared_ptr<ServerConnection<T>> self(
+      new ServerConnection(std::move(socket)));
+  return self;
+}
+
+template <class T>
 ServerConnection<T>::ServerConnection(boost::asio::basic_stream_socket<T> &&socket)
     : socket_(std::move(socket)),
       write_queue_(),
@@ -105,8 +112,9 @@ void ServerConnection<T>::WriteSome() {
       break;
     }
   }
+  auto this_ptr = this->shared_from_this();
   boost::asio::async_write(ServerConnection<T>::socket_, message_buffers,
-      [this, num_messages](const boost::system::error_code &error, size_t
+      [this, this_ptr, num_messages](const boost::system::error_code &error, size_t
         bytes_transferred){
     ray::Status status = ray::Status::OK();
     if (error.value() != boost::system::errc::errc_t::success) {
@@ -206,7 +214,7 @@ void ClientConnection<T>::ProcessMessages(bool sync) {
   } else {
     boost::asio::async_read(
         ServerConnection<T>::socket_, header,
-        boost::bind(&ClientConnection<T>::ProcessMessageHeader, this->shared_from_this(),
+        boost::bind(&ClientConnection<T>::ProcessMessageHeader, shared_ClientConnection_from_this(),
                     boost::asio::placeholders::error, sync));
   }
 }
@@ -245,7 +253,7 @@ void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &
   } else {
     boost::asio::async_read(
         ServerConnection<T>::socket_, boost::asio::buffer(read_message_),
-        boost::bind(&ClientConnection<T>::ProcessMessage, this->shared_from_this(),
+        boost::bind(&ClientConnection<T>::ProcessMessage, shared_ClientConnection_from_this(),
                     boost::asio::placeholders::error));
   }
 }
@@ -257,7 +265,7 @@ void ClientConnection<T>::ProcessMessage(const boost::system::error_code &error)
   }
 
   uint64_t start_ms = current_time_ms();
-  message_handler_(this->shared_from_this(), read_type_, read_message_.data());
+  message_handler_(shared_ClientConnection_from_this(), read_type_, read_message_.data());
   uint64_t interval = current_time_ms() - start_ms;
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
     RAY_LOG(WARNING) << "[" << debug_label_ << "]ProcessMessage with type " << read_type_

@@ -359,7 +359,7 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   boost::asio::ip::tcp::socket socket(io_service_);
   RAY_CHECK_OK(TcpConnect(socket, client_info.node_manager_address,
                           client_info.node_manager_port));
-  auto server_conn = TcpServerConnection(std::move(socket));
+  auto server_conn = TcpServerConnection::Create(std::move(socket));
   remote_server_connections_.emplace(client_id, std::move(server_conn));
 }
 
@@ -1520,7 +1520,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
   auto &server_conn = it->second;
   auto start = current_sys_time_ms();
-  server_conn.WriteMessageAsync(
+  server_conn->WriteMessageAsync(
       static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
       fbb.GetBufferPointer(), [this, task, node_id, start](const ray::Status &status) {
         HandleTaskForwarded(status, task, node_id);

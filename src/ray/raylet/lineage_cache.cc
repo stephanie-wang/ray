@@ -339,7 +339,10 @@ void LineageCache::MarkTaskAsForwarded(const TaskID &task_id, const ClientID &no
     return;
   }
   RAY_CHECK(!node_id.is_nil());
-  lineage_.GetEntryMutable(task_id)->MarkExplicitlyForwarded(node_id);
+  auto entry = lineage_.GetEntryMutable(task_id);
+  if (entry) {
+    entry->MarkExplicitlyForwarded(node_id);
+  }
 }
 
 Lineage LineageCache::GetUncommittedLineage(const TaskID &task_id,

@@ -27,10 +27,9 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 /// A generic type representing a client connection to a server. This typename
 /// can be used to write messages synchronously to the server.
 template <typename T>
-class ServerConnection {
+class ServerConnection : public std::enable_shared_from_this<ServerConnection<T>> {
  public:
-  /// Create a connection to the server.
-  ServerConnection(boost::asio::basic_stream_socket<T> &&socket);
+  static std::shared_ptr<ServerConnection<T>> Create(boost::asio::basic_stream_socket<T> &&socket);
 
   /// Write a message to the client.
   ///
@@ -66,6 +65,9 @@ class ServerConnection {
     std::function<void(const ray::Status&)> handler;
   };
 
+  /// Create a connection to the server.
+  ServerConnection(boost::asio::basic_stream_socket<T> &&socket);
+
   /// The socket connection to the server.
   boost::asio::basic_stream_socket<T> socket_;
   std::list<std::shared_ptr<WriteBufferData>> write_queue_;
@@ -73,6 +75,7 @@ class ServerConnection {
   size_t max_messages_;
 
  private:
+
   void WriteSome();
 };
 
@@ -91,9 +94,9 @@ using MessageHandler =
 /// writing messages to the client, like in ServerConnection, this typename can
 /// also be used to process messages asynchronously from client.
 template <typename T>
-class ClientConnection : public ServerConnection<T>,
-                         public std::enable_shared_from_this<ClientConnection<T>> {
+class ClientConnection : public ServerConnection<T> {
  public:
+  using std::enable_shared_from_this<ServerConnection<T>>::shared_from_this;
   /// Allocate a new node client connection.
   ///
   /// \param new_client_handler A reference to the client handler.
@@ -103,6 +106,10 @@ class ClientConnection : public ServerConnection<T>,
   static std::shared_ptr<ClientConnection<T>> Create(
       ClientHandler<T> &new_client_handler, MessageHandler<T> &message_handler,
       boost::asio::basic_stream_socket<T> &&socket, const std::string &debug_label);
+
+  std::shared_ptr<ClientConnection<T>> shared_ClientConnection_from_this() {
+    return std::static_pointer_cast<ClientConnection<T>>(shared_from_this());
+  }
 
   /// \return The ClientID of the remote client.
   const ClientID &GetClientID();
