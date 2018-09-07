@@ -19,16 +19,53 @@ logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
-def ray_warmup(node_resources, *dependencies):
+@ray.remote
+def warmup_objectstore():
+    x = np.ones(10 ** 8)
+    for _ in range(100):
+        ray.put(x)
+
+@ray.remote
+def warmup(*args):
+    return
+
+def ray_warmup(reducers, node_resources, *dependencies):
     """
     Warmup Ray
     """
     warmups = []
     for node_resource in node_resources:
-        warmups.append(warmup._submit(
-            args=dependencies, 
+        warmups.append(warmup_objectstore._submit(
+            args=[],
             resources={node_resource: 1}))
     ray.wait(warmups, num_returns=len(warmups))
+
+    warmups = []
+    for node_resource in node_resources:
+        warmups.append(warmup._submit(
+            args=dependencies,
+            resources={node_resource: 1}))
+    ray.wait(warmups, num_returns=len(warmups))
+
+    num_rounds = 100
+    for i in range(num_rounds):
+        reduce_warmups = []
+        for j, node_resource in enumerate(node_resources):
+            arg = None
+            for _ in range(5):
+                arg = reduce_warmup._submit(
+                                args=[arg],
+                                resources={node_resource: 1})
+            reduce_warmups.append(arg)
+        [reducer.foo.remote(*reduce_warmups) for reducer in reducers]
+        time.sleep(0.1)
+        if i % 10 == 0:
+            print("finished warmup round", i, "out of", num_rounds)
+
+@ray.remote
+def reduce_warmup(*args):
+    time.sleep(0.05)
+    return
 
 def submit_tasks():
     generated = []
@@ -222,12 +259,6 @@ def ping(time_to_sleep=0.01):
     time.sleep(time_to_sleep)
     return socket.gethostname()
 
-@ray.remote
-def warmup(*args):
-    x = np.ones(10 ** 8)
-    for _ in range(100):
-        ray.put(x)
-
 
 def to_list(json_object):
     return [json_object[field] for field in FIELDS]
@@ -355,6 +386,12 @@ class Reducer(object):
                 if latency > 0:
                     print(latency)
 
+    def foo(self, *args):
+        """
+        Reduce by key
+        Increment and store in dictionary
+        """
+        return
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -441,7 +478,7 @@ if __name__ == '__main__':
     print("...finished initializing reducers:", len(reducers))
 
     print("Placing dependencies on nodes...")
-    #ray_warmup(node_resources, gen_deps)
+    ray_warmup(reducers, node_resources, gen_deps)
 
     try:
         time_to_sleep = BATCH_SIZE_SEC
