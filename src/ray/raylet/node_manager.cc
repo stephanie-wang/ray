@@ -80,7 +80,7 @@ bool CheckDuplicateActorTask(
 void LogHandlerDelay(uint64_t start_ms, const std::string &operation, const TaskID &task_id, const ActorID &actor_id) {
   uint64_t end_ms = current_time_ms();
   uint64_t interval = end_ms - start_ms;
-  if (interval > 10) {
+  if (interval > 100) {
     RAY_LOG(WARNING) << "HANDLER: " << operation << " on task " << task_id
                      << " for actor " << actor_id << " took " << interval << " ms ";
   }
@@ -1521,6 +1521,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   flatbuffers::FlatBufferBuilder fbb;
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
   fbb.Finish(request);
+  size_t size = fbb.GetSize();
+  size_t num_entries = uncommitted_lineage.GetEntries().size();
 
   RAY_LOG(DEBUG) << "Forwarding task " << task_id << " to " << node_id << " spillback="
                  << lineage_cache_entry_task.GetTaskExecutionSpec().NumForwards();
@@ -1536,14 +1538,17 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   }
 
   auto &server_conn = it->second;
-  auto start = current_sys_time_ms();
+  auto start = current_time_ms();
   server_conn->WriteMessageAsync(
       static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
-      fbb.GetBufferPointer(), [this, task, node_id, start](const ray::Status &status) {
+      fbb.GetBufferPointer(), [this, task, node_id, start, size, num_entries](const ray::Status &status) {
         HandleTaskForwarded(status, task, node_id);
-        auto end = current_sys_time_ms();
-        if ((end - start) > 10) {
-          RAY_LOG(WARNING) << "ForwardTask WriteMessage took " << end - start;
+        uint64_t end_ms = current_time_ms();
+        uint64_t interval = end_ms - start;
+        if (interval > 100) {
+          RAY_LOG(WARNING) << "HANDLER: WriteMessage " << task.GetTaskSpecification().TaskId()
+                           << " to node " << node_id << " took " << interval << " ms "
+                           << num_entries << " entries, " << size << " bytes";
         }
       });
   return ray::Status::OK();
