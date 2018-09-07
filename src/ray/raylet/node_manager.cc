@@ -1513,6 +1513,10 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
   // Increment forward count for the forwarded task.
   lineage_cache_entry_task.IncrementNumForwards();
+  int64_t current_sys_time = current_sys_time_ms();
+  RAY_LOG(INFO) << "[ForwardTask] time spent on this raylet "
+      << (current_sys_time - lineage_cache_entry_task.GetTaskExecutionSpec().LastTimestamp());
+  lineage_cache_entry_task.SetLastTimestamp(current_sys_time_ms());
 
   flatbuffers::FlatBufferBuilder fbb;
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);

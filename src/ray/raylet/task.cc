@@ -24,6 +24,10 @@ void Task::SetExecutionDependencies(const std::vector<ObjectID> &dependencies) {
 
 void Task::IncrementNumForwards() { task_execution_spec_.IncrementNumForwards(); }
 
+void Task::SetLastTimestamp(int64_t new_timestamp) {
+  task_execution_spec_.SetLastTimestamp(new_timestamp);
+}
+
 const std::vector<ObjectID> &Task::GetDependencies() const { return dependencies_; }
 
 void Task::ComputeDependencies() {

@@ -74,6 +74,12 @@ class Task {
   /// Increment the number of times this task has been forwarded.
   void IncrementNumForwards();
 
+  /// Set the task's last timestamp to the specified value.
+  ///
+  /// \param new_timestamp The new timestamp in millisecond to set the task's
+  /// time stamp to. Tracks the last time this task entered a local scheduler.
+  void SetLastTimestamp(int64_t new_timestamp);
+
   void SetNumExecutions(int64_t num_executions) {
     task_execution_spec_.SetNumExecutions(num_executions);
   }
