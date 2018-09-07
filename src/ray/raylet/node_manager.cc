@@ -1551,23 +1551,27 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
                            << num_entries << " entries, " << size << " bytes";
         }
       });
+  // If we were able to forward the task, remove the forwarded task from the
+  // lineage cache since the receiving node is now responsible for writing
+  // the task to the GCS.
+  if (!lineage_cache_->RemoveWaitingTask(task_id)) {
+    RAY_LOG(WARNING) << "Task " << task_id << " already removed from the lineage "
+                                              "cache. This is most likely due to "
+                                              "reconstruction.";
+  }
+  // Mark as forwarded so that the task and its lineage is not re-forwarded
+  // in the future to the receiving node.
+  // NOTE(swang): If the node dies before it receives the task, the task may
+  // not actually have been forwarded to the node. This is probably okay since
+  // we assume that all following tasks will fail as well, so the receiving
+  // node will not have any missing lineage.
+  lineage_cache_->MarkTaskAsForwarded(task_id, node_id);
   return ray::Status::OK();
 }
 
 void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &task, const ClientID &node_manager_id) {
   TaskID task_id = task.GetTaskSpecification().TaskId();
   if (status.ok()) {
-    // If we were able to forward the task, remove the forwarded task from the
-    // lineage cache since the receiving node is now responsible for writing
-    // the task to the GCS.
-    if (!lineage_cache_->RemoveWaitingTask(task_id)) {
-      RAY_LOG(WARNING) << "Task " << task_id << " already removed from the lineage "
-                                                "cache. This is most likely due to "
-                                                "reconstruction.";
-    }
-    // Mark as forwarded so that the task and its lineage is not re-forwarded
-    // in the future to the receiving node.
-    lineage_cache_->MarkTaskAsForwarded(task_id, node_manager_id);
 
     // Notify the task dependency manager that we are no longer responsible
     // for executing this task.
