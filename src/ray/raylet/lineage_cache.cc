@@ -287,6 +287,7 @@ uint64_t LineageCache::CountUnsubscribedLineage(const TaskID &task_id,
 }
 
 bool LineageCache::RemoveWaitingTask(const TaskID &task_id) {
+  uint64_t start = current_time_ms();
   if (disabled_) {
     return true;
   }
@@ -338,6 +339,11 @@ bool LineageCache::RemoveWaitingTask(const TaskID &task_id) {
       // already subscribed to the task.
       RAY_CHECK(SubscribeTask(task_id));
     }
+  }
+  uint64_t end = current_time_ms();
+  uint64_t interval = end - start;
+  if (interval > 10) {
+    RAY_LOG(WARNING) << "HANDLER: LineageCache::RemoveWaitingTask took " << interval << "ms";
   }
   // The task was successfully reset to UNCOMMITTED_REMOTE.
   return true;
