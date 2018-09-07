@@ -61,7 +61,8 @@ void Monitor::Tick() {
     for (const auto &heartbeat : heartbeat_buffer_) {
       batch->batch.push_back(std::unique_ptr<HeartbeatTableDataT>(new HeartbeatTableDataT(heartbeat.second)));
     }
-    gcs_client_.heartbeat_batch_table().Add(UniqueID::nil(), UniqueID::nil(), batch, nullptr);
+    RAY_CHECK_OK(gcs_client_.heartbeat_batch_table().Add(UniqueID::nil(),
+                       UniqueID::nil(), batch, nullptr));
     heartbeat_buffer_.clear();
   }
 
