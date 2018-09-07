@@ -50,6 +50,7 @@ def ray_warmup(reducers, node_resources, *dependencies):
     num_rounds = 100
     for i in range(num_rounds):
         reduce_warmups = []
+        start = time.time()
         for j, node_resource in enumerate(node_resources):
             arg = None
             for _ in range(5):
@@ -58,7 +59,11 @@ def ray_warmup(reducers, node_resources, *dependencies):
                                 resources={node_resource: 1})
             reduce_warmups.append(arg)
         [reducer.foo.remote(*reduce_warmups) for reducer in reducers]
-        time.sleep(0.1)
+        took = time.time() - start
+        if took > 0.1:
+            print("Behind by", took - 0.1)
+        else:
+            time.sleep(0.1 - took)
         if i % 10 == 0:
             print("finished warmup round", i, "out of", num_rounds)
 

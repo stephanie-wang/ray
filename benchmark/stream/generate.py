@@ -76,7 +76,7 @@ def init_generator(ad_to_campaign, time_slice_num_events):
                           part5,
                           time_array,
                           part6])
-    return template, indices, ad_ids, user_ids, page_ids, event_types
+    return template, user_ids, page_ids, ad_ids, event_types, indices
     
     template_id = ray.put(template)
     indices_id = ray.put(indices)
