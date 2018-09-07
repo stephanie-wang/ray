@@ -469,7 +469,13 @@ if __name__ == '__main__':
     #ray_warmup(node_resources)
 
     print("Initializing generators...")
-    gen_deps = init_generator(AD_TO_CAMPAIGN_MAP, time_slice_num_events)
+    gen_deps = init_generator._submit(
+            args=[AD_TO_CAMPAIGN_MAP, time_slice_num_events],
+            resources={
+                "Node0": 1,
+                })
+    ray.wait(gen_deps, num_returns=len(gen_deps))
+
     print("Initializing reducers...")
     reducers = [init_actor(i, node_resources, Reducer, checkpoint) for i in range(num_reducers)]
     time.sleep(1)

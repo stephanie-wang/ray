@@ -45,6 +45,7 @@ def generate(num_ret_vals, template, user_ids, page_ids, ad_ids, event_types, in
         return np.array_split(template_cp, num_ret_vals) #timestamp, template_cp
 
 
+@ray.remote(num_return_vals=6)
 def init_generator(ad_to_campaign, time_slice_num_events):
 
     ad_ids = np.array([np.array(memoryview(x)) for x in list(ad_to_campaign.keys())])
@@ -75,6 +76,7 @@ def init_generator(ad_to_campaign, time_slice_num_events):
                           part5,
                           time_array,
                           part6])
+    return template, indices, ad_ids, user_ids, page_ids, event_types
     
     template_id = ray.put(template)
     indices_id = ray.put(indices)
