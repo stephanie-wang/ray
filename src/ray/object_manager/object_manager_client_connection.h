@@ -44,6 +44,11 @@ class SenderConnection : public boost::enable_shared_from_this<SenderConnection>
     return conn_->WriteMessage(type, length, message);
   }
 
+  void WriteMessageAsync(int64_t type, int64_t length, const uint8_t *message,
+      const std::function<void(const ray::Status&)> &handler) {
+    conn_->WriteMessageAsync(type, length, message, handler);
+  }
+
   /// Write a buffer to this connection.
   ///
   /// \param buffer The buffer.

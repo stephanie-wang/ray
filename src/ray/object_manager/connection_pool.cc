@@ -52,7 +52,7 @@ void ConnectionPool::GetSender(ConnectionType type, const ClientID &client_id,
 }
 
 void ConnectionPool::ReleaseSender(ConnectionType type,
-                                   std::shared_ptr<SenderConnection> &conn) {
+                                   const std::shared_ptr<SenderConnection> &conn) {
   std::unique_lock<std::mutex> guard(connection_mutex);
   SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
                                 ? available_message_send_connections_

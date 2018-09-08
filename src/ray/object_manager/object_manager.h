@@ -247,7 +247,7 @@ class ObjectManager : public ObjectManagerInterface {
 
   /// Synchronously send a pull request via remote object manager connection.
   /// Executes on main_service_ thread.
-  ray::Status PullSendRequest(const ObjectID &object_id,
+  void PullSendRequest(const ObjectID &object_id,
                               std::shared_ptr<SenderConnection> &conn);
 
   std::shared_ptr<SenderConnection> CreateSenderConnection(

@@ -8,7 +8,7 @@ namespace object_manager_protocol = ray::object_manager::protocol;
 
 namespace {
 
-void CheckIOError(ray::Status &status, const std::string &operation) {
+void CheckIOError(const ray::Status &status, const std::string &operation) {
   RAY_CHECK(status.IsIOError());
   RAY_LOG(ERROR) << "Failed to contact remote object manager during " << operation;
 }
@@ -266,41 +266,37 @@ void ObjectManager::PullEstablishConnection(const ObjectID &object_id,
           }
           connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
                                           client_id, async_conn);
-          Status pull_send_status = PullSendRequest(object_id, async_conn);
-          if (!pull_send_status.ok()) {
-            CheckIOError(pull_send_status, "Pull");
-          }
+          PullSendRequest(object_id, async_conn);
         },
         []() {
           RAY_LOG(ERROR) << "Failed to establish connection with remote object manager.";
         });
   } else {
-    status = PullSendRequest(object_id, conn);
-    if (!status.ok()) {
-      CheckIOError(status, "Pull");
-    }
+    PullSendRequest(object_id, conn);
   }
 }
 
-ray::Status ObjectManager::PullSendRequest(const ObjectID &object_id,
+void ObjectManager::PullSendRequest(const ObjectID &object_id,
                                            std::shared_ptr<SenderConnection> &conn) {
   flatbuffers::FlatBufferBuilder fbb;
   auto message = object_manager_protocol::CreatePullRequestMessage(
       fbb, fbb.CreateString(client_id_.binary()), fbb.CreateString(object_id.binary()));
   fbb.Finish(message);
   uint64_t start = current_time_ms();
-  Status status = conn->WriteMessage(
+  conn->WriteMessageAsync(
       static_cast<int64_t>(object_manager_protocol::MessageType::PullRequest),
-      fbb.GetSize(), fbb.GetBufferPointer());
-  uint64_t end = current_time_ms();
-  uint64_t interval = end - start;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_CHECK(false) << "HANDLER: PullSendRequest took " << interval << "ms";
-  }
-  if (status.ok()) {
-    connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn);
-  }
-  return status;
+      fbb.GetSize(), fbb.GetBufferPointer(), [this, start, conn](const ray::Status &status) {
+        uint64_t end = current_time_ms();
+        uint64_t interval = end - start;
+        if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+          RAY_LOG(WARNING) << "HANDLER: PullSendRequest took " << interval << "ms";
+        }
+        if (status.ok()) {
+          connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn);
+         } else {
+          CheckIOError(status, "Pull");
+         }
+      });
 }
 
 void ObjectManager::HandlePushTaskTimeout(const ObjectID &object_id,

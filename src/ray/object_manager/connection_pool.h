@@ -74,7 +74,7 @@ class ConnectionPool {
   /// \param type The type of connection.
   /// \param conn The actual connection.
   /// \return Void.
-  void ReleaseSender(ConnectionType type, std::shared_ptr<SenderConnection> &conn);
+  void ReleaseSender(ConnectionType type, const std::shared_ptr<SenderConnection> &conn);
 
   // TODO(hme): Implement with error handling.
   /// Remove a sender connection. This is invoked if the connection is no longer
