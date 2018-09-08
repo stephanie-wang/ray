@@ -111,7 +111,8 @@ class RemoteFunction(object):
                 num_return_vals=None,
                 num_cpus=None,
                 num_gpus=None,
-                resources=None):
+                resources=None,
+                batch=False):
         """An experimental alternate way to submit remote functions."""
         worker = ray.worker.get_global_worker()
         worker.check_connected()
@@ -132,15 +133,23 @@ class RemoteFunction(object):
             # immutable remote objects.
             result = self._function(*copy.deepcopy(args))
             return result
-        object_ids = worker.submit_task(
-            ray.ObjectID(self._function_id),
-            args,
-            num_return_vals=num_return_vals,
-            resources=resources)
-        if len(object_ids) == 1:
-            return object_ids[0]
-        elif len(object_ids) > 1:
-            return object_ids
+        if batch:
+            task = worker.create_task(
+                ray.ObjectID(self._function_id),
+                args,
+                num_return_vals=num_return_vals,
+                resources=resources)
+            return task
+        else:
+            object_ids = worker.submit_task(
+                ray.ObjectID(self._function_id),
+                args,
+                num_return_vals=num_return_vals,
+                resources=resources)
+            if len(object_ids) == 1:
+                return object_ids[0]
+            elif len(object_ids) > 1:
+                return object_ids
 
     def _export(self):
         worker = ray.worker.get_global_worker()

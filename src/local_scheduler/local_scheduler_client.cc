@@ -96,6 +96,23 @@ void local_scheduler_submit_raylet(
                 fbb.GetSize(), fbb.GetBufferPointer(), &conn->write_mutex);
 }
 
+void local_scheduler_submit_raylet_batch(
+    LocalSchedulerConnection *conn,
+    const std::vector<PyTask *> &tasks) {
+  flatbuffers::FlatBufferBuilder fbb;
+  std::vector<flatbuffers::Offset<ray::local_scheduler::protocol::SubmitTaskRequest>> task_messages;
+  for (const auto &task : tasks) {
+    auto execution_dependencies_message = to_flatbuf(fbb, *task->execution_dependencies);
+    auto task_message = ray::local_scheduler::protocol::CreateSubmitTaskRequest(
+        fbb, execution_dependencies_message, task->task_spec->ToFlatbuffer(fbb));
+    task_messages.push_back(task_message);
+  }
+  auto message = ray::local_scheduler::protocol::CreateSubmitBatchRequest(fbb, fbb.CreateVector(task_messages));
+  fbb.Finish(message);
+  write_message(conn->conn, static_cast<int64_t>(protocol::MessageType::SubmitBatch),
+                fbb.GetSize(), fbb.GetBufferPointer(), &conn->write_mutex);
+}
+
 TaskSpec *local_scheduler_get_task(LocalSchedulerConnection *conn,
                                    int64_t *task_size) {
   int64_t type;

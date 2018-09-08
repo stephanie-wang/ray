@@ -603,66 +603,109 @@ class Worker(object):
             The return object IDs for this task.
         """
         with profiling.profile("submit_task", worker=self):
-            if actor_id is None:
-                assert actor_handle_id is None
-                actor_id = ray.ObjectID(NIL_ACTOR_ID)
-                actor_handle_id = ray.ObjectID(NIL_ACTOR_HANDLE_ID)
-            else:
-                assert actor_handle_id is not None
-
-            if actor_creation_id is None:
-                actor_creation_id = ray.ObjectID(NIL_ACTOR_ID)
-
-            if actor_creation_dummy_object_id is None:
-                actor_creation_dummy_object_id = (ray.ObjectID(NIL_ID))
-
-            # Put large or complex arguments that are passed by value in the
-            # object store first.
-            args_for_local_scheduler = []
-            for arg in args:
-                if isinstance(arg, ray.ObjectID):
-                    args_for_local_scheduler.append(arg)
-                elif ray.local_scheduler.check_simple_value(arg):
-                    args_for_local_scheduler.append(arg)
-                else:
-                    args_for_local_scheduler.append(put(arg))
-
-            # By default, there are no execution dependencies.
-            if execution_dependencies is None:
-                execution_dependencies = []
-
-            if driver_id is None:
-                driver_id = self.task_driver_id
-
-            if resources is None:
-                raise ValueError("The resources dictionary is required.")
-            for value in resources.values():
-                assert (isinstance(value, int) or isinstance(value, float))
-                if value < 0:
-                    raise ValueError(
-                        "Resource quantities must be nonnegative.")
-                if (value >= 1 and isinstance(value, float)
-                        and not value.is_integer()):
-                    raise ValueError(
-                        "Resource quantities must all be whole numbers.")
-
-            with self.state_lock:
-                # Increment the worker's task index to track how many tasks
-                # have been submitted by the current task so far.
-                task_index = self.task_index
-                self.task_index += 1
-            # Submit the task to local scheduler.
-            task = ray.local_scheduler.Task(
-                driver_id, ray.ObjectID(
-                    function_id.id()), args_for_local_scheduler,
-                num_return_vals, self.current_task_id, task_index,
-                actor_creation_id, actor_creation_dummy_object_id, actor_id,
-                actor_handle_id, actor_counter, is_actor_checkpoint_method,
-                execution_dependencies, resources, self.use_raylet,
-                reconstruction)
+            task = self.create_task(
+                    function_id,
+                    args,
+                    actor_id,
+                    actor_handle_id,
+                    actor_counter,
+                    is_actor_checkpoint_method,
+                    actor_creation_id,
+                    actor_creation_dummy_object_id,
+                    execution_dependencies,
+                    num_return_vals,
+                    resources,
+                    driver_id,
+                    reconstruction)
             self.local_scheduler_client.submit(task)
-
             return task.returns()
+
+    def submit_batch(self, tasks):
+        with profiling.profile("submit_batch", worker=self):
+            self.local_scheduler_client.submit_batch(tasks)
+            returns = []
+            for task in tasks:
+                object_ids = task.returns()
+                if task.actor_id().id() != NIL_ACTOR_ID:
+                    object_ids.pop(-1)
+                if len(object_ids) == 1:
+                    returns += object_ids
+                else:
+                    returns.append(object_ids)
+            return returns
+
+    def create_task(self,
+                    function_id,
+                    args,
+                    actor_id=None,
+                    actor_handle_id=None,
+                    actor_counter=0,
+                    is_actor_checkpoint_method=False,
+                    actor_creation_id=None,
+                    actor_creation_dummy_object_id=None,
+                    execution_dependencies=None,
+                    num_return_vals=None,
+                    resources=None,
+                    driver_id=None,
+                    reconstruction=True):
+        if actor_id is None:
+            assert actor_handle_id is None
+            actor_id = ray.ObjectID(NIL_ACTOR_ID)
+            actor_handle_id = ray.ObjectID(NIL_ACTOR_HANDLE_ID)
+        else:
+            assert actor_handle_id is not None
+
+        if actor_creation_id is None:
+            actor_creation_id = ray.ObjectID(NIL_ACTOR_ID)
+
+        if actor_creation_dummy_object_id is None:
+            actor_creation_dummy_object_id = (ray.ObjectID(NIL_ID))
+
+        # Put large or complex arguments that are passed by value in the
+        # object store first.
+        args_for_local_scheduler = []
+        for arg in args:
+            if isinstance(arg, ray.ObjectID):
+                args_for_local_scheduler.append(arg)
+            elif ray.local_scheduler.check_simple_value(arg):
+                args_for_local_scheduler.append(arg)
+            else:
+                args_for_local_scheduler.append(put(arg))
+
+        # By default, there are no execution dependencies.
+        if execution_dependencies is None:
+            execution_dependencies = []
+
+        if driver_id is None:
+            driver_id = self.task_driver_id
+
+        if resources is None:
+            raise ValueError("The resources dictionary is required.")
+        for value in resources.values():
+            assert (isinstance(value, int) or isinstance(value, float))
+            if value < 0:
+                raise ValueError(
+                    "Resource quantities must be nonnegative.")
+            if (value >= 1 and isinstance(value, float)
+                    and not value.is_integer()):
+                raise ValueError(
+                    "Resource quantities must all be whole numbers.")
+
+        with self.state_lock:
+            # Increment the worker's task index to track how many tasks
+            # have been submitted by the current task so far.
+            task_index = self.task_index
+            self.task_index += 1
+        # Submit the task to local scheduler.
+        task = ray.local_scheduler.Task(
+            driver_id, ray.ObjectID(
+                function_id.id()), args_for_local_scheduler,
+            num_return_vals, self.current_task_id, task_index,
+            actor_creation_id, actor_creation_dummy_object_id, actor_id,
+            actor_handle_id, actor_counter, is_actor_checkpoint_method,
+            execution_dependencies, resources, self.use_raylet,
+            reconstruction)
+        return task
 
     def export_remote_function(self, function_id, function_name, function,
                                max_calls, decorated_function):

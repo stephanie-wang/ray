@@ -1,7 +1,8 @@
 NUM_RAYLETS=$1
 THROUGHPUT=${2:-100000}
 NUM_REDIS_SHARDS=${3:-1}
-LINEAGE_POLICY=${4:-2}
+NUM_REDUCERS=${4:-$NUM_RAYLETS}
+LINEAGE_POLICY=1
 #EXPERIMENT_TIME=$5
 
 MAX_LINEAGE_SIZE=1
@@ -34,4 +35,4 @@ sleep 5
 
 echo "Starting job..."
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --actor-checkpointing
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --actor-checkpointing --num-reducers $NUM_REDUCERS

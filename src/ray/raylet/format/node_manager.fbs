@@ -70,6 +70,7 @@ enum MessageType:int {
   PushProfileEventsRequest,
   // Free the objects in objects store.
   FreeObjectsInObjectStoreRequest,
+  SubmitBatch,
 }
 
 table TaskExecutionSpecification {

@@ -474,7 +474,10 @@ class ActorMethod(object):
     def remote(self, *args, **kwargs):
         return self._submit(args, kwargs)
 
-    def _submit(self, args, kwargs, num_return_vals=None):
+    def remote_batch(self, *args, **kwargs):
+        return self._submit(args, kwargs, batch=True)
+
+    def _submit(self, args, kwargs, num_return_vals=None, batch=False):
         if num_return_vals is None:
             num_return_vals = self._num_return_vals
 
@@ -483,7 +486,8 @@ class ActorMethod(object):
             args=args,
             kwargs=kwargs,
             num_return_vals=num_return_vals,
-            dependency=self._actor._ray_actor_cursor)
+            dependency=self._actor._ray_actor_cursor,
+            batch=batch)
 
 
 class ActorClass(object):
@@ -758,7 +762,8 @@ class ActorHandle(object):
                            args=None,
                            kwargs=None,
                            num_return_vals=None,
-                           dependency=None):
+                           dependency=None,
+                           batch=False):
         """Method execution stub for an actor handle.
 
         This is the function that executes when
@@ -814,21 +819,39 @@ class ActorHandle(object):
 
         function_id = compute_actor_method_function_id(self._ray_class_name,
                                                        method_name)
-        object_ids = worker.submit_task(
-            function_id,
-            args,
-            actor_id=self._ray_actor_id,
-            actor_handle_id=actor_handle_id,
-            actor_counter=self._ray_actor_counter,
-            is_actor_checkpoint_method=is_actor_checkpoint_method,
-            actor_creation_dummy_object_id=(
-                self._ray_actor_creation_dummy_object_id),
-            execution_dependencies=execution_dependencies,
-            # We add one for the dummy return ID.
-            num_return_vals=num_return_vals + 1,
-            resources={"CPU": self._ray_actor_method_cpus},
-            driver_id=self._ray_actor_driver_id,
-            reconstruction=self._reconstruction)
+        if batch:
+            task = worker.create_task(
+                function_id,
+                args,
+                actor_id=self._ray_actor_id,
+                actor_handle_id=actor_handle_id,
+                actor_counter=self._ray_actor_counter,
+                is_actor_checkpoint_method=is_actor_checkpoint_method,
+                actor_creation_dummy_object_id=(
+                    self._ray_actor_creation_dummy_object_id),
+                execution_dependencies=execution_dependencies,
+                # We add one for the dummy return ID.
+                num_return_vals=num_return_vals + 1,
+                resources={"CPU": self._ray_actor_method_cpus},
+                driver_id=self._ray_actor_driver_id,
+                reconstruction=self._reconstruction)
+            object_ids = task.returns()
+        else:
+            object_ids = worker.submit_task(
+                function_id,
+                args,
+                actor_id=self._ray_actor_id,
+                actor_handle_id=actor_handle_id,
+                actor_counter=self._ray_actor_counter,
+                is_actor_checkpoint_method=is_actor_checkpoint_method,
+                actor_creation_dummy_object_id=(
+                    self._ray_actor_creation_dummy_object_id),
+                execution_dependencies=execution_dependencies,
+                # We add one for the dummy return ID.
+                num_return_vals=num_return_vals + 1,
+                resources={"CPU": self._ray_actor_method_cpus},
+                driver_id=self._ray_actor_driver_id,
+                reconstruction=self._reconstruction)
         # Update the actor counter and cursor to reflect the most recent
         # invocation.
         self._ray_actor_counter += 1
@@ -841,7 +864,10 @@ class ActorHandle(object):
         elif len(object_ids) == 0:
             object_ids = None
 
-        return object_ids
+        if batch:
+            return task
+        else:
+            return object_ids
 
     # Make tab completion work.
     def __dir__(self):

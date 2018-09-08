@@ -70,6 +70,35 @@ static PyObject *PyLocalSchedulerClient_submit(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
+static PyObject *PyLocalSchedulerClient_submit_batch(PyObject *self, PyObject *args) {
+  PyObject *py_tasks;
+  if (!PyArg_ParseTuple(args, "O", &py_tasks)) {
+    return NULL;
+  }
+
+  PyObject *iter = PyObject_GetIter(py_tasks);
+  if (!iter) {
+    return NULL;
+  }
+  std::vector<PyTask *> tasks;
+  while (true) {
+    PyObject *next = PyIter_Next(iter);
+    if (!next) {
+      break;
+    }
+    PyTask *task = reinterpret_cast<PyTask *>(next);
+    RAY_CHECK(use_raylet(task));
+    tasks.push_back(task);
+  }
+
+  LocalSchedulerConnection *connection =
+      reinterpret_cast<PyLocalSchedulerClient *>(self)
+          ->local_scheduler_connection;
+  local_scheduler_submit_raylet_batch(connection, tasks);
+
+  Py_RETURN_NONE;
+}
+
 // clang-format off
 static PyObject *PyLocalSchedulerClient_get_task(PyObject *self) {
   TaskSpec *task_spec;
@@ -456,6 +485,8 @@ static PyMethodDef PyLocalSchedulerClient_methods[] = {
      "Notify the local scheduler that this client is exiting gracefully."},
     {"submit", (PyCFunction) PyLocalSchedulerClient_submit, METH_VARARGS,
      "Submit a task to the local scheduler."},
+    {"submit_batch", (PyCFunction) PyLocalSchedulerClient_submit_batch, METH_VARARGS,
+     "Submit a batch of tasks to the local scheduler."},
     {"get_task", (PyCFunction) PyLocalSchedulerClient_get_task, METH_NOARGS,
      "Get a task from the local scheduler."},
     {"reconstruct_objects",

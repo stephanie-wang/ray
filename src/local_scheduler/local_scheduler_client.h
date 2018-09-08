@@ -3,6 +3,7 @@
 
 #include <mutex>
 
+#include "common_extension.h"
 #include "common/task.h"
 #include "local_scheduler_shared.h"
 #include "ray/raylet/task_spec.h"
@@ -77,6 +78,10 @@ void local_scheduler_submit_raylet(
     LocalSchedulerConnection *conn,
     const std::vector<ObjectID> &execution_dependencies,
     const ray::raylet::TaskSpecification &task_spec);
+
+void local_scheduler_submit_raylet_batch(
+    LocalSchedulerConnection *conn,
+    const std::vector<PyTask *> &tasks);
 
 /**
  * Notify the local scheduler that this client is disconnecting gracefully. This

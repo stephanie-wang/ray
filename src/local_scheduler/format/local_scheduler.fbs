@@ -56,6 +56,10 @@ table SubmitTaskRequest {
   task_spec: string;
 }
 
+table SubmitBatchRequest {
+  batch: [SubmitTaskRequest];
+}
+
 // This message is sent from the local scheduler to a worker.
 table GetTaskReply {
   // A string of bytes representing the task specification.

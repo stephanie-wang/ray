@@ -19,6 +19,8 @@ logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
+BATCH = True
+
 @ray.remote
 def warmup_objectstore():
     x = np.ones(10 ** 8)
@@ -49,20 +51,37 @@ def ray_warmup(reducers, node_resources, *dependencies):
 
     num_rounds = 100
     for i in range(num_rounds):
-        reduce_warmups = []
-        start = time.time()
-        for j, node_resource in enumerate(node_resources):
-            arg = None
-            for _ in range(5):
-                arg = reduce_warmup._submit(
-                                args=[arg],
-                                resources={node_resource: 1})
-            reduce_warmups.append(arg)
-        [reducer.foo.remote(*reduce_warmups) for reducer in reducers]
+        with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
+            start = time.time()
+            args = [None for _ in range(len(node_resources))]
+            if BATCH:
+                for _ in range(5):
+                    batch = []
+                    for j, node_resource in enumerate(node_resources):
+                        task = reduce_warmup._submit(
+                                        args=[args[j]],
+                                        resources={node_resource: 1},
+                                        batch=True)
+                        batch.append(task)
+                    args = ray.worker.global_worker.submit_batch(batch)
+                batch = [reducer.foo.remote_batch(*args) for reducer in reducers]
+                ray.worker.global_worker.submit_batch(batch)
+            else:
+                for _ in range(5):
+                    batch = []
+                    for j, node_resource in enumerate(node_resources):
+                        return_value = reduce_warmup._submit(
+                                        args=[args[j]],
+                                        resources={node_resource: 1})
+                        batch.append(return_value)
+                    args = batch
+                [reducer.foo.remote(*args) for reducer in reducers]
+
         took = time.time() - start
         if took > 0.1:
             print("Behind by", took - 0.1)
         else:
+            print("Ahead by", 0.1 - took)
             time.sleep(0.1 - took)
         if i % 10 == 0:
             print("finished warmup round", i, "out of", num_rounds)
@@ -79,7 +98,10 @@ def submit_tasks():
             generated.append(generate._submit(
                 args=[num_generator_out] + list(gen_deps) + [time_slice_num_events],
                 num_return_vals=num_generator_out, 
-                resources={node_resources[i]: 1}))
+                resources={node_resources[i]: 1},
+                batch=BATCH))
+    if BATCH:
+        generated = ray.worker.global_worker.submit_batch(generated)
     generated = flatten(generated)
 
     parsed, start_idx = [], 0
@@ -88,8 +110,11 @@ def submit_tasks():
             parsed.append(parse_json._submit(
                 args=[num_parser_out] + generated[start_idx : start_idx + num_parser_in],
                 num_return_vals=num_parser_out,
-                resources={node_resources[i] : 1}))
+                resources={node_resources[i] : 1},
+                batch=BATCH))
             start_idx += num_parser_in
+    if BATCH:
+        parsed = ray.worker.global_worker.submit_batch(parsed)
     parsed = flatten(parsed)
 
     filtered, start_idx = [], 0
@@ -98,8 +123,11 @@ def submit_tasks():
             filtered.append(filter._submit(
                 args=[num_filter_out] + parsed[start_idx : start_idx + num_filter_in],
                 num_return_vals=num_filter_out,
-                resources={node_resources[i] : 1}))
-            start_idx += num_filter_in 
+                resources={node_resources[i] : 1},
+                batch=BATCH))
+            start_idx += num_filter_in
+    if BATCH:
+        filtered = ray.worker.global_worker.submit_batch(filtered)
     filtered = flatten(filtered)
 
     shuffled, start_idx = [], 0
@@ -109,15 +137,24 @@ def submit_tasks():
             shuffled.append(project_shuffle._submit(
                 args=[num_projector_out] + batches,
                 num_return_vals=num_projector_out,
-                resources={node_resources[i] : 1}))
+                resources={node_resources[i] : 1},
+                batch=BATCH))
             start_idx += num_projector_in
+    if BATCH:
+        shuffled = ray.worker.global_worker.submit_batch(shuffled)
     shuffled = np.array(shuffled)
 
     if num_reducers == 1:
         # Handle return type difference for num_ret_vals=1
         shuffled = np.reshape(shuffled, (len(shuffled), 1))
 
-    [reducers[i].reduce.remote(*shuffled[:,i]) for i in range(num_reducers)]
+    if BATCH:
+        batch = [reducers[i].reduce.remote_batch(*shuffled[:,i]) for i in range(num_reducers)]
+        ray.worker.global_worker.submit_batch(batch)
+    else:
+        [reducers[i].reduce.remote(*shuffled[:,i]) for i in range(num_reducers)]
+
+
 
 def compute_stats():
     i, total = 0, 0
@@ -427,13 +464,12 @@ if __name__ == '__main__':
     num_parsers_per_node = args.num_parsers 
     num_filters_per_node = args.num_filters
     num_projectors_per_node = args.num_projectors 
-    num_reducers_per_node = args.num_reducers 
 
     num_generators = args.num_generators * num_nodes
     num_parsers = args.num_parsers * num_nodes
     num_filters = args.num_filters * num_nodes
     num_projectors = args.num_projectors * num_nodes
-    num_reducers = args.num_reducers * num_nodes
+    num_reducers = args.num_reducers
 
     num_generator_out = max(1, num_parsers // num_generators)
     num_parser_in = max(1, num_generators // num_parsers)
@@ -448,7 +484,7 @@ if __name__ == '__main__':
     print(num_parser_in, "--> [", num_parsers_per_node, "parsers ] -->", num_parser_out  )
     print(num_filter_in, "--> [", num_filters_per_node, "filters ] -->", num_filter_out  )
     print(num_projector_in, "--> [", num_projectors_per_node, "projectors ] -->", num_projector_out)
-    print(num_projectors, "--> [", num_reducers_per_node, "reducers]")
+    print(num_projectors, "--> [", num_reducers, "reducers]")
 
     node_resources = ["Node{}".format(i) for i in range(num_nodes)]
 
@@ -491,55 +527,58 @@ if __name__ == '__main__':
     print("Placing dependencies on nodes...")
     ray_warmup(reducers, node_resources, gen_deps)
 
-    try:
-        time_to_sleep = BATCH_SIZE_SEC
+    if exp_time > 0:
+        try:
+            time_to_sleep = BATCH_SIZE_SEC
 
-        print("Warming up...")
-        start_time = time.time()
-        end_time = start_time + warmup_time
+            print("Warming up...")
+            start_time = time.time()
+            end_time = start_time + warmup_time
 
-        while time.time() < end_time:
-            submit_tasks()
-            time.sleep(time_to_sleep)
+            while time.time() < end_time:
+                submit_tasks()
+                time.sleep(time_to_sleep)
 
-        print("Clearing reducers...")
-        time.sleep(5) # TODO non-deterministic, fix
-        ray.wait([reducer.clear.remote() for reducer in reducers],
-                 num_returns = len(reducers))
+            print("Clearing reducers...")
+            time.sleep(5) # TODO non-deterministic, fix
+            ray.wait([reducer.clear.remote() for reducer in reducers],
+                     num_returns = len(reducers))
 
-        print("Measuring...")
-        start_time = time.time()
-        end_time = start_time + exp_time
+            print("Measuring...")
+            start_time = time.time()
+            end_time = start_time + exp_time
 
-        while time.time() < end_time:
-            loop_start = time.time()
-            submit_tasks()
-            loop_end = time.time()
-            time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
-            if time_to_sleep > 0:
-                time.sleep(time_to_sleep) 
+            while time.time() < end_time:
+                loop_start = time.time()
+                submit_tasks()
+                loop_end = time.time()
+                time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
+                if time_to_sleep > 0:
+                    time.sleep(time_to_sleep)
+                else:
+                    print("WARNING: behind by", time_to_sleep * -1)
 
-        end_time = time.time()
+            end_time = time.time()
 
-        print("Finished in: ", (end_time - start_time), "s")
+            print("Finished in: ", (end_time - start_time), "s")
 
-        print("Computing throughput...")
-        compute_stats() 
-    
-        print("Writing latencies...")
-        write_latencies()
-    
-        print("Dumping...")
-        ray.global_state.chrome_tracing_dump(filename=args.dump)
+            print("Computing throughput...")
+            compute_stats()
 
-        print("Computing checkpoint overhead...")
-        compute_checkpoint_overhead()
-    
-        print("Writing timeseries...")
-        write_timeseries()
-    
-    except KeyboardInterrupt: 
-        print("Dumping current state...")
-        ray.global_state.chrome_tracing_dump(filename=args.dump)
-        exit()
+            print("Writing latencies...")
+            write_latencies()
+
+            print("Dumping...")
+            ray.global_state.chrome_tracing_dump(filename=args.dump)
+
+            print("Computing checkpoint overhead...")
+            compute_checkpoint_overhead()
+
+            print("Writing timeseries...")
+            write_timeseries()
+
+        except KeyboardInterrupt:
+            print("Dumping current state...")
+            ray.global_state.chrome_tracing_dump(filename=args.dump)
+            exit()
 

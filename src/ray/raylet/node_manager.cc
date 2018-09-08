@@ -667,6 +667,23 @@ void NodeManager::ProcessClientMessage(
     }
     return;
   } break;
+  case protocol::MessageType::SubmitBatch: {
+    // Read the task submitted by the client.
+    auto message = flatbuffers::GetRoot<local_scheduler::protocol::SubmitBatchRequest>(message_data);
+    for (size_t i = 0; i < message->batch()->size(); ++i) {
+      auto task_message = message->batch()->Get(i);
+      TaskExecutionSpecification task_execution_spec(
+          from_flatbuf(*task_message->execution_dependencies()));
+      task_execution_spec.SetLastTimestamp(current_sys_time_ms());
+      TaskSpecification task_spec(*task_message->task_spec());
+      Task task(task_execution_spec, task_spec);
+      io_service_.post([this, task]() {
+        // Submit the task to the local scheduler. Since the task was submitted
+        // locally, there is no uncommitted lineage.
+        SubmitTask(task, Lineage());
+      });
+    }
+  } break;
   case protocol::MessageType::SubmitTask: {
     // Read the task submitted by the client.
     auto message = flatbuffers::GetRoot<protocol::SubmitTaskRequest>(message_data);
