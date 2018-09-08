@@ -22,6 +22,13 @@ LocalSchedulerConnection *LocalSchedulerConnection_init(
   result->use_raylet = use_raylet;
   result->conn = connect_ipc_sock_retry(local_scheduler_socket, -1, -1);
 
+  size_t writebuf_size = 212992;
+  setsockopt(result->conn, SOL_SOCKET, SO_SNDBUF, &writebuf_size, sizeof(writebuf_size));
+  size_t new_writebuf = 0;
+  socklen_t new_writebuf_size = sizeof(new_writebuf);
+  getsockopt(result->conn, SOL_SOCKET, SO_SNDBUF, &new_writebuf, &new_writebuf_size);
+  RAY_CHECK(new_writebuf == 212992 * 2) << "writebuf was " << writebuf_size << " is now " << new_writebuf << " size is " << new_writebuf_size;
+
   /* Register with the local scheduler.
    * NOTE(swang): If the local scheduler exits and we are registered as a
    * worker, we will get killed. */
