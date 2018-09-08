@@ -199,7 +199,7 @@ void MergeLineageHelper(const TaskID &task_id, const Lineage &lineage_from,
 }
 
 /// A helper function to merge one lineage into another, in DFS order.
-void LineageCache::AddUncommittedLineage(const TaskID &task_id, const Lineage &uncommitted_lineage) {
+void LineageCache::AddUncommittedLineage(const TaskID &task_id, const Lineage &uncommitted_lineage, bool subscribe) {
   // If the entry is not found in the lineage to merge, then we stop since
   // there is nothing to copy into the merged lineage.
   auto entry = uncommitted_lineage.GetEntry(task_id);
@@ -214,13 +214,13 @@ void LineageCache::AddUncommittedLineage(const TaskID &task_id, const Lineage &u
   // if the new entry has an equal or lower GCS status than the current entry
   // in lineage_to. This also prevents us from traversing the same node twice.
   if (lineage_.SetEntry(entry->TaskData(), entry->GetStatus())) {
-    if (entry->RequestEvictionNotification(max_lineage_size_)) {
+    if (subscribe) {
       RAY_LOG(DEBUG) << "subscribing to remote task " << task_id;
       SubscribeTask(task_id);
     }
     for (const auto &parent_id : parent_ids) {
       children_[parent_id].insert(task_id);
-      AddUncommittedLineage(parent_id, uncommitted_lineage);
+      AddUncommittedLineage(parent_id, uncommitted_lineage, subscribe);
     }
   }
 }
@@ -233,7 +233,8 @@ bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   RAY_LOG(DEBUG) << "add waiting task " << task_id << " on " << client_id_;
 
   // Merge the uncommitted lineage into the lineage cache.
-  AddUncommittedLineage(task_id, uncommitted_lineage);
+  bool notify_evicted = uncommitted_lineage.GetEntry(task_id)->NotifyEvicted(max_lineage_size_);
+  AddUncommittedLineage(task_id, uncommitted_lineage, notify_evicted);
 
   // Add the submitted task to the lineage cache as UNCOMMITTED_WAITING. It
   // should be marked as UNCOMMITTED_READY once the task starts execution.
@@ -380,28 +381,29 @@ bool LineageCache::UnsubscribeTask(const TaskID &task_id) {
   return subscribed;
 }
 
-void LineageCache::EvictTask(const TaskID &task_id) {
+boost::optional<LineageEntry> LineageCache::EvictTask(const TaskID &task_id) {
+  boost::optional<LineageEntry> evicted_entry;
   auto commit_it = committed_tasks_.find(task_id);
   if (commit_it == committed_tasks_.end()) {
-    return;
+    return evicted_entry;
   }
   auto entry = lineage_.GetEntry(task_id);
   if (!entry) {
-    return;
+    return evicted_entry;
   }
   if (!(entry->GetStatus() == GcsStatus::UNCOMMITTED_REMOTE || entry->GetStatus() == GcsStatus::COMMITTING)) {
     // Only evict tasks that we were subscribed to or that we were committing.
-    return;
+    return evicted_entry;
   }
   for (const auto &parent_id : entry->GetParentTaskIds()) {
     if (ContainsTask(parent_id)) {
-      return;
+      return evicted_entry;
     }
   }
 
   // Evict the task.
   RAY_LOG(DEBUG) << "evicting task " << task_id << " on " << client_id_;
-  lineage_.PopEntry(task_id);
+  evicted_entry = lineage_.PopEntry(task_id);
   committed_tasks_.erase(commit_it);
   UnsubscribeTask(task_id);
   // Try to evict the children of the committed task. These are the tasks that
@@ -419,7 +421,7 @@ void LineageCache::EvictTask(const TaskID &task_id) {
     }
   }
 
-  return;
+  return evicted_entry;
 }
 
 void LineageCache::EvictRemoteLineage(const TaskID &task_id) {
@@ -460,23 +462,23 @@ void LineageCache::HandleEntryCommitted(const TaskID &task_id, bool lineage_comm
   committed_tasks_.insert(task_id);
   if (lineage_committed) {
     EvictRemoteLineage(task_id);
-  } else if (entry->NotifyEvicted(max_lineage_size_)) {
-    gcs::raylet::TaskTable::WriteCallback task_callback = [this](
-        ray::gcs::AsyncGcsClient *client, const TaskID &id, const protocol::TaskT &data) {
-      HandleEntryCommitted(id, true);
-    };
-    lineage_.GetEntryMutable(task_id)->TaskDataMutable().SetLineageCommitted();
-    flatbuffers::FlatBufferBuilder fbb;
-    auto message = entry->TaskData().ToFlatbuffer(fbb);
-    fbb.Finish(message);
-    auto task_data = std::make_shared<protocol::TaskT>();
-    auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
-    root->UnPackTo(task_data.get());
-    RAY_CHECK_OK(task_storage_.Add(entry->TaskData().GetTaskSpecification().DriverId(),
-                                   task_id, task_data, task_callback));
-
   } else {
-    EvictTask(task_id);
+    auto evicted_entry = EvictTask(task_id);
+    if (evicted_entry && evicted_entry->NotifyEvicted(max_lineage_size_)) {
+      gcs::raylet::TaskTable::WriteCallback task_callback = [this](
+          ray::gcs::AsyncGcsClient *client, const TaskID &id, const protocol::TaskT &data) {
+        HandleEntryCommitted(id, true);
+      };
+      evicted_entry->TaskDataMutable().SetLineageCommitted();
+      flatbuffers::FlatBufferBuilder fbb;
+      auto message = evicted_entry->TaskData().ToFlatbuffer(fbb);
+      fbb.Finish(message);
+      auto task_data = std::make_shared<protocol::TaskT>();
+      auto root = flatbuffers::GetRoot<protocol::Task>(fbb.GetBufferPointer());
+      root->UnPackTo(task_data.get());
+      RAY_CHECK_OK(task_storage_.Add(evicted_entry->TaskData().GetTaskSpecification().DriverId(),
+                                     task_id, task_data, task_callback));
+    }
   }
 }
 
