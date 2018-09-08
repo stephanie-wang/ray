@@ -70,7 +70,7 @@ class ServerConnection : public std::enable_shared_from_this<ServerConnection<T>
 
   /// The socket connection to the server.
   boost::asio::basic_stream_socket<T> socket_;
-  std::list<std::shared_ptr<WriteBufferData>> write_queue_;
+  std::list<std::unique_ptr<WriteBufferData>> write_queue_;
   bool writing_;
   size_t max_messages_;
 

@@ -145,13 +145,13 @@ template <class T>
 void ServerConnection<T>::WriteMessageAsync(int64_t type, int64_t length, const
     uint8_t *message, const std::function<void(const ray::Status&)>
     &handler) {
-  auto write_buffer = std::make_shared<WriteBufferData>();
+  auto write_buffer = std::unique_ptr<WriteBufferData>(new WriteBufferData());
   write_buffer->write_type = type;
   write_buffer->write_length = length;
   write_buffer->write_message.resize(length);
   write_buffer->write_message.assign(message, message + length);
   write_buffer->handler = handler;
-  write_queue_.push_back(write_buffer);
+  write_queue_.push_back(std::move(write_buffer));
 
   if (!writing_) {
     WriteSome();
