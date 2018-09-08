@@ -862,7 +862,8 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
     int64_t interval = current_sys_time_ms() - task.GetTaskExecutionSpec().LastTimestamp();
     if (interval > 100) {
-      RAY_LOG(WARNING) << "HANDLER: ForwardTask receive took " << interval << "ms";
+      RAY_LOG(WARNING) << "HANDLER: ForwardTask receive took " << interval << "ms"
+                       << " for " << uncommitted_lineage.GetEntries().size() << " tasks";
     }
     LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
     //RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
@@ -1398,6 +1399,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
 void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t reconstruction_attempt) {
   RAY_LOG(INFO) << "Reconstructing task " << task_id << " on client "
                 << gcs_client_->client_table().GetLocalClientId();
+  return;
   // Retrieve the task spec in order to re-execute the task.
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id,
