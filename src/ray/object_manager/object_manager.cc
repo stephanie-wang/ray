@@ -408,7 +408,9 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
 
   // Fail on status not okay. The object is local, and there is
   // no other anticipated error here.
-  RAY_CHECK_OK(chunk_status.second);
+  if (!chunk_status.second.ok()) {
+    RAY_LOG(WARNING) << "WARN: Object not local " << object_id;
+  }
 
   // Create buffer.
   flatbuffers::FlatBufferBuilder fbb;

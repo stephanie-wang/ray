@@ -860,6 +860,11 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
 
     Lineage uncommitted_lineage(*message);
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
+    int64_t interval = current_sys_time_ms() - task.GetTaskExecutionSpec().LastTimestamp();
+    if (interval > 100) {
+      RAY_LOG(WARNING) << "HANDLER: ForwardTask receive took " << interval << "ms";
+    }
+    LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
     //RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
     //               << " spillback=" << task.GetTaskExecutionSpec().NumForwards();
     LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
