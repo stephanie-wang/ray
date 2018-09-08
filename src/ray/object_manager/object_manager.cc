@@ -406,6 +406,7 @@ ray::Status ObjectManager::SendObjectHeaders(const ObjectID &object_id,
   // no other anticipated error here.
   if (!chunk_status.second.ok()) {
     RAY_LOG(WARNING) << "WARN: Object not local " << object_id;
+    return Status::OK();
   }
 
   // Create buffer.
