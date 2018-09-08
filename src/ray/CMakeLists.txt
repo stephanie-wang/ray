@@ -54,6 +54,7 @@ set(RAY_SRCS
   raylet/actor_registration.cc
   raylet/scheduling_queue.cc
   raylet/scheduling_policy.cc
+  raylet/scheduling_buffer.cc
   raylet/task_dependency_manager.cc
   raylet/reconstruction_policy.cc
   raylet/node_manager.cc

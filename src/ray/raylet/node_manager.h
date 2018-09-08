@@ -15,6 +15,7 @@
 #include "ray/raylet/reconstruction_policy.h"
 #include "ray/raylet/task_dependency_manager.h"
 #include "ray/raylet/worker_pool.h"
+#include "ray/raylet/scheduling_buffer.h"
 // clang-format on
 
 namespace ray {
@@ -203,6 +204,7 @@ class NodeManager {
   // means sleep for that many ms before writing to the GCS.
   int gcs_delay_ms_;
   std::unordered_map<TaskID, Task> gcs_task_cache_;
+  SchedulingBuffer scheduling_buffer_;
 };
 
 }  // namespace raylet

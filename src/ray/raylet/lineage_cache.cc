@@ -140,7 +140,7 @@ const std::unordered_map<const TaskID, LineageEntry> &Lineage::GetEntries() cons
 }
 
 flatbuffers::Offset<protocol::ForwardTaskRequest> Lineage::ToFlatbuffer(
-    flatbuffers::FlatBufferBuilder &fbb, const TaskID &task_id) const {
+    flatbuffers::FlatBufferBuilder &fbb, const TaskID &task_id, const std::deque<std::pair<ObjectID, ClientID>> &pushes) const {
   RAY_CHECK(GetEntry(task_id));
   // Serialize the task and object entries.
   std::vector<flatbuffers::Offset<protocol::Task>> uncommitted_tasks;
@@ -148,8 +148,17 @@ flatbuffers::Offset<protocol::ForwardTaskRequest> Lineage::ToFlatbuffer(
     uncommitted_tasks.push_back(entry.second.TaskData().ToFlatbuffer(fbb));
   }
 
+  std::vector<flatbuffers::Offset<flatbuffers::String>> objects;
+  std::vector<flatbuffers::Offset<flatbuffers::String>> clients;
+  for (const auto &push : pushes) {
+    objects.push_back(to_flatbuf(fbb, push.first));
+    clients.push_back(to_flatbuf(fbb, push.second));
+  }
+
   auto request = protocol::CreateForwardTaskRequest(fbb, to_flatbuf(fbb, task_id),
-                                                    fbb.CreateVector(uncommitted_tasks));
+                                                    fbb.CreateVector(uncommitted_tasks),
+                                                    fbb.CreateVector(objects),
+                                                    fbb.CreateVector(clients));
   return request;
 }
 

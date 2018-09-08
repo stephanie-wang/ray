@@ -144,6 +144,8 @@ table ForwardTaskRequest {
   // The tasks in the uncommitted lineage of the forwarded task. This
   // should include task_id.
   uncommitted_tasks: [Task];
+  push_objects: [string];
+  push_clients: [string];
 }
 
 table ReconstructObjects {

@@ -154,7 +154,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_clients_(),
       remote_server_connections_(),
       actor_registry_(),
-      gcs_delay_ms_(config.gcs_delay_ms) {
+      gcs_delay_ms_(config.gcs_delay_ms),
+      scheduling_buffer_(1024, 1024) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -871,6 +872,12 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
     SubmitTask(task, uncommitted_lineage, /* forwarded = */ true);
     LogHandlerDelay(start, "ForwardTaskRequest2", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
+
+    for (size_t i = 0; i < message->push_objects()->size(); ++i) {
+      ObjectID object_id = from_flatbuf(*message->push_objects()->Get(i));
+      ClientID client_id = from_flatbuf(*message->push_clients()->Get(i));
+      object_manager_.Push(object_id, client_id);
+    }
   } break;
   case protocol::MessageType::DisconnectClient: {
     // TODO(rkn): We need to do some cleanup here.
@@ -1540,7 +1547,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   lineage_cache_entry_task.IncrementNumForwards();
 
   flatbuffers::FlatBufferBuilder fbb;
-  auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id);
+  auto pushes = scheduling_buffer_.GetPushes(node_id);
+  auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id, pushes);
   fbb.Finish(request);
   size_t size = fbb.GetSize();
   size_t num_entries = uncommitted_lineage.GetEntries().size();
@@ -1587,6 +1595,27 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // we assume that all following tasks will fail as well, so the receiving
   // node will not have any missing lineage.
   lineage_cache_->MarkTaskAsForwarded(task_id, node_id);
+
+  scheduling_buffer_.AddDecision(task_id, node_id);
+  if (task.GetTaskSpecification().IsActorTask()) {
+    // Iterate through the object's arguments. NOTE(swang): We do not include
+    // the execution dependencies here since those cannot be transferred
+    // between nodes.
+    for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
+      int count = task.GetTaskSpecification().ArgIdCount(i);
+      for (int j = 0; j < count; j++) {
+        ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
+        // If the argument is local, then push it to the receiving node.
+        if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
+          object_manager_.Push(argument_id, node_id);
+        } else {
+          // Record that this object should be pushed to the node where
+          // the task was forwarded.
+          scheduling_buffer_.AddPush(argument_id, node_id);
+        }
+      }
+    }
+  }
   return ray::Status::OK();
 }
 
@@ -1600,21 +1629,6 @@ void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &tas
     // Preemptively push any local arguments to the receiving node. For now, we
     // only do this with actor tasks, since actor tasks must be executed by a
     // specific process and therefore have affinity to the receiving node.
-    if (task.GetTaskSpecification().IsActorTask()) {
-      // Iterate through the object's arguments. NOTE(swang): We do not include
-      // the execution dependencies here since those cannot be transferred
-      // between nodes.
-      for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
-        int count = task.GetTaskSpecification().ArgIdCount(i);
-        for (int j = 0; j < count; j++) {
-          ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
-          // If the argument is local, then push it to the receiving node.
-          if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
-            object_manager_.Push(argument_id, node_manager_id);
-          }
-        }
-      }
-    }
   } else {
     RAY_LOG(INFO) << "Failed to forward task " << task_id << " to node manager "
                   << node_manager_id;

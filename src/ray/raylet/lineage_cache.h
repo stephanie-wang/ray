@@ -2,6 +2,7 @@
 #define RAY_RAYLET_LINEAGE_CACHE_H
 
 #include <boost/optional.hpp>
+#include <deque>
 
 // clang-format off
 #include "common_protocol.h"
@@ -183,7 +184,8 @@ class Lineage {
   /// \return An offset to the serialized lineage. The serialization includes
   /// all task and object entries in the lineage.
   flatbuffers::Offset<protocol::ForwardTaskRequest> ToFlatbuffer(
-      flatbuffers::FlatBufferBuilder &fbb, const TaskID &entry_id) const;
+      flatbuffers::FlatBufferBuilder &fbb, const TaskID &entry_id,
+      const std::deque<std::pair<ObjectID, ClientID>> &pushes) const;
 
  private:
   /// The lineage entries.
