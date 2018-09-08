@@ -245,7 +245,7 @@ ray::Status NodeManager::RegisterGcs() {
   RAY_RETURN_NOT_OK(gcs_client_->heartbeat_batch_table().Subscribe(
       UniqueID::nil(), UniqueID::nil(), heartbeat_batch_added, nullptr,
       [](gcs::AsyncGcsClient *client) {
-        RAY_LOG(DEBUG) << "heartbeat table subscription done callback called.";
+        //RAY_LOG(DEBUG) << "heartbeat table subscription done callback called.";
       }));
 
   // Subscribe to driver table updates.
@@ -267,8 +267,8 @@ ray::Status NodeManager::RegisterGcs() {
 void NodeManager::HandleDriverTableUpdate(
     const ClientID &id, const std::vector<DriverTableDataT> &driver_data) {
   for (const auto &entry : driver_data) {
-    RAY_LOG(DEBUG) << "HandleDriverTableUpdate " << UniqueID::from_binary(entry.driver_id)
-                   << " " << entry.is_dead;
+    //RAY_LOG(DEBUG) << "HandleDriverTableUpdate " << UniqueID::from_binary(entry.driver_id)
+    //               << " " << entry.is_dead;
     if (entry.is_dead) {
       // TODO: Implement cleanup on driver death. For reference,
       // see handle_driver_removed_callback in local_scheduler.cc
@@ -296,7 +296,7 @@ void NodeManager::Heartbeat() {
   }
   last_heartbeat_at_ms_ = now_ms;
 
-  RAY_LOG(DEBUG) << "[Heartbeat] sending heartbeat.";
+  //RAY_LOG(DEBUG) << "[Heartbeat] sending heartbeat.";
   auto &heartbeat_table = gcs_client_->heartbeat_table();
   auto heartbeat_data = std::make_shared<HeartbeatTableDataT>();
   auto client_id = gcs_client_->client_table().GetLocalClientId();
@@ -318,7 +318,7 @@ void NodeManager::Heartbeat() {
       UniqueID::nil(), gcs_client_->client_table().GetLocalClientId(), heartbeat_data,
       [](ray::gcs::AsyncGcsClient *client, const ClientID &id,
          const HeartbeatTableDataT &data) {
-        RAY_LOG(DEBUG) << "[HEARTBEAT] heartbeat sent callback";
+        //RAY_LOG(DEBUG) << "[HEARTBEAT] heartbeat sent callback";
       });
 
   if (!status.ok()) {
@@ -338,7 +338,7 @@ void NodeManager::Heartbeat() {
 void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   ClientID client_id = ClientID::from_binary(client_data.client_id);
 
-  RAY_LOG(DEBUG) << "[ClientAdded] received callback from client id " << client_id;
+  //RAY_LOG(DEBUG) << "[ClientAdded] received callback from client id " << client_id;
   if (client_id == gcs_client_->client_table().GetLocalClientId()) {
     // We got a notification for ourselves, so we are connected to the GCS now.
     // Save this NodeManager's resource information in the cluster resource map.
@@ -349,12 +349,12 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   // TODO(atumanov): make remote client lookup O(1)
   if (std::find(remote_clients_.begin(), remote_clients_.end(), client_id) ==
       remote_clients_.end()) {
-    RAY_LOG(DEBUG) << "a new client: " << client_id;
+    //RAY_LOG(DEBUG) << "a new client: " << client_id;
     remote_clients_.push_back(client_id);
   } else {
     // NodeManager connection to this client was already established.
-    RAY_LOG(DEBUG) << "received a new client connection that already exists: "
-                   << client_id;
+    //RAY_LOG(DEBUG) << "received a new client connection that already exists: "
+    //               << client_id;
     return;
   }
 
@@ -364,9 +364,9 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
 
   // Establish a new NodeManager connection to this GCS client.
   auto client_info = gcs_client_->client_table().GetClient(client_id);
-  RAY_LOG(DEBUG) << "[ClientAdded] CONNECTING TO: "
-                 << " " << client_info.node_manager_address << " "
-                 << client_info.node_manager_port;
+  //RAY_LOG(DEBUG) << "[ClientAdded] CONNECTING TO: "
+  //               << " " << client_info.node_manager_address << " "
+  //               << client_info.node_manager_port;
 
   boost::asio::ip::tcp::socket socket(io_service_);
   RAY_CHECK_OK(TcpConnect(socket, client_info.node_manager_address,
@@ -379,7 +379,7 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
   // TODO(swang): If we receive a notification for our own death, clean up and
   // exit immediately.
   const ClientID client_id = ClientID::from_binary(client_data.client_id);
-  RAY_LOG(DEBUG) << "[ClientRemoved] received callback from client id " << client_id;
+  //RAY_LOG(DEBUG) << "[ClientRemoved] received callback from client id " << client_id;
 
   RAY_CHECK(client_id != gcs_client_->client_table().GetLocalClientId())
       << "Exiting because this node manager has mistakenly been marked dead by the "
@@ -401,7 +401,7 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
 
 void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &client_id,
                                  const HeartbeatTableDataT &heartbeat_data) {
-  RAY_LOG(DEBUG) << "[HeartbeatAdded]: received heartbeat from client id " << client_id;
+  //RAY_LOG(DEBUG) << "[HeartbeatAdded]: received heartbeat from client id " << client_id;
   if (client_id == gcs_client_->client_table().GetLocalClientId()) {
     // Skip heartbeats from self.
     return;
@@ -556,7 +556,7 @@ void NodeManager::DispatchTasks() {
 void NodeManager::ProcessClientMessage(
     const std::shared_ptr<LocalClientConnection> &client, int64_t message_type,
     const uint8_t *message_data) {
-  RAY_LOG(DEBUG) << "Message of type " << message_type;
+  //RAY_LOG(DEBUG) << "Message of type " << message_type;
 
   switch (static_cast<protocol::MessageType>(message_type)) {
   case protocol::MessageType::RegisterClientRequest: {
@@ -863,16 +863,16 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
 
     Lineage uncommitted_lineage(*message);
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
-    RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
-                   << " spillback=" << task.GetTaskExecutionSpec().NumForwards();
+    //RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
+    //               << " spillback=" << task.GetTaskExecutionSpec().NumForwards();
     LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
     SubmitTask(task, uncommitted_lineage, /* forwarded = */ true);
     LogHandlerDelay(start, "ForwardTaskRequest2", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
   } break;
   case protocol::MessageType::DisconnectClient: {
     // TODO(rkn): We need to do some cleanup here.
-    RAY_LOG(DEBUG) << "Received disconnect message from remote node manager. "
-                   << "We need to do some cleanup here.";
+    //RAY_LOG(DEBUG) << "Received disconnect message from remote node manager. "
+    //               << "We need to do some cleanup here.";
     // Do not process any more messages from this node manager.
     return;
   } break;
@@ -889,11 +889,11 @@ void NodeManager::ScheduleTasks() {
       cluster_resource_map_, gcs_client_->client_table().GetLocalClientId(),
       remote_clients_);
 #ifndef NDEBUG
-  RAY_LOG(DEBUG) << "[NM ScheduleTasks] policy decision:";
+  //RAY_LOG(DEBUG) << "[NM ScheduleTasks] policy decision:";
   for (const auto &pair : policy_decision) {
     TaskID task_id = pair.first;
     ClientID client_id = pair.second;
-    RAY_LOG(DEBUG) << task_id << " --> " << client_id;
+    //RAY_LOG(DEBUG) << task_id << " --> " << client_id;
   }
 #endif
 
@@ -933,7 +933,7 @@ void NodeManager::ScheduleTasks() {
 }
 
 void NodeManager::TreatTaskAsFailed(const TaskSpecification &spec) {
-  RAY_LOG(DEBUG) << "Treating task " << spec.TaskId() << " as failed.";
+  //RAY_LOG(DEBUG) << "Treating task " << spec.TaskId() << " as failed.";
   // Loop over the return IDs (except the dummy ID) and store a fake object in
   // the object store.
   int64_t num_returns = spec.NumReturns();
@@ -1249,7 +1249,7 @@ void NodeManager::AssignTask(Task &task) {
     return;
   }
 
-  RAY_LOG(DEBUG) << "Assigning task to worker with pid " << worker->Pid();
+  //RAY_LOG(DEBUG) << "Assigning task to worker with pid " << worker->Pid();
   flatbuffers::FlatBufferBuilder fbb;
 
   const ClientID &my_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -1333,7 +1333,7 @@ void NodeManager::HandleTaskAssigned(const ray::Status &status, Task &task, std:
 
 void NodeManager::FinishAssignedTask(Worker &worker) {
   TaskID task_id = worker.GetAssignedTaskId();
-  RAY_LOG(DEBUG) << "Finished task " << task_id;
+  //RAY_LOG(DEBUG) << "Finished task " << task_id;
 
   // (See design_docs/task_states.rst for the state transition diagram.)
   const auto task = local_queues_.RemoveTask(task_id);
@@ -1353,7 +1353,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     actor_notification->driver_id = JobID::nil().binary();
     actor_notification->node_manager_id =
         gcs_client_->client_table().GetLocalClientId().binary();
-    RAY_LOG(DEBUG) << "Publishing actor creation: " << actor_id;
+    //RAY_LOG(DEBUG) << "Publishing actor creation: " << actor_id;
     RAY_CHECK_OK(gcs_client_->actor_table().Append(JobID::nil(), actor_id,
                                                    actor_notification, nullptr));
 
@@ -1541,8 +1541,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   size_t size = fbb.GetSize();
   size_t num_entries = uncommitted_lineage.GetEntries().size();
 
-  RAY_LOG(DEBUG) << "Forwarding task " << task_id << " to " << node_id << " spillback="
-                 << lineage_cache_entry_task.GetTaskExecutionSpec().NumForwards();
+  //RAY_LOG(DEBUG) << "Forwarding task " << task_id << " to " << node_id << " spillback="
+  //               << lineage_cache_entry_task.GetTaskExecutionSpec().NumForwards();
 
   auto client_info = gcs_client_->client_table().GetClient(node_id);
 
@@ -1639,8 +1639,8 @@ void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &tas
             // Timer killing will receive the boost::asio::error::operation_aborted,
             // we only handle the timeout event.
             RAY_CHECK(!error);
-            RAY_LOG(DEBUG) << "Resubmitting task " << task_id
-                           << " because ForwardTask failed.";
+            //RAY_LOG(DEBUG) << "Resubmitting task " << task_id
+            //               << " because ForwardTask failed.";
             Task task_copy(task);
             task_copy.SetNumExecutions(task.GetTaskExecutionSpec().NumExecutions() + 1);
             SubmitTask(task_copy, Lineage());

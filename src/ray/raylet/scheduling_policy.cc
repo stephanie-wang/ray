@@ -18,14 +18,14 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
   // The policy decision to be returned.
   std::unordered_map<TaskID, ClientID> decision;
   // TODO(atumanov): protect DEBUG code blocks with ifdef DEBUG
-  RAY_LOG(DEBUG) << "[Schedule] cluster resource map: ";
-  for (const auto &client_resource_pair : cluster_resources) {
-    // pair = ClientID, SchedulingResources
-    const ClientID &client_id = client_resource_pair.first;
-    const SchedulingResources &resources = client_resource_pair.second;
-    RAY_LOG(DEBUG) << "client_id: " << client_id << " "
-                   << resources.GetAvailableResources().ToString();
-  }
+  //RAY_LOG(DEBUG) << "[Schedule] cluster resource map: ";
+  //for (const auto &client_resource_pair : cluster_resources) {
+  //  // pair = ClientID, SchedulingResources
+  //  const ClientID &client_id = client_resource_pair.first;
+  //  const SchedulingResources &resources = client_resource_pair.second;
+  //  RAY_LOG(DEBUG) << "client_id: " << client_id << " "
+  //                 << resources.GetAvailableResources().ToString();
+  //}
 
   // Iterate over running tasks, get their resource demand and try to schedule.
   for (const auto &t : scheduling_queue_.GetPlaceableTasks()) {
@@ -39,10 +39,10 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
     }
 
     const TaskID &task_id = t.GetTaskSpecification().TaskId();
-    RAY_LOG(DEBUG) << "[SchedulingPolicy]: task=" << task_id
-                   << " numforwards=" << t.GetTaskExecutionSpec().NumForwards()
-                   << " resources="
-                   << t.GetTaskSpecification().GetRequiredResources().ToString();
+    //RAY_LOG(DEBUG) << "[SchedulingPolicy]: task=" << task_id
+    //               << " numforwards=" << t.GetTaskExecutionSpec().NumForwards()
+    //               << " resources="
+    //               << t.GetTaskSpecification().GetRequiredResources().ToString();
     // TODO(atumanov): replace the simple spillback policy with exponential backoff based
     // policy.
     //if (t.GetTaskExecutionSpecReadonly().NumForwards() >= 1) {
@@ -56,8 +56,8 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
       // pair = ClientID, SchedulingResources
       ClientID node_client_id = client_resource_pair.first;
       const auto &node_resources = client_resource_pair.second;
-      RAY_LOG(DEBUG) << "client_id " << node_client_id << " resources: "
-                     << node_resources.GetAvailableResources().ToString();
+      //RAY_LOG(DEBUG) << "client_id " << node_client_id << " resources: "
+      //               << node_resources.GetAvailableResources().ToString();
       if (resource_demand.IsSubset(node_resources.GetTotalResources())) {
         // This node is a feasible candidate.
         client_keys.push_back(node_client_id);
@@ -71,23 +71,23 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
       std::uniform_int_distribution<int> distribution(0, client_keys.size() - 1);
       int client_key_index = distribution(gen_);
       decision[task_id] = client_keys[client_key_index];
-      RAY_LOG(DEBUG) << "[SchedulingPolicy] idx=" << client_key_index << " " << task_id
-                     << " --> " << client_keys[client_key_index];
+      //RAY_LOG(DEBUG) << "[SchedulingPolicy] idx=" << client_key_index << " " << task_id
+      //               << " --> " << client_keys[client_key_index];
     } else {
       // TODO(swang): Hack to schedule reconstructed tasks that require
       // custom resources that are no longer available.
       // There are no nodes that can feasibily execute this task. TODO(rkn): Propagate a
       // warning to the user.
-      RAY_LOG(DEBUG) << "This task requires "
-                       << resource_demand.ToString()
-                       << ", but no nodes have the necessary resources.";
+      //RAY_LOG(DEBUG) << "This task requires "
+      //                 << resource_demand.ToString()
+      //                 << ", but no nodes have the necessary resources.";
       resource_demand = resource_demand.GetCpuResources();
       for (const auto &client_resource_pair : cluster_resources) {
         // pair = ClientID, SchedulingResources
         ClientID node_client_id = client_resource_pair.first;
         const auto &node_resources = client_resource_pair.second;
-        RAY_LOG(DEBUG) << "client_id " << node_client_id << " resources: "
-                       << node_resources.GetAvailableResources().ToString();
+        //RAY_LOG(DEBUG) << "client_id " << node_client_id << " resources: "
+        //               << node_resources.GetAvailableResources().ToString();
         if (resource_demand.IsSubset(node_resources.GetTotalResources())) {
           // This node is a feasible candidate.
           client_keys.push_back(node_client_id);
@@ -100,8 +100,8 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
       std::uniform_int_distribution<int> distribution(0, client_keys.size() - 1);
       int client_key_index = distribution(gen_);
       decision[task_id] = client_keys[client_key_index];
-      RAY_LOG(DEBUG) << "[SchedulingPolicy] idx=" << client_key_index << " " << task_id
-                     << " --> " << client_keys[client_key_index];
+      //RAY_LOG(DEBUG) << "[SchedulingPolicy] idx=" << client_key_index << " " << task_id
+      //               << " --> " << client_keys[client_key_index];
 
     }
   }
