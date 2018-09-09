@@ -7,6 +7,7 @@ import logging
 import numpy as np
 import ujson
 import uuid
+import sys
 
 import ray
 import ray.cloudpickle as pickle
@@ -20,6 +21,7 @@ log = logging.getLogger(__name__)
 log.setLevel(logging.INFO)
 
 BATCH = True
+USE_OBJECTS = True
 
 @ray.remote
 def warmup_objectstore():
@@ -31,7 +33,7 @@ def warmup_objectstore():
 def warmup(*args):
     return
 
-def ray_warmup(reducers, node_resources, *dependencies):
+def ray_warmup(reducers, node_resources):
     """
     Warmup Ray
     """
@@ -42,18 +44,11 @@ def ray_warmup(reducers, node_resources, *dependencies):
             resources={node_resource: 1}))
     ray.wait(warmups, num_returns=len(warmups))
 
-    warmups = []
-    for node_resource in node_resources:
-        warmups.append(warmup._submit(
-            args=dependencies,
-            resources={node_resource: 1}))
-    ray.wait(warmups, num_returns=len(warmups))
-
-    num_rounds = 100
+    num_rounds = 1000
     for i in range(num_rounds):
         with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
             start = time.time()
-            args = [None for _ in range(len(node_resources))]
+            args = [[time.time()] for _ in range(len(node_resources))]
             if BATCH:
                 for _ in range(5):
                     batch = []
@@ -86,10 +81,29 @@ def ray_warmup(reducers, node_resources, *dependencies):
         if i % 10 == 0:
             print("finished warmup round", i, "out of", num_rounds)
 
+    gen_deps = init_generator._submit(
+            args=[AD_TO_CAMPAIGN_MAP, time_slice_num_events],
+            resources={
+                "Node0": 1,
+                })
+    ray.wait(gen_deps, num_returns=len(gen_deps))
+    warmups = []
+    for node_resource in node_resources:
+        warmups.append(warmup._submit(
+            args=gen_deps,
+            resources={node_resource: 1}))
+    ray.wait(warmups, num_returns=len(warmups))
+    return gen_deps
+
+
 @ray.remote
-def reduce_warmup(*args):
+def reduce_warmup(timestamp, *args):
+    timestamp = timestamp[0]
     time.sleep(0.05)
-    return
+    if USE_OBJECTS:
+        return [timestamp for _ in range(1000)]
+    else:
+        return [timestamp]
 
 def submit_tasks():
     generated = []
@@ -159,11 +173,14 @@ def submit_tasks():
 def compute_stats():
     i, total = 0, 0
     missed_total, miss_time_total = 0, 0
-    for reducer in reducers:
+    counts = ray.get([reducer.count.remote() for reducer in reducers])
+    for count in counts:
+        print("Counted:", count)
+
+    all_seen = ray.get([reducer.seen.remote() for reducer in reducers])
+    for seen in all_seen:
         reducer_total = 0
         i += 1
-        print("Counted:", ray.get(reducer.count.remote()))
-        seen = ray.get(reducer.seen.remote())
         for key in seen:
             if key[1] < end_time:
                 reducer_total += seen[key]
@@ -343,6 +360,7 @@ def project_shuffle(num_ret_vals, *batches):
         for e in batch:
             cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
             shuffled[hash(cid) % num_ret_vals][(cid, window)] += 1
+    print("project shuffle size:", sys.getsizeof(shuffled))
     return shuffled[0] if len(shuffled) == 1 else tuple(shuffled)
 
 
@@ -428,17 +446,18 @@ class Reducer(object):
                 if latency > 0:
                     print(latency)
 
-    def foo(self, *args):
+    def foo(self, *timestamps):
         """
         Reduce by key
         Increment and store in dictionary
         """
-        return
+        timestamp = min([lst[0] for lst in timestamps])
+        print("foo latency:", time.time() - timestamp - 0.05 * 5)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dump', type=str, default='dump.json')
-    parser.add_argument('--exp-time', type=int, default=60)
+    parser.add_argument('--exp-time', type=int, default=30)
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--actor-checkpointing', action='store_true')
     parser.add_argument('--num-projectors', type=int, default=1)
@@ -510,13 +529,6 @@ if __name__ == '__main__':
     #ray_warmup(node_resources)
 
     print("Initializing generators...")
-    gen_deps = init_generator._submit(
-            args=[AD_TO_CAMPAIGN_MAP, time_slice_num_events],
-            resources={
-                "Node0": 1,
-                })
-    ray.wait(gen_deps, num_returns=len(gen_deps))
-
     print("Initializing reducers...")
     reducers = [init_actor(i, node_resources, Reducer, checkpoint) for i in range(num_reducers)]
     time.sleep(1)
@@ -525,22 +537,22 @@ if __name__ == '__main__':
     print("...finished initializing reducers:", len(reducers))
 
     print("Placing dependencies on nodes...")
-    ray_warmup(reducers, node_resources, gen_deps)
+    gen_deps = ray_warmup(reducers, node_resources)
 
     if exp_time > 0:
         try:
             time_to_sleep = BATCH_SIZE_SEC
 
             print("Warming up...")
-            start_time = time.time()
-            end_time = start_time + warmup_time
+            #start_time = time.time()
+            #end_time = start_time + warmup_time
 
-            while time.time() < end_time:
-                submit_tasks()
-                time.sleep(time_to_sleep)
+            #while time.time() < end_time:
+            #    submit_tasks()
+            #    time.sleep(time_to_sleep)
 
-            print("Clearing reducers...")
-            time.sleep(5) # TODO non-deterministic, fix
+            #print("Clearing reducers...")
+            time.sleep(30) # TODO non-deterministic, fix
             ray.wait([reducer.clear.remote() for reducer in reducers],
                      num_returns = len(reducers))
 
@@ -562,14 +574,14 @@ if __name__ == '__main__':
 
             print("Finished in: ", (end_time - start_time), "s")
 
+            print("Dumping...")
+            ray.global_state.chrome_tracing_dump(filename=args.dump)
+
             print("Computing throughput...")
             compute_stats()
 
             print("Writing latencies...")
             write_latencies()
-
-            print("Dumping...")
-            ray.global_state.chrome_tracing_dump(filename=args.dump)
 
             print("Computing checkpoint overhead...")
             compute_checkpoint_overhead()
