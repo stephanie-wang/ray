@@ -301,14 +301,12 @@ void ObjectManager::PullSendRequest(const ObjectID &object_id,
 
 void ObjectManager::HandlePushTaskTimeout(const ObjectID &object_id,
                                           const ClientID &client_id) {
-  RAY_LOG(WARNING) << "Invalid Push request ObjectID: " << object_id
-                   << " after waiting for " << config_.push_timeout_ms << " ms.";
   auto iter = unfulfilled_push_requests_.find(object_id);
-  RAY_CHECK(iter != unfulfilled_push_requests_.end());
-  uint num_erased = iter->second.erase(client_id);
-  RAY_CHECK(num_erased == 1);
-  if (iter->second.size() == 0) {
-    unfulfilled_push_requests_.erase(iter);
+  if (iter != unfulfilled_push_requests_.end()) {
+    iter->second.erase(client_id);
+    if (iter->second.size() == 0) {
+      unfulfilled_push_requests_.erase(iter);
+    }
   }
 }
 
