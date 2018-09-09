@@ -355,6 +355,7 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
                                       const ObjectID &object_id, uint64_t data_size,
                                       uint64_t metadata_size, uint64_t chunk_index,
                                       const RemoteConnectionInfo &connection_info) {
+  RAY_LOG(INFO) << "Pushing object " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   RAY_LOG(DEBUG) << "ExecuteSendObject " << client_id << " " << object_id << " "
                  << chunk_index;
   ray::Status status;
