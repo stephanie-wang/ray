@@ -22,6 +22,7 @@ log.setLevel(logging.INFO)
 
 BATCH = True
 USE_OBJECTS = True
+USE_MULTIPLE_PROJECTOR_OUTPUT = False
 
 @ray.remote
 def warmup_objectstore():
@@ -44,7 +45,7 @@ def ray_warmup(reducers, node_resources):
             resources={node_resource: 1}))
     ray.wait(warmups, num_returns=len(warmups))
 
-    num_rounds = 1000
+    num_rounds = 100
     for i in range(num_rounds):
         with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
             start = time.time()
@@ -156,18 +157,25 @@ def submit_tasks():
             start_idx += num_projector_in
     if BATCH:
         shuffled = ray.worker.global_worker.submit_batch(shuffled)
-    shuffled = np.array(shuffled)
 
-    if num_reducers == 1:
-        # Handle return type difference for num_ret_vals=1
-        shuffled = np.reshape(shuffled, (len(shuffled), 1))
+    if USE_MULTIPLE_PROJECTOR_OUTPUT:
+        shuffled = np.array(shuffled)
 
-    if BATCH:
-        batch = [reducers[i].reduce.remote_batch(*shuffled[:,i]) for i in range(num_reducers)]
-        ray.worker.global_worker.submit_batch(batch)
+        if num_reducers == 1:
+            # Handle return type difference for num_ret_vals=1
+            shuffled = np.reshape(shuffled, (len(shuffled), 1))
+
+        if BATCH:
+            batch = [reducer.reduce.remote_batch(*shuffled[:,i]) for reducer in reducers]
+            ray.worker.global_worker.submit_batch(batch)
+        else:
+            [reducer.reduce.remote(*shuffled[:,i]) for reducer in reducers]
     else:
-        [reducers[i].reduce.remote(*shuffled[:,i]) for i in range(num_reducers)]
-
+        if BATCH:
+            batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
+            ray.worker.global_worker.submit_batch(batch)
+        else:
+            [reducer.reduce.remote(*shuffled) for reducer in reducers]
 
 
 def compute_stats():
@@ -296,6 +304,7 @@ def flatten(x):
 def init_actor(node_index, node_resources, actor_cls, checkpoint, args=None):
     if args is None:
         args = []
+    args.append(node_index)
 
     if checkpoint:
         actor = ray.remote(
@@ -360,19 +369,21 @@ def project_shuffle(num_ret_vals, *batches):
         for e in batch:
             cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
             shuffled[hash(cid) % num_ret_vals][(cid, window)] += 1
-    print("project shuffle size:", sys.getsizeof(shuffled))
-    return shuffled[0] if len(shuffled) == 1 else tuple(shuffled)
+    if USE_MULTIPLE_PROJECTOR_OUTPUT:
+        return shuffled[0] if len(shuffled) == 1 else tuple(shuffled)
+    else:
+        return shuffled
 
 
 class Reducer(object):
 
-    def __init__(self):
+    def __init__(self, reduce_index):
         """
         Constructor
         """
+        self.reduce_index = reduce_index
         # (campaign_id, window) --> count
         self.clear()
-        print("Initialized reducer, debug?", DEBUG)
 
     def __ray_save__(self):
         checkpoint = pickle.dumps({
@@ -380,6 +391,7 @@ class Reducer(object):
                 "latencies": list(self.latencies.items()),
                 "calls": self.calls,
                 "count": self.count,
+                "reduce_index": self.reduce_index,
                 })
         self.checkpoints.append(checkpoint)
         self.seen.clear()
@@ -393,6 +405,7 @@ class Reducer(object):
             checkpoint = pickle.loads(self.checkpoints[-1])
             self.calls = checkpoint["calls"]
             self.count = checkpoint["count"]
+            self.reduce_index = checkpoint["reduce_index"]
 
     def seen(self):
         if not self.checkpoints:
@@ -434,6 +447,8 @@ class Reducer(object):
         Reduce by key
         Increment and store in dictionary
         """
+        if not USE_MULTIPLE_PROJECTOR_OUTPUT:
+            partitions = [partition[self.reduce_index] for partition in partitions]
         self.calls += 1
         for partition in partitions:
             for key in partition:
