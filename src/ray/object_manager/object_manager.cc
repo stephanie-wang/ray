@@ -710,6 +710,14 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, *conn);
   });
+
+  // We're receiving the object, so extend the timer before we retry the Pull.
+  auto it = pull_requests_.find(object_id);
+  if (it != pull_requests_.end() && it->second.timer_set) {
+    it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
+        TryPull(object_id);
+      });
+  }
 }
 
 void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,

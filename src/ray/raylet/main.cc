@@ -71,8 +71,9 @@ int main(int argc, char *argv[]) {
   // Configuration for the object manager.
   ray::ObjectManagerConfig object_manager_config;
   object_manager_config.store_socket_name = store_socket_name;
-  object_manager_config.pull_timeout_ms =
-      RayConfig::instance().object_manager_pull_timeout_ms();
+  //object_manager_config.pull_timeout_ms =
+  //    RayConfig::instance().object_manager_pull_timeout_ms();
+  object_manager_config.pull_timeout_ms = 1000;
   object_manager_config.push_timeout_ms =
       RayConfig::instance().object_manager_push_timeout_ms();
 
