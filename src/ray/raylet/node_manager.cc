@@ -371,6 +371,7 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
                           client_info.node_manager_port));
   auto server_conn = TcpServerConnection::Create(std::move(socket));
   remote_server_connections_.emplace(client_id, std::move(server_conn));
+  RAY_LOG(INFO) << "connected to client " << client_id << " at " << client_info.node_manager_address;
 }
 
 void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {

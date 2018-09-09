@@ -19,7 +19,7 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
   uint64_t end = current_time_ms();
   uint64_t interval = end - start;
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_LOG(WARNING) << "HANDLER: TcpConnect took " << interval << "ms";
+    RAY_LOG(WARNING) << "HANDLER: TcpConnect to " << ip_address_string << " took " << interval << "ms";
   }
   return boost_to_ray_status(error);
 }

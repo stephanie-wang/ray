@@ -231,6 +231,7 @@ void ObjectManager::TryPull(const ObjectID &object_id) {
 
 void ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                             const ClientID &client_id) {
+  RAY_LOG(INFO) << "Sending pull request " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   // Acquire a message connection and send pull request.
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
@@ -701,6 +702,7 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   auto object_header =
       flatbuffers::GetRoot<object_manager_protocol::PushRequestMessage>(message);
   ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
+  RAY_LOG(INFO) << "Receiving push " << object_id << " at " << current_sys_time_ms();
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
