@@ -175,6 +175,28 @@ class ObjectManager : public ObjectManagerInterface {
 
   struct PullRequest {
     PullRequest() : retry_timer(nullptr), timer_set(false), client_locations() {}
+    void SetTimer(boost::asio::io_service &service, uint timeout_ms, const std::function<void()> &handler) {
+      if (retry_timer == nullptr) {
+        // Set the timer if we haven't already.
+        retry_timer = std::unique_ptr<boost::asio::deadline_timer>(
+            new boost::asio::deadline_timer(service));
+      }
+
+      // Wait for a timeout. If we receive the object or a caller Cancels the
+      // Pull within the timeout, then nothing will happen. Otherwise, the timer
+      // will fire and the next client in the list will be tried.
+      boost::posix_time::milliseconds retry_timeout(timeout_ms);
+      retry_timer->expires_from_now(retry_timeout);
+      retry_timer->async_wait([handler](const boost::system::error_code &error) {
+            if (!error) {
+              handler();
+            } else {
+              // Check that the error was due to the timer being canceled.
+              RAY_CHECK(error == boost::asio::error::operation_aborted);
+            }
+          });
+      timer_set = true;
+    }
     std::unique_ptr<boost::asio::deadline_timer> retry_timer;
     bool timer_set;
     std::vector<ClientID> client_locations;
