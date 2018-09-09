@@ -177,6 +177,14 @@ ray::Status ObjectDirectory::UnsubscribeObjectLocations(const UniqueID &callback
 
 ray::Status ObjectDirectory::LookupLocations(const ObjectID &object_id,
                                              const OnLocationsFound &callback) {
+  auto subscribe_it = listeners_.find(object_id);
+  if (subscribe_it != listeners_.end()) {
+    std::vector<ClientID> client_id_vec(subscribe_it->second.current_object_locations.begin(),
+                                        subscribe_it->second.current_object_locations.end());
+    callback(client_id_vec, object_id);
+    return ray::Status::OK();
+  }
+
   JobID job_id = JobID::nil();
   ray::Status status = gcs_client_->object_table().Lookup(
       job_id, object_id,

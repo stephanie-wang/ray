@@ -143,16 +143,18 @@ void ReconstructionPolicy::HandleTaskLeaseExpired(const TaskID &task_id) {
   // objects no longer exist on any live nodes, then reconstruction will be
   // attempted asynchronously.
   for (const auto &created_object_id : it->second.created_objects) {
-    RAY_CHECK_OK(object_directory_->LookupLocations(
-        created_object_id,
-        [this, task_id, reconstruction_attempt](const std::vector<ray::ClientID> &clients,
-                                                const ray::ObjectID &object_id) {
-          if (clients.empty()) {
-            // The required object no longer exists on any live nodes. Attempt
-            // reconstruction.
-            AttemptReconstruction(task_id, object_id, reconstruction_attempt);
-          }
-        }));
+    io_service_.post([this, task_id, created_object_id, reconstruction_attempt]() {
+      RAY_CHECK_OK(object_directory_->LookupLocations(
+          created_object_id,
+          [this, task_id, reconstruction_attempt](const std::vector<ray::ClientID> &clients,
+                                                  const ray::ObjectID &object_id) {
+            if (clients.empty()) {
+              // The required object no longer exists on any live nodes. Attempt
+              // reconstruction.
+              AttemptReconstruction(task_id, object_id, reconstruction_attempt);
+            }
+          }));
+    });
   }
   // Reset the timer to wait for task lease notifications again.
   SetTaskTimeout(it, initial_reconstruction_timeout_ms_);

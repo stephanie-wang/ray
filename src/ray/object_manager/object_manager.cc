@@ -511,19 +511,21 @@ ray::Status ObjectManager::LookupRemainingWaitObjects(const UniqueID &wait_id) {
     for (const auto &object_id : wait_state.remaining) {
       // Lookup remaining objects.
       wait_state.requested_objects.insert(object_id);
-      RAY_RETURN_NOT_OK(object_directory_->LookupLocations(
-          object_id, [this, wait_id](const std::vector<ClientID> &client_ids,
-                                     const ObjectID &lookup_object_id) {
-            auto &wait_state = active_wait_requests_.find(wait_id)->second;
-            if (!client_ids.empty()) {
-              wait_state.remaining.erase(lookup_object_id);
-              wait_state.found.insert(lookup_object_id);
-            }
-            wait_state.requested_objects.erase(lookup_object_id);
-            if (wait_state.requested_objects.empty()) {
-              SubscribeRemainingWaitObjects(wait_id);
-            }
-          }));
+      main_service_->post([this, object_id, wait_id]() {
+        RAY_CHECK_OK(object_directory_->LookupLocations(
+            object_id, [this, wait_id](const std::vector<ClientID> &client_ids,
+                                       const ObjectID &lookup_object_id) {
+              auto &wait_state = active_wait_requests_.find(wait_id)->second;
+              if (!client_ids.empty()) {
+                wait_state.remaining.erase(lookup_object_id);
+                wait_state.found.insert(lookup_object_id);
+              }
+              wait_state.requested_objects.erase(lookup_object_id);
+              if (wait_state.requested_objects.empty()) {
+                SubscribeRemainingWaitObjects(wait_id);
+              }
+            }));
+        });
     }
   }
   return ray::Status::OK();
