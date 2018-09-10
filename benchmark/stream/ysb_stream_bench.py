@@ -222,8 +222,8 @@ def write_latencies():
     f = open("lat.txt", "w+")
     lat_total, count = 0, 0
     mid_time = (end_time - start_time) / 2
-    for reducer in reducers:
-        lats = ray.get(reducer.get_latencies.remote())
+    latencies = [reducer.get_latencies.remote() for reducer in reducers]
+    for lats in latencies:
         for key in lats:
             if key[1] < end_time:
                 f.write(str(lats[key]) + "\n")
