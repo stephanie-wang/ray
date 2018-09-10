@@ -272,8 +272,9 @@ class ObjectManager : public ObjectManagerInterface {
   void PullSendRequest(const ObjectID &object_id,
                               std::shared_ptr<SenderConnection> &conn);
 
-  std::shared_ptr<SenderConnection> CreateSenderConnection(
-      ConnectionPool::ConnectionType type, RemoteConnectionInfo info);
+  void CreateSenderConnection(
+      ConnectionPool::ConnectionType type, RemoteConnectionInfo info,
+      const std::function<void(std::shared_ptr<SenderConnection>)> &handler);
 
   /// Begin executing a send.
   /// Executes on send_service_ thread pool.

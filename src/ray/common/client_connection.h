@@ -13,14 +13,7 @@
 
 namespace ray {
 
-/// Connect a TCP socket.
-///
-/// \param socket The socket to connect.
-/// \param ip_address The IP address to connect to.
-/// \param port The port to connect to.
-/// \return Status.
-ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
-                       const std::string &ip_address, int port);
+boost::asio::ip::tcp::endpoint MakeTcpEndpoint(const std::string &ip_address_string, int port);
 
 /// \typename ServerConnection
 ///
@@ -29,6 +22,8 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 template <typename T>
 class ServerConnection : public std::enable_shared_from_this<ServerConnection<T>> {
  public:
+  using endpoint_type = typename boost::asio::basic_stream_socket<T>::endpoint_type;
+
   static std::shared_ptr<ServerConnection<T>> Create(boost::asio::basic_stream_socket<T> &&socket);
 
   /// Write a message to the client.
@@ -56,6 +51,10 @@ class ServerConnection : public std::enable_shared_from_this<ServerConnection<T>
   void ReadBuffer(const std::vector<boost::asio::mutable_buffer> &buffer,
                   boost::system::error_code &ec);
 
+  void ConnectAsync(
+                       const endpoint_type &endpoint,
+                       const std::function<void(std::shared_ptr<ServerConnection<T>>)> &callback);
+
  protected:
   struct WriteBufferData {
     int64_t write_version;
@@ -73,6 +72,7 @@ class ServerConnection : public std::enable_shared_from_this<ServerConnection<T>
   std::list<std::unique_ptr<WriteBufferData>> write_queue_;
   bool writing_;
   size_t max_messages_;
+  bool connected_;
 
  private:
 

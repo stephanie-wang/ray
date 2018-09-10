@@ -367,11 +367,17 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   //               << client_info.node_manager_port;
 
   boost::asio::ip::tcp::socket socket(io_service_);
-  RAY_CHECK_OK(TcpConnect(socket, client_info.node_manager_address,
-                          client_info.node_manager_port));
   auto server_conn = TcpServerConnection::Create(std::move(socket));
-  remote_server_connections_.emplace(client_id, std::move(server_conn));
-  RAY_LOG(INFO) << "connected to client " << client_id << " at " << client_info.node_manager_address;
+  const auto &address = client_info.node_manager_address;
+  auto endpoint = MakeTcpEndpoint(address, client_info.node_manager_port);
+  server_conn->ConnectAsync(endpoint, [this, client_id, address](std::shared_ptr<TcpServerConnection> conn) {
+      if (conn != nullptr) {
+        remote_server_connections_.emplace(client_id, std::move(conn));
+        RAY_LOG(INFO) << "connected to client " << client_id << " at " << address;
+      } else {
+        RAY_LOG(WARNING) << "Failed to connect to remote node manager " << client_id;
+      }
+      });
 }
 
 void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {

@@ -26,9 +26,10 @@ class SenderConnection : public boost::enable_shared_from_this<SenderConnection>
   /// \param port The port of the remote node server.
   /// \return A connection to the remote object manager. This is null if the
   /// connection was unsuccessful.
-  static std::shared_ptr<SenderConnection> Create(boost::asio::io_service &io_service,
+  static void Create(boost::asio::io_service &io_service,
                                                   const ClientID &client_id,
-                                                  const std::string &ip, uint16_t port);
+                                                  const std::string &ip, uint16_t port,
+    const std::function<void(std::shared_ptr<SenderConnection>)> &callback);
 
   /// \param socket A reference to the socket created by the static Create method.
   /// \param client_id The ClientID of the remote node.

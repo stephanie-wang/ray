@@ -8,20 +8,11 @@
 
 namespace ray {
 
-ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
-                       const std::string &ip_address_string, int port) {
-  uint64_t start = current_time_ms();
+boost::asio::ip::tcp::endpoint MakeTcpEndpoint(const std::string &ip_address_string, int port) {
   boost::asio::ip::address ip_address =
       boost::asio::ip::address::from_string(ip_address_string);
   boost::asio::ip::tcp::endpoint endpoint(ip_address, port);
-  boost::system::error_code error;
-  socket.connect(endpoint, error);
-  uint64_t end = current_time_ms();
-  uint64_t interval = end - start;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_LOG(WARNING) << "HANDLER: TcpConnect to " << ip_address_string << " took " << interval << "ms";
-  }
-  return boost_to_ray_status(error);
+  return endpoint;
 }
 
 template <class T>
@@ -36,11 +27,13 @@ ServerConnection<T>::ServerConnection(boost::asio::basic_stream_socket<T> &&sock
     : socket_(std::move(socket)),
       write_queue_(),
       writing_(false),
-      max_messages_(1) {}
+      max_messages_(1),
+      connected_(false) {}
 
 template <class T>
 Status ServerConnection<T>::WriteBuffer(
     const std::vector<boost::asio::const_buffer> &buffer) {
+  RAY_CHECK(connected_);
   boost::system::error_code error;
   // Loop until all bytes are written while handling interrupts.
   // When profiling with pprof, unhandled interrupts were being sent by the profiler to
@@ -67,6 +60,7 @@ template <class T>
 void ServerConnection<T>::ReadBuffer(
     const std::vector<boost::asio::mutable_buffer> &buffer,
     boost::system::error_code &ec) {
+  RAY_CHECK(connected_);
   // Loop until all bytes are read while handling interrupts.
   for (const auto &b : buffer) {
     uint64_t bytes_remaining = boost::asio::buffer_size(b);
@@ -88,6 +82,7 @@ void ServerConnection<T>::ReadBuffer(
 template <class T>
 ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
                                               const uint8_t *message) {
+  RAY_CHECK(connected_);
   std::vector<boost::asio::const_buffer> message_buffers;
   auto write_version = RayConfig::instance().ray_protocol_version();
   message_buffers.push_back(boost::asio::buffer(&write_version, sizeof(write_version)));
@@ -100,7 +95,23 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
 }
 
 template <class T>
+void ServerConnection<T>::ConnectAsync(
+                       const endpoint_type &endpoint,
+                       const std::function<void(std::shared_ptr<ServerConnection<T>>)> &callback) {
+  auto this_ptr = this->shared_from_this();
+  socket_.async_connect(endpoint, [this, this_ptr, callback](const boost::system::error_code &error) {
+      if (error) {
+        callback(nullptr);
+      } else {
+        connected_ = true;
+        callback(this_ptr);
+      }
+      });
+}
+
+template <class T>
 void ServerConnection<T>::WriteSome() {
+  RAY_CHECK(connected_);
   // Make sure we were not writing to the socket.
   RAY_CHECK(!writing_);
   writing_ = true;
@@ -145,6 +156,7 @@ template <class T>
 void ServerConnection<T>::WriteMessageAsync(int64_t type, int64_t length, const
     uint8_t *message, const std::function<void(const ray::Status&)>
     &handler) {
+  RAY_CHECK(connected_);
   auto write_buffer = std::unique_ptr<WriteBufferData>(new WriteBufferData());
   write_buffer->write_type = type;
   write_buffer->write_length = length;
@@ -178,7 +190,9 @@ ClientConnection<T>::ClientConnection(MessageHandler<T> &message_handler,
       message_handler_(message_handler),
       debug_label_(debug_label),
       num_sync_messages_(0),
-      sync_start_(current_time_ms()) {}
+      sync_start_(current_time_ms()) {
+  ServerConnection<T>::connected_ = true;
+}
 
 template <class T>
 const ClientID &ClientConnection<T>::GetClientID() {

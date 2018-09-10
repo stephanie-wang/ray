@@ -252,14 +252,12 @@ void ObjectManager::PullEstablishConnection(const ObjectID &object_id,
     status = object_directory_->GetInformation(
         client_id,
         [this, object_id, client_id](const RemoteConnectionInfo &connection_info) {
-          std::shared_ptr<SenderConnection> async_conn = CreateSenderConnection(
-              ConnectionPool::ConnectionType::MESSAGE, connection_info);
-          if (async_conn == nullptr) {
-            return;
-          }
-          connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
-                                          client_id, async_conn);
-          PullSendRequest(object_id, async_conn);
+           CreateSenderConnection(
+              ConnectionPool::ConnectionType::MESSAGE, connection_info, [this, client_id, object_id](std::shared_ptr<SenderConnection> async_conn) {
+                connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
+                                                client_id, async_conn);
+                PullSendRequest(object_id, async_conn);
+              });
         },
         []() {
           RAY_LOG(ERROR) << "Failed to establish connection with remote object manager.";
@@ -374,17 +372,20 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
   std::shared_ptr<SenderConnection> conn;
   connection_pool_.GetSender(ConnectionPool::ConnectionType::TRANSFER, client_id, &conn);
   if (conn == nullptr) {
-    conn =
-        CreateSenderConnection(ConnectionPool::ConnectionType::TRANSFER, connection_info);
-    connection_pool_.RegisterSender(ConnectionPool::ConnectionType::TRANSFER, client_id,
-                                    conn);
-    if (conn == nullptr) {
-      return;
+    CreateSenderConnection(ConnectionPool::ConnectionType::TRANSFER, connection_info,
+        [this, client_id, object_id, data_size, metadata_size, chunk_index](std::shared_ptr<SenderConnection> new_conn) {
+      connection_pool_.RegisterSender(ConnectionPool::ConnectionType::TRANSFER, client_id,
+                                      new_conn);
+      auto status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, new_conn);
+      if (!status.ok()) {
+        CheckIOError(status, "Push");
+      }
+      });
+  } else {
+    status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, conn);
+    if (!status.ok()) {
+      CheckIOError(status, "Push");
     }
-  }
-  status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, conn);
-  if (!status.ok()) {
-    CheckIOError(status, "Push");
   }
 }
 
@@ -616,32 +617,40 @@ void ObjectManager::WaitComplete(const UniqueID &wait_id) {
   active_wait_requests_.erase(wait_id);
 }
 
-std::shared_ptr<SenderConnection> ObjectManager::CreateSenderConnection(
-    ConnectionPool::ConnectionType type, RemoteConnectionInfo info) {
-  std::shared_ptr<SenderConnection> conn =
-      SenderConnection::Create(*main_service_, info.client_id, info.ip, info.port);
-  if (conn == nullptr) {
-    RAY_LOG(ERROR) << "Failed to connect to remote object manager.";
-    return conn;
-  }
-  // Prepare client connection info buffer
-  flatbuffers::FlatBufferBuilder fbb;
-  bool is_transfer = (type == ConnectionPool::ConnectionType::TRANSFER);
-  auto message = object_manager_protocol::CreateConnectClientMessage(
-      fbb, fbb.CreateString(client_id_.binary()), is_transfer);
-  fbb.Finish(message);
-  // Send synchronously.
-  uint64_t start = current_time_ms();
-  RAY_CHECK_OK(conn->WriteMessage(
-      static_cast<int64_t>(object_manager_protocol::MessageType::ConnectClient),
-      fbb.GetSize(), fbb.GetBufferPointer()));
-  uint64_t end = current_time_ms();
-  uint64_t interval = end - start;
-  if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
-    RAY_CHECK(false) << "HANDLER: PullSendRequest took " << interval << "ms";
-  }
-  // The connection is ready; return to caller.
-  return conn;
+void ObjectManager::CreateSenderConnection(
+    ConnectionPool::ConnectionType type, RemoteConnectionInfo info,
+    const std::function<void(std::shared_ptr<SenderConnection>)> &handler) {
+  uint64_t start = current_sys_time_ms();
+  const auto ip = info.ip;
+  RAY_LOG(INFO) << "CreateSenderConnection to " << ip << " at " << start;
+  SenderConnection::Create(*main_service_, info.client_id, info.ip, info.port, [this, type, handler, start, ip](std::shared_ptr<SenderConnection> conn) {
+    if (conn == nullptr) {
+      RAY_LOG(ERROR) << "Failed to connect to remote object manager.";
+      return;
+    }
+    // Prepare client connection info buffer
+    flatbuffers::FlatBufferBuilder fbb;
+    bool is_transfer = (type == ConnectionPool::ConnectionType::TRANSFER);
+    auto message = object_manager_protocol::CreateConnectClientMessage(
+        fbb, fbb.CreateString(client_id_.binary()), is_transfer);
+    fbb.Finish(message);
+    // Send synchronously.
+    conn->WriteMessageAsync(
+        static_cast<int64_t>(object_manager_protocol::MessageType::ConnectClient),
+        fbb.GetSize(), fbb.GetBufferPointer(),
+        [this, conn, handler, start, ip](const ray::Status &status) {
+          if (status.ok()) {
+            handler(conn);
+          } else {
+            RAY_LOG(WARNING) << "Failed to CreateSenderConnection to " << ip;
+          }
+          uint64_t end = current_sys_time_ms();
+          uint64_t interval = end - start;
+          if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
+            RAY_LOG(WARNING) << "HANDLER: CreateSenderConnection to " << ip << " took " << interval << "ms";
+          }
+        });
+      });
 }
 
 void ObjectManager::ProcessNewClient(TcpClientConnection &conn) {
@@ -798,25 +807,39 @@ void ObjectManager::FreeObjects(const std::vector<ObjectID> &object_ids,
 
 void ObjectManager::SpreadFreeObjectRequest(const std::vector<ObjectID> &object_ids) {
   // This code path should be called from node manager.
-  flatbuffers::FlatBufferBuilder fbb;
-  flatbuffers::Offset<object_manager_protocol::FreeRequestMessage> request =
-      object_manager_protocol::CreateFreeRequestMessage(fbb, to_flatbuf(fbb, object_ids));
-  fbb.Finish(request);
-  auto function_on_client = [this, &fbb](const RemoteConnectionInfo &connection_info) {
+  auto function_on_client = [this, object_ids](const RemoteConnectionInfo &connection_info) {
+    const auto client_id = connection_info.client_id;
     std::shared_ptr<SenderConnection> conn;
     connection_pool_.GetSender(ConnectionPool::ConnectionType::MESSAGE,
                                connection_info.client_id, &conn);
     if (conn == nullptr) {
-      conn = CreateSenderConnection(ConnectionPool::ConnectionType::MESSAGE,
-                                    connection_info);
-      connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
-                                      connection_info.client_id, conn);
-    }
-    ray::Status status = conn->WriteMessage(
-        static_cast<int64_t>(object_manager_protocol::MessageType::FreeRequest),
-        fbb.GetSize(), fbb.GetBufferPointer());
-    if (status.ok()) {
-      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn);
+      CreateSenderConnection(ConnectionPool::ConnectionType::MESSAGE,
+                             connection_info,
+                             [this, client_id, object_ids](std::shared_ptr<SenderConnection> new_conn) {
+        flatbuffers::FlatBufferBuilder fbb;
+        flatbuffers::Offset<object_manager_protocol::FreeRequestMessage> request =
+            object_manager_protocol::CreateFreeRequestMessage(fbb, to_flatbuf(fbb, object_ids));
+        fbb.Finish(request);
+        connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
+                                        client_id, new_conn);
+        ray::Status status = new_conn->WriteMessage(
+            static_cast<int64_t>(object_manager_protocol::MessageType::FreeRequest),
+            fbb.GetSize(), fbb.GetBufferPointer());
+        if (status.ok()) {
+          connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, new_conn);
+        }
+                                    });
+    } else {
+      flatbuffers::FlatBufferBuilder fbb;
+      flatbuffers::Offset<object_manager_protocol::FreeRequestMessage> request =
+          object_manager_protocol::CreateFreeRequestMessage(fbb, to_flatbuf(fbb, object_ids));
+      fbb.Finish(request);
+      ray::Status status = conn->WriteMessage(
+          static_cast<int64_t>(object_manager_protocol::MessageType::FreeRequest),
+          fbb.GetSize(), fbb.GetBufferPointer());
+      if (status.ok()) {
+        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::MESSAGE, conn);
+      }
     }
     // TODO(Yuhong): Implement ConnectionPool::RemoveSender and call it in "else".
   };
