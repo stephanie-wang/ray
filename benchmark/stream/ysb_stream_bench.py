@@ -374,6 +374,8 @@ def project_shuffle(num_ret_vals, *batches):
         for e in batch:
             cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
             shuffled[hash(cid) % num_ret_vals][(cid, window)] += 1
+    # Deserializing tuples is a lot faster than defaultdict.
+    shuffled = [tuple(partition.items()) for partition in shuffled]
     if USE_MULTIPLE_PROJECTOR_OUTPUT:
         return shuffled[0] if len(shuffled) == 1 else tuple(shuffled)
     else:
@@ -456,9 +458,9 @@ class Reducer(object):
             partitions = [partition[self.reduce_index] for partition in partitions]
         self.calls += 1
         for partition in partitions:
-            for key in partition:
-                self.seen[key] += partition[key]
-                self.count += partition[key]
+            for key, count in partition:
+                self.seen[key] += count
+                self.count += count
                 latency = time.time() - key[1]
                 self.latencies[key] = max(self.latencies[key], latency)
         if DEBUG and self.calls % 10 == 0:
