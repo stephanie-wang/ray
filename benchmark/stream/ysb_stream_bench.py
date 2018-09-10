@@ -26,6 +26,7 @@ USE_MULTIPLE_PROJECTOR_OUTPUT = False
 
 @ray.remote
 def warmup_objectstore():
+    return
     x = np.ones(10 ** 8)
     for _ in range(100):
         ray.put(x)
@@ -45,7 +46,7 @@ def ray_warmup(reducers, node_resources):
             resources={node_resource: 1}))
     ray.wait(warmups, num_returns=len(warmups))
 
-    num_rounds = 100
+    num_rounds = 50
     for i in range(num_rounds):
         with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
             start = time.time()
@@ -89,7 +90,7 @@ def ray_warmup(reducers, node_resources):
                 })
     ray.wait(gen_deps, num_returns=len(gen_deps))
     warmups = []
-    for node_resource in node_resources:
+    for node_resource in reversed(node_resources):
         warmups.append(warmup._submit(
             args=gen_deps,
             resources={node_resource: 1}))
@@ -146,12 +147,16 @@ def submit_tasks():
     filtered = flatten(filtered)
 
     shuffled, start_idx = [], 0
+    if USE_MULTIPLE_PROJECTOR_OUTPUT:
+        num_return_vals = num_projector_out
+    else:
+        num_return_vals = 1
     for i in range(num_nodes):
         for _ in range(num_projectors_per_node):
             batches = filtered[start_idx : start_idx + num_projector_in]
             shuffled.append(project_shuffle._submit(
                 args=[num_projector_out] + batches,
-                num_return_vals=num_projector_out,
+                num_return_vals=num_return_vals,
                 resources={node_resources[i] : 1},
                 batch=BATCH))
             start_idx += num_projector_in
@@ -166,10 +171,10 @@ def submit_tasks():
             shuffled = np.reshape(shuffled, (len(shuffled), 1))
 
         if BATCH:
-            batch = [reducer.reduce.remote_batch(*shuffled[:,i]) for reducer in reducers]
+            batch = [reducer.reduce.remote_batch(*shuffled[:,i]) for i, reducer in enumerate(reducers)]
             ray.worker.global_worker.submit_batch(batch)
         else:
-            [reducer.reduce.remote(*shuffled[:,i]) for reducer in reducers]
+            [reducer.reduce.remote(*shuffled[:,i]) for i, reducer in enumerate(reducers)]
     else:
         if BATCH:
             batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
@@ -557,19 +562,21 @@ if __name__ == '__main__':
     if exp_time > 0:
         try:
             time_to_sleep = BATCH_SIZE_SEC
+            time.sleep(10) # TODO non-deterministic, fix
 
             print("Warming up...")
-            #start_time = time.time()
-            #end_time = start_time + warmup_time
+            start_time = time.time()
+            end_time = start_time + warmup_time
 
-            #while time.time() < end_time:
-            #    submit_tasks()
-            #    time.sleep(time_to_sleep)
+            for i in range(10):
+                round_start = time.time()
+                submit_tasks()
+                time.sleep(time_to_sleep)
+                ray.wait([reducer.clear.remote() for reducer in reducers],
+                         num_returns = len(reducers))
+                print("finished round", i, "in", time.time() - round_start)
 
-            #print("Clearing reducers...")
-            time.sleep(30) # TODO non-deterministic, fix
-            ray.wait([reducer.clear.remote() for reducer in reducers],
-                     num_returns = len(reducers))
+            time.sleep(10) # TODO non-deterministic, fix
 
             print("Measuring...")
             start_time = time.time()
