@@ -22,7 +22,6 @@ log.setLevel(logging.INFO)
 
 BATCH = True
 USE_OBJECTS = True
-USE_MULTIPLE_PROJECTOR_OUTPUT = False
 
 @ray.remote
 def warmup_objectstore():
@@ -147,10 +146,7 @@ def submit_tasks():
     filtered = flatten(filtered)
 
     shuffled, start_idx = [], 0
-    if USE_MULTIPLE_PROJECTOR_OUTPUT:
-        num_return_vals = num_projector_out
-    else:
-        num_return_vals = 1
+    num_return_vals = 1
     for i in range(num_nodes):
         for _ in range(num_projectors_per_node):
             batches = filtered[start_idx : start_idx + num_projector_in]
@@ -163,24 +159,11 @@ def submit_tasks():
     if BATCH:
         shuffled = ray.worker.global_worker.submit_batch(shuffled)
 
-    if USE_MULTIPLE_PROJECTOR_OUTPUT:
-        shuffled = np.array(shuffled)
-
-        if num_reducers == 1:
-            # Handle return type difference for num_ret_vals=1
-            shuffled = np.reshape(shuffled, (len(shuffled), 1))
-
-        if BATCH:
-            batch = [reducer.reduce.remote_batch(*shuffled[:,i]) for i, reducer in enumerate(reducers)]
-            ray.worker.global_worker.submit_batch(batch)
-        else:
-            [reducer.reduce.remote(*shuffled[:,i]) for i, reducer in enumerate(reducers)]
+    if BATCH:
+        batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
+        ray.worker.global_worker.submit_batch(batch)
     else:
-        if BATCH:
-            batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
-            ray.worker.global_worker.submit_batch(batch)
-        else:
-            [reducer.reduce.remote(*shuffled) for reducer in reducers]
+        [reducer.reduce.remote(*shuffled) for reducer in reducers]
 
 
 def compute_stats():
@@ -361,25 +344,42 @@ def filter(num_ret_vals, *batches):
     return filtered if num_ret_vals == 1 else tuple(np.array_split(filtered, num_ret_vals))
 
 
-@ray.remote
-def project_shuffle(num_ret_vals, *batches):
+#@ray.remote
+def project_shuffle(num_reducers, *batches):
     """
     Project: e -> (campaign_id, window)
     Count by: (campaign_id, window)
     Shuffles by hash(campaign_id)
     """
-    shuffled = [defaultdict(int) for _ in range(num_ret_vals)]
+    shuffled = [defaultdict(int) for _ in range(num_reducers)]
+    partition_sizes = [0 for _ in range(num_reducers)]
     for batch in batches:
-        window = ts_to_window(batch[0][EVENT_TIME])
+        #window = ts_to_window(batch[0][EVENT_TIME])
+        window = ts_to_window(time.time())
         for e in batch:
-            cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
-            shuffled[hash(cid) % num_ret_vals][(cid, window)] += 1
-    # Deserializing tuples is a lot faster than defaultdict.
-    shuffled = [tuple(partition.items()) for partition in shuffled]
-    if USE_MULTIPLE_PROJECTOR_OUTPUT:
-        return shuffled[0] if len(shuffled) == 1 else tuple(shuffled)
-    else:
-        return shuffled
+            #cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
+            cid = str(uuid.uuid4()).encode('ascii')
+            partition = hash(cid) % num_reducers
+            shuffled[partition][(cid, window)] += 1
+            partition_sizes[partition] += 1
+
+    campaign_keys = [[] for _ in range(num_reducers)]
+    window_keys = [[] for _ in range(num_reducers)]
+    counts = [[] for _ in range(num_reducers)]
+    max_partition_size = max(partition_sizes)
+    for i, partition in enumerate(shuffled):
+        partition_size = 0
+        for key, count in partition.items():
+            campaign_keys[i].append(key[0])
+            window_keys[i].append(key[1])
+            counts[i].append(count)
+            partition_size += 1
+        while partition_size < max_partition_size:
+            campaign_keys[i].append('')
+            window_keys[i].append(0)
+            counts[i].append(0)
+            partition_size += 1
+    return [np.array(campaign_keys), np.array(window_keys), np.array(counts)]
 
 
 class Reducer(object):
@@ -454,14 +454,18 @@ class Reducer(object):
         Reduce by key
         Increment and store in dictionary
         """
-        if not USE_MULTIPLE_PROJECTOR_OUTPUT:
-            partitions = [partition[self.reduce_index] for partition in partitions]
         self.calls += 1
-        for partition in partitions:
-            for key, count in partition:
+        for campaign_ids, windows, counts in partitions:
+            campaign_ids = campaign_ids[self.reduce_index]
+            windows = windows[self.reduce_index]
+            counts = counts[self.reduce_index]
+            for campaign_id, window, count in zip(campaign_ids, windows, counts):
+                if not campaign_id:
+                    break
+                key = (campaign_id, window)
                 self.seen[key] += count
                 self.count += count
-                latency = time.time() - key[1]
+                latency = time.time() - window
                 self.latencies[key] = max(self.latencies[key], latency)
         if DEBUG and self.calls % 10 == 0:
             for key, latency in self.latencies:
