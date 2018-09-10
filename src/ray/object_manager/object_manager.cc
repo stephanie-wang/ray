@@ -199,8 +199,16 @@ void ObjectManager::TryPull(const ObjectID &object_id) {
   }
 
   // The timer should never fire if there are no expected client locations.
-  RAY_CHECK(!it->second.client_locations.empty());
-  RAY_CHECK(local_objects_.count(object_id) == 0);
+  if (it->second.client_locations.empty()) {
+    RAY_LOG(WARNING) << "Pull for object " << object_id << " called but no locations";
+    it->second.timer_set = false;
+    return;
+  }
+  if (local_objects_.count(object_id) != 0) {
+    RAY_LOG(WARNING) << "Pull for object " << object_id << " called but object already local";
+    it->second.timer_set = false;
+    return;
+  }
 
   // Get the next client to try.
   const ClientID client_id = std::move(it->second.client_locations.back());
