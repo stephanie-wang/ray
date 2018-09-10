@@ -1040,6 +1040,9 @@ def start_raylet(redis_address,
                                 plasma_store_name, raylet_name, redis_address))
 
     command = [
+        "numactl",
+        "-C",
+        "0-1",
         RAYLET_EXECUTABLE,
         raylet_name,
         plasma_store_name,
