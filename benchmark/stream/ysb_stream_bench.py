@@ -344,7 +344,7 @@ def filter(num_ret_vals, *batches):
     return filtered if num_ret_vals == 1 else tuple(np.array_split(filtered, num_ret_vals))
 
 
-#@ray.remote
+@ray.remote
 def project_shuffle(num_reducers, *batches):
     """
     Project: e -> (campaign_id, window)
@@ -354,11 +354,9 @@ def project_shuffle(num_reducers, *batches):
     shuffled = [defaultdict(int) for _ in range(num_reducers)]
     partition_sizes = [0 for _ in range(num_reducers)]
     for batch in batches:
-        #window = ts_to_window(batch[0][EVENT_TIME])
-        window = ts_to_window(time.time())
+        window = ts_to_window(batch[0][EVENT_TIME])
         for e in batch:
-            #cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
-            cid = str(uuid.uuid4()).encode('ascii')
+            cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
             partition = hash(cid) % num_reducers
             shuffled[partition][(cid, window)] += 1
             partition_sizes[partition] += 1
