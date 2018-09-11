@@ -28,7 +28,8 @@ def generate_ad_to_campaign_map():
     return ad_to_campaign
 
 @ray.remote
-def generate(num_ret_vals, template, user_ids, page_ids, ad_ids, event_types, indices, time_slice_num_events):
+def generate(num_ret_vals, generator_dependencies, time_slice_num_events):
+    template, user_ids, page_ids, ad_ids, event_types, indices = generator_dependencies
     template_cp = template.copy()
     template_cp[:, 12:48] = user_ids[indices % NUM_USER_IDS]
     template_cp[:, 61:97] = page_ids[indices % NUM_PAGE_IDS]
@@ -45,7 +46,7 @@ def generate(num_ret_vals, template, user_ids, page_ids, ad_ids, event_types, in
         return np.array_split(template_cp, num_ret_vals) #timestamp, template_cp
 
 
-@ray.remote(num_return_vals=6)
+@ray.remote
 def init_generator(ad_to_campaign, time_slice_num_events):
 
     ad_ids = np.array([np.array(memoryview(x)) for x in list(ad_to_campaign.keys())])

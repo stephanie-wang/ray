@@ -25,7 +25,6 @@ USE_OBJECTS = True
 
 @ray.remote
 def warmup_objectstore():
-    return
     x = np.ones(10 ** 8)
     for _ in range(100):
         ray.put(x)
@@ -82,19 +81,19 @@ def ray_warmup(reducers, node_resources):
         if i % 10 == 0:
             print("finished warmup round", i, "out of", num_rounds)
 
-    gen_deps = init_generator._submit(
+    gen_dep = init_generator._submit(
             args=[AD_TO_CAMPAIGN_MAP, time_slice_num_events],
             resources={
                 "Node0": 1,
                 })
-    ray.wait(gen_deps, num_returns=len(gen_deps))
+    ray.get(gen_dep)
     warmups = []
     for node_resource in reversed(node_resources):
         warmups.append(warmup._submit(
-            args=gen_deps,
+            args=[gen_dep],
             resources={node_resource: 1}))
     ray.wait(warmups, num_returns=len(warmups))
-    return gen_deps
+    return gen_dep
 
 
 @ray.remote
@@ -106,12 +105,12 @@ def reduce_warmup(timestamp, *args):
     else:
         return [timestamp]
 
-def submit_tasks():
+def submit_tasks(gen_dep):
     generated = []
     for i in range(num_nodes):
         for _ in range(num_generators_per_node):
             generated.append(generate._submit(
-                args=[num_generator_out] + list(gen_deps) + [time_slice_num_events],
+                args=[num_generator_out, gen_dep, time_slice_num_events],
                 num_return_vals=num_generator_out, 
                 resources={node_resources[i]: 1},
                 batch=BATCH))
@@ -561,7 +560,7 @@ if __name__ == '__main__':
     print("...finished initializing reducers:", len(reducers))
 
     print("Placing dependencies on nodes...")
-    gen_deps = ray_warmup(reducers, node_resources)
+    gen_dep = ray_warmup(reducers, node_resources)
 
     if exp_time > 0:
         try:
@@ -572,9 +571,11 @@ if __name__ == '__main__':
             start_time = time.time()
             end_time = start_time + warmup_time
 
-            for i in range(10):
+            time.sleep(10)
+            for i in range(1):
                 round_start = time.time()
-                submit_tasks()
+                submit_tasks(gen_dep)
+                time.sleep(0.1)
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -588,7 +589,7 @@ if __name__ == '__main__':
 
             while time.time() < end_time:
                 loop_start = time.time()
-                submit_tasks()
+                submit_tasks(gen_dep)
                 loop_end = time.time()
                 time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
                 if time_to_sleep > 0:
