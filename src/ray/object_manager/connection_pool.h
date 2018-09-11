@@ -85,6 +85,9 @@ class ConnectionPool {
   /// \return Status of invoking this method.
   ray::Status RemoveSender(ConnectionType type, std::shared_ptr<SenderConnection> conn);
 
+  size_t NumConnections(const ClientID &client_id);
+  void IncrementNumConnections(const ClientID &client_id);
+
   /// This object cannot be copied for thread-safety.
   RAY_DISALLOW_COPY_AND_ASSIGN(ConnectionPool);
 
@@ -130,6 +133,8 @@ class ConnectionPool {
 
   ReceiverMapType message_receive_connections_;
   ReceiverMapType transfer_receive_connections_;
+
+  std::unordered_map<ClientID, size_t> num_connections_;
 };
 
 }  // namespace ray

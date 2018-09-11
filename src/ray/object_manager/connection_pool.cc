@@ -38,6 +38,14 @@ void ConnectionPool::RegisterSender(ConnectionType type, const ClientID &client_
   // Don't add to available connections. It will become available once it is released.
 }
 
+size_t ConnectionPool::NumConnections(const ClientID &client_id) {
+  return num_connections_[client_id];
+}
+
+void ConnectionPool::IncrementNumConnections(const ClientID &client_id) {
+  num_connections_[client_id]++;
+}
+
 void ConnectionPool::GetSender(ConnectionType type, const ClientID &client_id,
                                std::shared_ptr<SenderConnection> *conn) {
   std::unique_lock<std::mutex> guard(connection_mutex);

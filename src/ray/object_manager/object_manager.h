@@ -45,6 +45,7 @@ struct ObjectManagerConfig {
   /// Negative: waiting infinitely.
   /// 0: giving up retrying immediately.
   int push_timeout_ms;
+  size_t max_pull_connections;
 };
 
 class ObjectManagerInterface {
@@ -265,7 +266,7 @@ class ObjectManager : public ObjectManagerInterface {
   /// Part of an asynchronous sequence of Pull methods.
   /// Uses an existing connection or creates a connection to ClientID.
   /// Executes on main_service_ thread.
-  void PullEstablishConnection(const ObjectID &object_id, const ClientID &client_id);
+  bool PullEstablishConnection(const ObjectID &object_id, const ClientID &client_id);
 
   /// Synchronously send a pull request via remote object manager connection.
   /// Executes on main_service_ thread.

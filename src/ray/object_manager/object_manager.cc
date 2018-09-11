@@ -223,23 +223,31 @@ void ObjectManager::TryPull(const ObjectID &object_id) {
   }
 
   // Try pulling from the client.
-  PullEstablishConnection(object_id, client_id);
-
-  // If there are more clients to try, try them in succession, with a timeout
-  // in between each try.
-  if (!it->second.client_locations.empty()) {
+  bool connected = PullEstablishConnection(object_id, client_id);
+  if (connected) {
+    // If there are more clients to try, try them in succession, with a timeout
+    // in between each try.
+    if (!it->second.client_locations.empty()) {
+      it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
+            TryPull(object_id);
+          });
+    } else {
+      // The timer is not reset since there are no more clients to try. Go back
+      // to waiting for more notifications. Once we receive a new object location
+      // from the object directory, then the Pull will be retried.
+      it->second.timer_set = false;
+    }
+  } else {
+    // We failed to connect to the client since we were already requesting a
+    // different Pull. Put the client back and try again later.
+    it->second.client_locations.push_back(client_id);
     it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
           TryPull(object_id);
         });
-  } else {
-    // The timer is not reset since there are no more clients to try. Go back
-    // to waiting for more notifications. Once we receive a new object location
-    // from the object directory, then the Pull will be retried.
-    it->second.timer_set = false;
   }
 };
 
-void ObjectManager::PullEstablishConnection(const ObjectID &object_id,
+bool ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                             const ClientID &client_id) {
   //RAY_LOG(INFO) << "Sending pull request " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   // Acquire a message connection and send pull request.
@@ -248,23 +256,35 @@ void ObjectManager::PullEstablishConnection(const ObjectID &object_id,
   // TODO(hme): There is no cap on the number of pull request connections.
   connection_pool_.GetSender(ConnectionPool::ConnectionType::MESSAGE, client_id, &conn);
 
+  bool success = false;
   if (conn == nullptr) {
-    status = object_directory_->GetInformation(
-        client_id,
-        [this, object_id, client_id](const RemoteConnectionInfo &connection_info) {
-           CreateSenderConnection(
-              ConnectionPool::ConnectionType::MESSAGE, connection_info, [this, client_id, object_id](std::shared_ptr<SenderConnection> async_conn) {
-                connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
-                                                client_id, async_conn);
-                PullSendRequest(object_id, async_conn);
-              });
-        },
-        []() {
-          RAY_LOG(ERROR) << "Failed to establish connection with remote object manager.";
-        });
+    size_t num_connections = connection_pool_.NumConnections(client_id);
+    if (num_connections < config_.max_pull_connections) {
+      // Tell the connection pool that we're going to make a connection to this
+      // client.
+      connection_pool_.IncrementNumConnections(client_id);
+      status = object_directory_->GetInformation(
+          client_id,
+          [this, object_id, client_id](const RemoteConnectionInfo &connection_info) {
+             CreateSenderConnection(
+                ConnectionPool::ConnectionType::MESSAGE, connection_info, [this, client_id, object_id](std::shared_ptr<SenderConnection> async_conn) {
+                  connection_pool_.RegisterSender(ConnectionPool::ConnectionType::MESSAGE,
+                                                  client_id, async_conn);
+                  PullSendRequest(object_id, async_conn);
+                });
+          },
+          []() {
+            RAY_LOG(ERROR) << "Failed to establish connection with remote object manager.";
+          });
+      success = true;
+    } else {
+      RAY_LOG(ERROR) << "Too many Pull connections for " << client_id << " try Pull on " << object_id << " again";
+    }
   } else {
     PullSendRequest(object_id, conn);
+    success = true;
   }
+  return success;
 }
 
 void ObjectManager::PullSendRequest(const ObjectID &object_id,
