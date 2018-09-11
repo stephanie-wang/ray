@@ -30,11 +30,16 @@ void ConnectionPool::RegisterSender(ConnectionType type, const ClientID &client_
                                     std::shared_ptr<SenderConnection> &conn) {
   if (type == ConnectionType::TRANSFER) {
     std::unique_lock<std::mutex> guard(connection_mutex);
+    SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
+                                  ? message_send_connections_
+                                  : transfer_send_connections_;
+    Add(conn_map, client_id, conn);
+  } else {
+    SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
+                                  ? message_send_connections_
+                                  : transfer_send_connections_;
+    Add(conn_map, client_id, conn);
   }
-  SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
-                                ? message_send_connections_
-                                : transfer_send_connections_;
-  Add(conn_map, client_id, conn);
   // Don't add to available connections. It will become available once it is released.
 }
 
@@ -50,14 +55,23 @@ void ConnectionPool::GetSender(ConnectionType type, const ClientID &client_id,
                                std::shared_ptr<SenderConnection> *conn) {
   if (type == ConnectionType::TRANSFER) {
     std::unique_lock<std::mutex> guard(connection_mutex);
-  }
-  SenderMapType &avail_conn_map = (type == ConnectionType::MESSAGE)
-                                      ? available_message_send_connections_
-                                      : available_transfer_send_connections_;
-  if (Count(avail_conn_map, client_id) > 0) {
-    *conn = Borrow(avail_conn_map, client_id);
+    SenderMapType &avail_conn_map = (type == ConnectionType::MESSAGE)
+                                        ? available_message_send_connections_
+                                        : available_transfer_send_connections_;
+    if (Count(avail_conn_map, client_id) > 0) {
+      *conn = Borrow(avail_conn_map, client_id);
+    } else {
+      *conn = nullptr;
+    }
   } else {
-    *conn = nullptr;
+    SenderMapType &avail_conn_map = (type == ConnectionType::MESSAGE)
+                                        ? available_message_send_connections_
+                                        : available_transfer_send_connections_;
+    if (Count(avail_conn_map, client_id) > 0) {
+      *conn = Borrow(avail_conn_map, client_id);
+    } else {
+      *conn = nullptr;
+    }
   }
 }
 
@@ -65,11 +79,16 @@ void ConnectionPool::ReleaseSender(ConnectionType type,
                                    const std::shared_ptr<SenderConnection> &conn) {
   if (type == ConnectionType::TRANSFER) {
     std::unique_lock<std::mutex> guard(connection_mutex);
+    SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
+                                  ? available_message_send_connections_
+                                  : available_transfer_send_connections_;
+    Return(conn_map, conn->GetClientID(), conn);
+  } else {
+    SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
+                                  ? available_message_send_connections_
+                                  : available_transfer_send_connections_;
+    Return(conn_map, conn->GetClientID(), conn);
   }
-  SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
-                                ? available_message_send_connections_
-                                : available_transfer_send_connections_;
-  Return(conn_map, conn->GetClientID(), conn);
 }
 
 void ConnectionPool::Add(ReceiverMapType &conn_map, const ClientID &client_id,
