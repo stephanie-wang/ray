@@ -366,7 +366,7 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
         uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
         uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
         for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
-          RAY_LOG(INFO) << "Pushing object " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+          RAY_LOG(INFO) << "Pushing object " << object_id << " of size " << data_size << " to " << client_id << " at " << current_sys_time_ms();
           uint64_t start = current_sys_time_ms();
           send_service_.post([this, client_id, object_id, data_size, metadata_size,
                               chunk_index, info, start]() {
@@ -776,10 +776,10 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   auto object_header =
       flatbuffers::GetRoot<object_manager_protocol::PushRequestMessage>(message);
   ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
-  RAY_LOG(INFO) << "Receiving push " << object_id << " at " << current_sys_time_ms();
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
+  RAY_LOG(INFO) << "Receiving push " << object_id << " of size " << data_size << " at " << current_sys_time_ms();
 
   uint64_t start = current_sys_time_ms();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn, start]() {
