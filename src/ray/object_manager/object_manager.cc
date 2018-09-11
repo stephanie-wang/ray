@@ -658,7 +658,7 @@ std::shared_ptr<SenderConnection> ObjectManager::CreateTransferConnection(
   }
 
   if (conn == nullptr) {
-    RAY_LOG(ERROR) << "Failed to connect to remote object manager.";
+    RAY_LOG(ERROR) << "Failed to connect to remote object manager at " << ip;
   }
   return conn;
 }
