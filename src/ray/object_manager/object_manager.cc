@@ -400,7 +400,7 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
       if (!status.ok()) {
         CheckIOError(status, "Push");
       } else {
-        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn);
+        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, new_conn);
         RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
                        << config_.max_sends;
       }
