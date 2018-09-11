@@ -22,6 +22,9 @@ log.setLevel(logging.INFO)
 
 BATCH = True
 USE_OBJECTS = True
+SEPARATE_REDUCERS = True
+
+CAMPAIGN_TO_PARTITION = {}
 
 @ray.remote
 def warmup_objectstore():
@@ -44,15 +47,28 @@ def ray_warmup(reducers, node_resources):
             resources={node_resource: 1}))
     ray.wait(warmups, num_returns=len(warmups))
 
+    last_node_resource = "Node{}".format(len(node_resources) - 1)
+    gen_dep = init_generator._submit(
+            args=[AD_TO_CAMPAIGN_MAP, time_slice_num_events],
+            resources={
+                last_node_resource: 1,
+                })
+    ray.get(gen_dep)
+
     num_rounds = 50
     for i in range(num_rounds):
         with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
             start = time.time()
-            args = [[time.time()] for _ in range(len(node_resources))]
+            if SEPARATE_REDUCERS:
+                args = [[time.time(), gen_dep] for _ in range(len(reducers), len(node_resources))]
+                start_index = len(reducers)
+            else:
+                args = [[time.time(), gen_dep] for _ in range(len(node_resources))]
+                start_index = 0
             if BATCH:
                 for _ in range(5):
                     batch = []
-                    for j, node_resource in enumerate(node_resources):
+                    for j, node_resource in enumerate(node_resources[start_index:]):
                         task = reduce_warmup._submit(
                                         args=[args[j]],
                                         resources={node_resource: 1},
@@ -81,12 +97,6 @@ def ray_warmup(reducers, node_resources):
         if i % 10 == 0:
             print("finished warmup round", i, "out of", num_rounds)
 
-    gen_dep = init_generator._submit(
-            args=[AD_TO_CAMPAIGN_MAP, time_slice_num_events],
-            resources={
-                "Node0": 1,
-                })
-    ray.get(gen_dep)
     warmups = []
     for node_resource in reversed(node_resources):
         warmups.append(warmup._submit(
@@ -105,9 +115,14 @@ def reduce_warmup(timestamp, *args):
     else:
         return [timestamp]
 
-def submit_tasks(gen_dep):
+def submit_tasks(gen_dep, num_reducers):
+    if SEPARATE_REDUCERS:
+        start_index = num_reducers
+    else:
+        start_index = 0
+
     generated = []
-    for i in range(num_nodes):
+    for i in range(start_index, num_nodes):
         for _ in range(num_generators_per_node):
             generated.append(generate._submit(
                 args=[num_generator_out, gen_dep, time_slice_num_events],
@@ -119,7 +134,7 @@ def submit_tasks(gen_dep):
     generated = flatten(generated)
 
     parsed, start_idx = [], 0
-    for i in range(num_nodes):
+    for i in range(start_index, num_nodes):
         for _ in range(num_parsers_per_node):
             parsed.append(parse_json._submit(
                 args=[num_parser_out] + generated[start_idx : start_idx + num_parser_in],
@@ -132,7 +147,7 @@ def submit_tasks(gen_dep):
     parsed = flatten(parsed)
 
     filtered, start_idx = [], 0
-    for i in range(num_nodes):
+    for i in range(start_index, num_nodes):
         for _ in range(num_filters_per_node):
             filtered.append(filter._submit(
                 args=[num_filter_out] + parsed[start_idx : start_idx + num_filter_in],
@@ -146,7 +161,7 @@ def submit_tasks(gen_dep):
 
     shuffled, start_idx = [], 0
     num_return_vals = 1
-    for i in range(num_nodes):
+    for i in range(start_index, num_nodes):
         for _ in range(num_projectors_per_node):
             batches = filtered[start_idx : start_idx + num_projector_in]
             shuffled.append(project_shuffle._submit(
@@ -342,8 +357,6 @@ def filter(num_ret_vals, *batches):
         filtered = filtered_batches[0]
     return filtered if num_ret_vals == 1 else tuple(np.array_split(filtered, num_ret_vals))
 
-
-@ray.remote
 def project_shuffle(num_reducers, *batches):
     """
     Project: e -> (campaign_id, window)
@@ -351,19 +364,17 @@ def project_shuffle(num_reducers, *batches):
     Shuffles by hash(campaign_id)
     """
     shuffled = [defaultdict(int) for _ in range(num_reducers)]
-    partition_sizes = [0 for _ in range(num_reducers)]
     for batch in batches:
         window = ts_to_window(batch[0][EVENT_TIME])
         for e in batch:
             cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
-            partition = hash(cid) % num_reducers
+            partition = CAMPAIGN_TO_PARTITION[cid]
             shuffled[partition][(cid, window)] += 1
-            partition_sizes[partition] += 1
 
     campaign_keys = [[] for _ in range(num_reducers)]
     window_keys = [[] for _ in range(num_reducers)]
     counts = [[] for _ in range(num_reducers)]
-    max_partition_size = max(partition_sizes)
+    max_partition_size = max(len(partition) for partition in shuffled)
     for i, partition in enumerate(shuffled):
         partition_size = 0
         for key, count in partition.items():
@@ -480,7 +491,7 @@ class Reducer(object):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dump', type=str, default='dump.json')
-    parser.add_argument('--exp-time', type=int, default=30)
+    parser.add_argument('--exp-time', type=int, default=60)
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--actor-checkpointing', action='store_true')
     parser.add_argument('--num-projectors', type=int, default=1)
@@ -548,6 +559,13 @@ if __name__ == '__main__':
         ray.init(redis_address="{}:6379".format(args.redis_address), use_raylet=True)
     time.sleep(2)
 
+    partition = 0
+    for campaign_id in CAMPAIGN_IDS:
+        CAMPAIGN_TO_PARTITION[campaign_id] = partition
+        partition += 1
+        partition %= num_reducers
+    project_shuffle = ray.remote(project_shuffle)
+
     print("Warming up...")
     #ray_warmup(node_resources)
 
@@ -572,10 +590,9 @@ if __name__ == '__main__':
             end_time = start_time + warmup_time
 
             time.sleep(10)
-            for i in range(1):
+            for i in range(10):
                 round_start = time.time()
-                submit_tasks(gen_dep)
-                time.sleep(0.1)
+                submit_tasks(gen_dep, num_reducers)
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -589,7 +606,7 @@ if __name__ == '__main__':
 
             while time.time() < end_time:
                 loop_start = time.time()
-                submit_tasks(gen_dep)
+                submit_tasks(gen_dep, num_reducers)
                 loop_end = time.time()
                 time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
                 if time_to_sleep > 0:
@@ -601,14 +618,14 @@ if __name__ == '__main__':
 
             print("Finished in: ", (end_time - start_time), "s")
 
-            print("Dumping...")
-            ray.global_state.chrome_tracing_dump(filename=args.dump)
-
             print("Computing throughput...")
             compute_stats()
 
             print("Writing latencies...")
             write_latencies()
+
+            print("Dumping...")
+            ray.global_state.chrome_tracing_dump(filename=args.dump)
 
             print("Computing checkpoint overhead...")
             compute_checkpoint_overhead()

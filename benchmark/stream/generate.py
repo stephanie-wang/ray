@@ -7,11 +7,6 @@ from random import randint
 
 from conf import *
 
-NUM_PAGE_IDS = 100
-NUM_USER_IDS = 100
-NUM_CAMPAIGNS = 10000
-NUM_ADS_PER_CAMPAIGN = 10
-
 def generate_id():
     return str(uuid.uuid4()).encode('ascii')
 
@@ -25,7 +20,7 @@ def generate_ad_to_campaign_map():
         for ad_id in campaign_to_ads[campaign_id]:
             ad_to_campaign[ad_id] = campaign_id
 
-    return ad_to_campaign
+    return campaign_ids, ad_to_campaign
 
 @ray.remote
 def generate(num_ret_vals, generator_dependencies, time_slice_num_events):
@@ -90,4 +85,4 @@ def init_generator(ad_to_campaign, time_slice_num_events):
 
 
 # Global variable to pre-generate the ad map.
-AD_TO_CAMPAIGN_MAP = generate_ad_to_campaign_map()
+CAMPAIGN_IDS, AD_TO_CAMPAIGN_MAP = generate_ad_to_campaign_map()
