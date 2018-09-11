@@ -777,20 +777,33 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
 
   uint64_t start = current_sys_time_ms();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn, start]() {
-    ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
+    bool success = ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, *conn, start);
+    // If we failed to receive the object, then retry the pull.
+    if (!success) {
+      main_service_->post([this, object_id]() {
+        auto it = pull_requests_.find(object_id);
+        if (it != pull_requests_.end() && it->second.timer_set) {
+          RAY_LOG(INFO) << "Failed to receive object " << object_id << ", retrying Pull";
+          it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
+              TryPull(object_id);
+            });
+        }
+        });
+    }
   });
 
-  // We're receiving the object, so extend the timer before we retry the Pull.
+  // We're receiving the object, so cancel the timer so that Pull is not
+  // reattempted.
   auto it = pull_requests_.find(object_id);
   if (it != pull_requests_.end() && it->second.timer_set) {
-    it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
-        TryPull(object_id);
-      });
+    // NOTE: We purposely leave timer_set = true so that no one will retry Pull
+    // while we're receiving the object.
+    it->second.retry_timer->cancel();
   }
 }
 
-void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
+bool ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
                                          const ObjectID &object_id, uint64_t data_size,
                                          uint64_t metadata_size, uint64_t chunk_index,
                                          TcpClientConnection &conn,
@@ -803,6 +816,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
       buffer_pool_.CreateChunk(object_id, data_size, metadata_size, chunk_index);
   ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
   RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", created after " << current_sys_time_ms() - start;
+  bool success = false;
   if (chunk_status.second.ok()) {
     // Avoid handling this chunk if it's already being handled by another process.
     std::vector<boost::asio::mutable_buffer> buffer;
@@ -812,8 +826,10 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", bytes received at " << current_sys_time_ms() - start;
     if (ec.value() == boost::system::errc::success) {
       buffer_pool_.SealChunk(object_id, chunk_index);
+      success = true;
     } else {
       buffer_pool_.AbortCreateChunk(object_id, chunk_index);
+      success = false;
       // TODO(hme): This chunk failed, so create a pull request for this chunk.
     }
     RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", sealed/aborted at " << current_sys_time_ms() - start;
@@ -832,11 +848,13 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     if (ec.value() != boost::system::errc::success) {
       RAY_LOG(ERROR) << boost_to_ray_status(ec).ToString();
     }
+    success = true;
     // TODO(hme): If the object isn't local, create a pull request for this chunk.
   }
   conn.ProcessMessages();
   RAY_LOG(DEBUG) << "ReceiveCompleted " << client_id_ << " " << object_id << " "
                  << "/" << config_.max_receives;
+  return success;
 }
 
 void ObjectManager::ReceiveFreeRequest(std::shared_ptr<TcpClientConnection> &conn,

@@ -303,7 +303,7 @@ class ObjectManager : public ObjectManagerInterface {
   void ReceivePushRequest(std::shared_ptr<TcpClientConnection> &conn,
                           const uint8_t *message);
   /// Execute a receive on the receive_service_ thread pool.
-  void ExecuteReceiveObject(const ClientID &client_id, const ObjectID &object_id,
+  bool ExecuteReceiveObject(const ClientID &client_id, const ObjectID &object_id,
                             uint64_t data_size, uint64_t metadata_size,
                             uint64_t chunk_index, TcpClientConnection &conn, uint64_t start);
 
