@@ -399,12 +399,20 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
       auto status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, new_conn);
       if (!status.ok()) {
         CheckIOError(status, "Push");
+      } else {
+        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn);
+        RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
+                       << config_.max_sends;
       }
       });
   } else {
     status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, conn);
     if (!status.ok()) {
       CheckIOError(status, "Push");
+    } else {
+      connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn);
+      RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
+                     << config_.max_sends;
     }
   }
 }
@@ -450,11 +458,6 @@ ray::Status ObjectManager::SendObjectData(const ObjectID &object_id,
   // Do this regardless of whether it failed or succeeded.
   buffer_pool_.ReleaseGetChunk(object_id, chunk_info.chunk_index);
 
-  if (status.ok()) {
-    connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn);
-    RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
-                   << config_.max_sends;
-  }
   return status;
 }
 
