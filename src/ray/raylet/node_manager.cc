@@ -1581,7 +1581,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
         HandleTaskForwarded(status, task, node_id);
         uint64_t end_ms = current_time_ms();
         uint64_t interval = end_ms - start;
-        if (num_entries > 300) {
+        if (end_ms > 100) {
           RAY_LOG(WARNING) << "HANDLER: WriteMessage " << task.GetTaskSpecification().TaskId()
                            << " to node " << node_id << " took " << interval << " ms "
                            << num_entries << " entries, " << size << " bytes";
