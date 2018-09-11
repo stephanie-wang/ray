@@ -774,9 +774,11 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
-  receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn]() {
+
+  uint64_t start = current_sys_time_ms();
+  receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn, start]() {
     ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
-                         chunk_index, *conn);
+                         chunk_index, *conn, start);
   });
 
   // We're receiving the object, so extend the timer before we retry the Pull.
@@ -791,25 +793,30 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
 void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
                                          const ObjectID &object_id, uint64_t data_size,
                                          uint64_t metadata_size, uint64_t chunk_index,
-                                         TcpClientConnection &conn) {
+                                         TcpClientConnection &conn,
+                                         uint64_t start) {
   RAY_LOG(DEBUG) << "ExecuteReceiveObject " << client_id << " " << object_id << " "
                  << chunk_index;
 
+  RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", starting after " << current_sys_time_ms() - start;
   std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status =
       buffer_pool_.CreateChunk(object_id, data_size, metadata_size, chunk_index);
   ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
+  RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", created after " << current_sys_time_ms() - start;
   if (chunk_status.second.ok()) {
     // Avoid handling this chunk if it's already being handled by another process.
     std::vector<boost::asio::mutable_buffer> buffer;
     buffer.push_back(asio::buffer(chunk_info.data, chunk_info.buffer_length));
     boost::system::error_code ec;
     conn.ReadBuffer(buffer, ec);
+    RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", bytes received at " << current_sys_time_ms() - start;
     if (ec.value() == boost::system::errc::success) {
       buffer_pool_.SealChunk(object_id, chunk_index);
     } else {
       buffer_pool_.AbortCreateChunk(object_id, chunk_index);
       // TODO(hme): This chunk failed, so create a pull request for this chunk.
     }
+    RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", sealed/aborted at " << current_sys_time_ms() - start;
   } else {
     // RAY_LOG(ERROR) << "Create Chunk Failed index = " << chunk_index << ": "
     //               << chunk_status.second.message();
@@ -821,6 +828,7 @@ void ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     buffer.push_back(asio::buffer(mutable_vec, buffer_length));
     boost::system::error_code ec;
     conn.ReadBuffer(buffer, ec);
+    RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ",  fake bytes received at " << current_sys_time_ms() - start;
     if (ec.value() != boost::system::errc::success) {
       RAY_LOG(ERROR) << boost_to_ray_status(ec).ToString();
     }

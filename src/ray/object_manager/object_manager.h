@@ -305,7 +305,7 @@ class ObjectManager : public ObjectManagerInterface {
   /// Execute a receive on the receive_service_ thread pool.
   void ExecuteReceiveObject(const ClientID &client_id, const ObjectID &object_id,
                             uint64_t data_size, uint64_t metadata_size,
-                            uint64_t chunk_index, TcpClientConnection &conn);
+                            uint64_t chunk_index, TcpClientConnection &conn, uint64_t start);
 
   /// Handles receiving a pull request message.
   void ReceivePullRequest(std::shared_ptr<TcpClientConnection> &conn,
