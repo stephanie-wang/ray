@@ -86,7 +86,7 @@ int main(int argc, char *argv[]) {
       RayConfig::instance().object_manager_default_chunk_size();
   // The number of open connections that we can have to a remote object manager
   // for sending Pull requests.
-  object_manager_config.max_pull_connections = 1;
+  object_manager_config.max_pull_connections = 10;
 
   RAY_LOG(DEBUG) << "Starting object manager with configuration: \n"
                  << "max_sends = " << object_manager_config.max_sends << "\n"

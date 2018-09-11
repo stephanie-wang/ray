@@ -55,6 +55,8 @@ class ServerConnection : public std::enable_shared_from_this<ServerConnection<T>
                        const endpoint_type &endpoint,
                        const std::function<void(std::shared_ptr<ServerConnection<T>>)> &callback);
 
+  ray::Status Connect(const endpoint_type &endpoint);
+
  protected:
   struct WriteBufferData {
     int64_t write_version;

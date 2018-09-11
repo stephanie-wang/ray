@@ -110,6 +110,16 @@ void ServerConnection<T>::ConnectAsync(
 }
 
 template <class T>
+ray::Status ServerConnection<T>::Connect(const endpoint_type &endpoint) {
+  boost::system::error_code error;
+  socket_.connect(endpoint, error);
+  if (!error) {
+    connected_ = true;
+  }
+  return boost_to_ray_status(error);
+}
+
+template <class T>
 void ServerConnection<T>::WriteSome() {
   RAY_CHECK(connected_);
   // Make sure we were not writing to the socket.

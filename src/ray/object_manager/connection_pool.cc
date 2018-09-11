@@ -6,7 +6,6 @@ ConnectionPool::ConnectionPool() {}
 
 void ConnectionPool::RegisterReceiver(ConnectionType type, const ClientID &client_id,
                                       std::shared_ptr<TcpClientConnection> &conn) {
-  std::unique_lock<std::mutex> guard(connection_mutex);
   switch (type) {
   case ConnectionType::MESSAGE: {
     Add(message_receive_connections_, client_id, conn);
@@ -18,7 +17,6 @@ void ConnectionPool::RegisterReceiver(ConnectionType type, const ClientID &clien
 }
 
 void ConnectionPool::RemoveReceiver(std::shared_ptr<TcpClientConnection> conn) {
-  std::unique_lock<std::mutex> guard(connection_mutex);
   ClientID client_id = conn->GetClientID();
   if (message_receive_connections_.count(client_id) != 0) {
     Remove(message_receive_connections_, client_id, conn);
@@ -30,7 +28,9 @@ void ConnectionPool::RemoveReceiver(std::shared_ptr<TcpClientConnection> conn) {
 
 void ConnectionPool::RegisterSender(ConnectionType type, const ClientID &client_id,
                                     std::shared_ptr<SenderConnection> &conn) {
-  std::unique_lock<std::mutex> guard(connection_mutex);
+  if (type == ConnectionType::TRANSFER) {
+    std::unique_lock<std::mutex> guard(connection_mutex);
+  }
   SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
                                 ? message_send_connections_
                                 : transfer_send_connections_;
@@ -48,7 +48,9 @@ void ConnectionPool::IncrementNumConnections(const ClientID &client_id) {
 
 void ConnectionPool::GetSender(ConnectionType type, const ClientID &client_id,
                                std::shared_ptr<SenderConnection> *conn) {
-  std::unique_lock<std::mutex> guard(connection_mutex);
+  if (type == ConnectionType::TRANSFER) {
+    std::unique_lock<std::mutex> guard(connection_mutex);
+  }
   SenderMapType &avail_conn_map = (type == ConnectionType::MESSAGE)
                                       ? available_message_send_connections_
                                       : available_transfer_send_connections_;
@@ -61,7 +63,9 @@ void ConnectionPool::GetSender(ConnectionType type, const ClientID &client_id,
 
 void ConnectionPool::ReleaseSender(ConnectionType type,
                                    const std::shared_ptr<SenderConnection> &conn) {
-  std::unique_lock<std::mutex> guard(connection_mutex);
+  if (type == ConnectionType::TRANSFER) {
+    std::unique_lock<std::mutex> guard(connection_mutex);
+  }
   SenderMapType &conn_map = (type == ConnectionType::MESSAGE)
                                 ? available_message_send_connections_
                                 : available_transfer_send_connections_;

@@ -30,6 +30,22 @@ void SenderConnection::Create(
       });
 };
 
+std::shared_ptr<SenderConnection> SenderConnection::CreateTransferConnection(
+    boost::asio::io_service &io_service, const ClientID &client_id, const std::string &ip,
+    uint16_t port) {
+  boost::asio::ip::tcp::socket socket(io_service);
+  auto endpoint = MakeTcpEndpoint(ip, port);
+  std::shared_ptr<TcpServerConnection> conn =
+      TcpServerConnection::Create(std::move(socket));
+  auto status = conn->Connect(endpoint);
+  if (status.ok()) {
+    auto sender_connection = std::make_shared<SenderConnection>(std::move(conn), client_id);
+    return sender_connection;
+  } else {
+    return nullptr;
+  }
+};
+
 SenderConnection::SenderConnection(std::shared_ptr<TcpServerConnection> conn,
                                    const ClientID &client_id)
     : conn_(conn) {

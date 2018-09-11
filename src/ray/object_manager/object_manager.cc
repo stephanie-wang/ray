@@ -277,8 +277,6 @@ bool ObjectManager::PullEstablishConnection(const ObjectID &object_id,
             RAY_LOG(ERROR) << "Failed to establish connection with remote object manager.";
           });
       success = true;
-    } else {
-      RAY_LOG(ERROR) << "Too many Pull connections for " << client_id << " try Pull on " << object_id << " again";
     }
   } else {
     PullSendRequest(object_id, conn);
@@ -392,20 +390,16 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
   std::shared_ptr<SenderConnection> conn;
   connection_pool_.GetSender(ConnectionPool::ConnectionType::TRANSFER, client_id, &conn);
   if (conn == nullptr) {
-    CreateSenderConnection(ConnectionPool::ConnectionType::TRANSFER, connection_info,
-        [this, client_id, object_id, data_size, metadata_size, chunk_index](std::shared_ptr<SenderConnection> new_conn) {
+    conn = CreateTransferConnection(connection_info);
+    if (conn != nullptr) {
       connection_pool_.RegisterSender(ConnectionPool::ConnectionType::TRANSFER, client_id,
-                                      new_conn);
-      auto status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, new_conn);
-      if (!status.ok()) {
-        CheckIOError(status, "Push");
-      } else {
-        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, new_conn);
-        RAY_LOG(DEBUG) << "SendCompleted " << client_id_ << " " << object_id << " "
-                       << config_.max_sends;
-      }
-      });
-  } else {
+                                      conn);
+    } else {
+      RAY_LOG(WARNING) << "Failed to create transfer connection to remote object manager";
+    }
+  }
+
+  if (conn != nullptr) {
     status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, conn);
     if (!status.ok()) {
       CheckIOError(status, "Push");
@@ -638,6 +632,35 @@ void ObjectManager::WaitComplete(const UniqueID &wait_id) {
   }
   wait_state.callback(found, remaining);
   active_wait_requests_.erase(wait_id);
+}
+
+std::shared_ptr<SenderConnection> ObjectManager::CreateTransferConnection(
+    RemoteConnectionInfo info) {
+  ConnectionPool::ConnectionType type = ConnectionPool::ConnectionType::TRANSFER;
+  uint64_t start = current_sys_time_ms();
+  const auto ip = info.ip;
+  RAY_LOG(INFO) << "CreateTransferConnection to " << ip << " at " << start;
+  auto conn = SenderConnection::CreateTransferConnection(*main_service_, info.client_id, info.ip, info.port);
+  if (conn != nullptr) {
+    // Prepare client connection info buffer
+    flatbuffers::FlatBufferBuilder fbb;
+    bool is_transfer = (type == ConnectionPool::ConnectionType::TRANSFER);
+    auto message = object_manager_protocol::CreateConnectClientMessage(
+        fbb, fbb.CreateString(client_id_.binary()), is_transfer);
+    fbb.Finish(message);
+    // Send synchronously.
+    auto status = conn->WriteMessage(
+        static_cast<int64_t>(object_manager_protocol::MessageType::ConnectClient),
+        fbb.GetSize(), fbb.GetBufferPointer());
+    if (!status.ok()) {
+      conn = nullptr;
+    }
+  }
+
+  if (conn == nullptr) {
+    RAY_LOG(ERROR) << "Failed to connect to remote object manager.";
+  }
+  return conn;
 }
 
 void ObjectManager::CreateSenderConnection(
