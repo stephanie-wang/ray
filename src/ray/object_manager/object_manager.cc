@@ -124,6 +124,7 @@ void ObjectManager::HandleObjectAdded(const ObjectInfoT &object_info) {
 }
 
 void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
+  RAY_LOG(INFO) << "Object removed " << object_id << " at " << current_sys_time_ms();
   local_objects_.erase(object_id);
   ray::Status status = object_directory_->ReportObjectRemoved(object_id, client_id_);
 }
@@ -366,10 +367,11 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
         uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
         for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
           RAY_LOG(INFO) << "Pushing object " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+          uint64_t start = current_sys_time_ms();
           send_service_.post([this, client_id, object_id, data_size, metadata_size,
-                              chunk_index, info]() {
+                              chunk_index, info, start]() {
             ExecuteSendObject(client_id, object_id, data_size, metadata_size, chunk_index,
-                              info);
+                              info, start);
           });
         }
       },
@@ -383,9 +385,11 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
 void ObjectManager::ExecuteSendObject(const ClientID &client_id,
                                       const ObjectID &object_id, uint64_t data_size,
                                       uint64_t metadata_size, uint64_t chunk_index,
-                                      const RemoteConnectionInfo &connection_info) {
+                                      const RemoteConnectionInfo &connection_info,
+                                      uint64_t start) {
   RAY_LOG(DEBUG) << "ExecuteSendObject " << client_id << " " << object_id << " "
                  << chunk_index;
+  RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", starting after " << current_sys_time_ms() - start;
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
   connection_pool_.GetSender(ConnectionPool::ConnectionType::TRANSFER, client_id, &conn);
@@ -400,7 +404,9 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
   }
 
   if (conn != nullptr) {
+    RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", connected after " << current_sys_time_ms() - start;
     status = SendObjectHeaders(object_id, data_size, metadata_size, chunk_index, conn);
+    RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", sent after " << current_sys_time_ms() - start;
     if (!status.ok()) {
       CheckIOError(status, "Push");
     } else {
