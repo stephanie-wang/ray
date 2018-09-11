@@ -104,7 +104,7 @@ void ObjectManager::HandleObjectAdded(const ObjectInfoT &object_info) {
   // Handle the unfulfilled_push_requests_ which contains the push request that is not
   // completed due to unsatisfied local objects.
   auto iter = unfulfilled_push_requests_.find(object_id);
-  //RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
   if (iter != unfulfilled_push_requests_.end()) {
     for (auto &pair : iter->second) {
       auto &client_id = pair.first;
@@ -249,7 +249,7 @@ void ObjectManager::TryPull(const ObjectID &object_id) {
 
 bool ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                             const ClientID &client_id) {
-  //RAY_LOG(INFO) << "Sending pull request " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Sending pull request " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   // Acquire a message connection and send pull request.
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
@@ -310,7 +310,7 @@ void ObjectManager::PullSendRequest(const ObjectID &object_id,
 
 void ObjectManager::HandlePushTaskTimeout(const ObjectID &object_id,
                                           const ClientID &client_id) {
-  //RAY_LOG(INFO) << "Object push expired " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Object push expired " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   auto iter = unfulfilled_push_requests_.find(object_id);
   if (iter != unfulfilled_push_requests_.end()) {
     iter->second.erase(client_id);
@@ -321,7 +321,7 @@ void ObjectManager::HandlePushTaskTimeout(const ObjectID &object_id,
 }
 
 void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
-  //RAY_LOG(INFO) << "Object push requested " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Object push requested " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   if (local_objects_.count(object_id) == 0) {
     // Avoid setting duplicated timer for the same object and client pair.
     auto &clients = unfulfilled_push_requests_[object_id];
@@ -365,7 +365,7 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
         uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
         uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
         for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
-          //RAY_LOG(INFO) << "Pushing object " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+          RAY_LOG(INFO) << "Pushing object " << object_id << " to " << client_id << " at " << current_sys_time_ms();
           send_service_.post([this, client_id, object_id, data_size, metadata_size,
                               chunk_index, info]() {
             ExecuteSendObject(client_id, object_id, data_size, metadata_size, chunk_index,
@@ -770,7 +770,7 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   auto object_header =
       flatbuffers::GetRoot<object_manager_protocol::PushRequestMessage>(message);
   ObjectID object_id = ObjectID::from_binary(object_header->object_id()->str());
-  //RAY_LOG(INFO) << "Receiving push " << object_id << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Receiving push " << object_id << " at " << current_sys_time_ms();
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
