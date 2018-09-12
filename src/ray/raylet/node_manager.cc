@@ -164,7 +164,9 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
 
   RAY_CHECK_OK(object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info) {
     ObjectID object_id = ObjectID::from_binary(object_info.object_id);
-    HandleObjectLocal(object_id);
+    if (!task_dependency_manager_.CheckObjectLocal(object_id)) {
+      HandleObjectLocal(object_id);
+    }
   }));
   RAY_CHECK_OK(object_manager_.SubscribeObjDeleted(
       [this](const ObjectID &object_id) { HandleObjectMissing(object_id); }));
@@ -1399,11 +1401,10 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   // will be invisible to both the local object manager and the other nodes.
   // NOTE(swang): These objects are never cleaned up. We should consider
   // removing the objects, e.g., when an actor is terminated.
-  if (task.GetTaskSpecification().IsActorCreationTask() ||
-      task.GetTaskSpecification().IsActorTask()) {
-    auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
-    if (!task_dependency_manager_.CheckObjectLocal(dummy_object)) {
-      HandleObjectLocal(dummy_object);
+  for (int64_t i = 0; i < task.GetTaskSpecification().NumReturns(); i++) {
+    auto return_id = task.GetTaskSpecification().ReturnId(i);
+    if (!task_dependency_manager_.CheckObjectLocal(return_id)) {
+      HandleObjectLocal(return_id);
     }
   }
 
