@@ -128,8 +128,7 @@ def submit_tasks(gen_dep, num_reducer_nodes):
     for i in range(start_index, num_nodes):
         for _ in range(num_generators_per_node):
             generated.append(generate._submit(
-                args=[num_generator_out, gen_dep, time_slice_num_events],
-                num_return_vals=num_generator_out, 
+                args=[gen_dep, time_slice_num_events],
                 resources={node_resources[i]: 1},
                 batch=BATCH))
     if BATCH:
@@ -137,14 +136,19 @@ def submit_tasks(gen_dep, num_reducer_nodes):
     generated = flatten(generated)
 
     parsed, start_idx = [], 0
-    for i in range(start_index, num_nodes):
-        for _ in range(num_parsers_per_node):
+    partition_size = time_slice_num_events // num_parsers_per_node
+    for i, generate_output in zip(range(start_index, num_nodes), generated):
+        partition_start = 0
+        for j in range(num_parsers_per_node):
+            partition_end = partition_start + partition_size
+            if j < time_slice_num_events % num_parsers_per_node:
+                partition_end += 1
             parsed.append(parse_json._submit(
-                args=[num_parser_out] + generated[start_idx : start_idx + num_parser_in],
+                args=[num_parser_out, partition_start, partition_end, generate_output],
                 num_return_vals=num_parser_out,
                 resources={node_resources[i] : 1},
                 batch=BATCH))
-            start_idx += num_parser_in
+            partition_start = partition_end
     if BATCH:
         parsed = ray.worker.global_worker.submit_batch(parsed)
     parsed = flatten(parsed)
@@ -349,11 +353,12 @@ def to_list(json_object):
     return [json_object[field] for field in FIELDS]
 
 @ray.remote
-def parse_json(num_ret_vals, *batches):
+def parse_json(num_ret_vals, partition_start, partition_end, *batches):
     """
     Parse batch of JSON events
     """
-    parsed = np.array([to_list(ujson.loads(e.tobytes().decode('ascii'))) for batch in batches for e in batch])
+    parsed = np.array([to_list(ujson.loads(e.tobytes().decode('ascii'))) for
+        batch in batches for e in batch[partition_start:partition_end]])
     return parsed if num_ret_vals == 1 else tuple(np.array_split(parsed, num_ret_vals))
 
 
