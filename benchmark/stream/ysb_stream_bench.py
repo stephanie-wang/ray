@@ -5,6 +5,7 @@ from collections import Iterable
 import time
 import logging
 import numpy as np
+import redis
 import ujson
 import uuid
 import sys
@@ -217,20 +218,6 @@ def compute_checkpoint_overhead():
     print("Checkpoint pickle time", end - start)
     print("Checkpoint size(bytes):", [len(pickle) for pickle in pickles])
 
-def write_latencies():
-    f = open("lat.txt", "w+")
-    lat_total, count = 0, 0
-    mid_time = (end_time - start_time) / 2
-    latencies = ray.get([reducer.get_latencies.remote() for reducer in reducers])
-    for lats in latencies:
-        for key in lats:
-            if key[1] < end_time:
-                f.write(str(key[1]) + "," + str(lats[key]) + "\n")
-                lat_total += lats[key]
-                count += 1
-    print("Average latency: ", lat_total/count)
-    f.close()
-
 def write_timeseries():
     f = open("timeseries.txt", "w+")
     total_lat = defaultdict(int)
@@ -394,7 +381,7 @@ def project_shuffle(num_reducers, *batches):
 
 class Reducer(object):
 
-    def __init__(self, reduce_index):
+    def __init__(self, reduce_index, redis_address=None, redis_port=None):
         """
         Constructor
         """
@@ -402,49 +389,39 @@ class Reducer(object):
         # (campaign_id, window) --> count
         self.clear()
 
+        if redis_address is not None:
+            self.use_redis = True
+            self.init_redis(redis_address, redis_port)
+
+    def init_redis(self, redis_address, redis_port):
+        print("Connecting to redis at {}:{}".format(redis_address, redis_port))
+        self.redis_address = redis_address
+        self.redis_port = redis_port
+        self.redis = redis.StrictRedis(redis_address, port=redis_port)
+
     def __ray_save__(self):
-        checkpoint = pickle.dumps({
+        checkpoint = {
                 "seen": list(self.seen.items()),
-                "latencies": list(self.latencies.items()),
-                "calls": self.calls,
                 "count": self.count,
                 "reduce_index": self.reduce_index,
-                })
-        self.checkpoints.append(checkpoint)
-        self.seen.clear()
-        self.latencies.clear()
-        return self.checkpoints
+                }
+        if self.use_redis:
+            checkpoint["redis_address"] = self.redis_address
+            checkpoint["redis_port"] = self.redis_port
 
-    def __ray_restore__(self, checkpoints):
-        self.__init__()
-        self.checkpoints = checkpoints
-        if len(self.checkpoints) > 0:
-            checkpoint = pickle.loads(self.checkpoints[-1])
-            self.calls = checkpoint["calls"]
-            self.count = checkpoint["count"]
-            self.reduce_index = checkpoint["reduce_index"]
+        checkpoint = pickle.dumps(checkpoint)
+        return checkpoint
+
+    def __ray_restore__(self, checkpoint):
+        checkpoint = pickle.loads(checkpoint)
+        self.__init__(checkpoint["reduce_index"],
+                      checkpoint.get("redis_address", None),
+                      checkpoint.get("redis_port", None))
+        self.seen = checkpoint["seen"]
+        self.count = checkpoint["count"]
 
     def seen(self):
-        if not self.checkpoints:
-            return self.seen
-        else:
-            seen = defaultdict(int)
-            for checkpoint in self.checkpoints:
-                checkpoint_seen = pickle.loads(checkpoint)["seen"]
-                for key, count in checkpoint_seen:
-                    seen[tuple(key)] += count
-            return seen
-
-    def get_latencies(self):
-        if not self.checkpoints:
-            return self.latencies
-        else:
-            latencies = defaultdict(int)
-            for checkpoint in self.checkpoints:
-                checkpoint_latencies = pickle.loads(checkpoint)["latencies"]
-                for key, latency in checkpoint_latencies:
-                    latencies[tuple(key)] = latency
-            return latencies
+        return self.seen
 
     def count(self):
         return self.count
@@ -454,17 +431,27 @@ class Reducer(object):
         Clear all data structures.
         """
         self.seen = defaultdict(int)
-        self.latencies = defaultdict(int)
-        self.calls = 0
         self.count = 0
-        self.checkpoints = []
+
+    def get_or_create_window(self, campaign_id, window):
+        window_id = self.redis.hget(campaign_id, window)
+        if window_id is None:
+            window_id = str(uuid.uuid4())
+            self.redis.hset(campaign_id, window, window_id)
+        return window_id
 
     def reduce(self, *partitions):
         """
         Reduce by key
         Increment and store in dictionary
         """
-        self.calls += 1
+        try:
+            min_window = min(window for _, window in self.seen)
+        except ValueError:
+            min_window = min(window for _, windows, _ in partitions for window in windows[self.reduce_index])
+
+        keys_to_flush = []
+        flush = False
         for campaign_ids, windows, counts in partitions:
             campaign_ids = campaign_ids[self.reduce_index]
             windows = windows[self.reduce_index]
@@ -475,12 +462,35 @@ class Reducer(object):
                 key = (campaign_id, window)
                 self.seen[key] += count
                 self.count += count
-                latency = time.time() - window
-                self.latencies[key] = max(self.latencies[key], latency)
-        if DEBUG and self.calls % 10 == 0:
-            key = (key[0], key[1] - 10)
-            if key in self.latencies:
-                print(self.latencies[key])
+
+                if window > min_window:
+                    flush = True
+
+        if flush:
+            keys_to_flush = []
+            if self.use_redis:
+                pipe = self.redis.pipeline()
+                for campaign_id, window in self.seen:
+                    if window > min_window:
+                        continue
+                    keys_to_flush.append((campaign_id, window))
+                    window_id = self.get_or_create_window(campaign_id, window)
+                    pipe.hset(window_id, "seen_count", self.seen[(campaign_id, window)])
+                    time_updated = time.time()
+                    pipe.hset(window_id, "time_updated", time_updated)
+
+                pipe.execute()
+            else:
+                for campaign_id, window in self.seen:
+                    if window > min_window:
+                        continue
+                    keys_to_flush.append((campaign_id, window))
+                    time_updated = time.time()
+                    print("LATENCY:", window, time_updated - window)
+
+            for key in keys_to_flush:
+                del self.seen[key]
+
 
     def foo(self, *timestamps):
         """
@@ -489,6 +499,7 @@ class Reducer(object):
         """
         timestamp = min([lst[0] for lst in timestamps])
         print("foo latency:", time.time() - timestamp - 0.05 * 5)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -508,6 +519,7 @@ if __name__ == '__main__':
     parser.add_argument('--test-throughput', action='store_true')
     parser.add_argument('--time-slice-ms', type=int, default=100)
     parser.add_argument('--warmup-time', type=int, default=10)
+    parser.add_argument('--reduce-redis-address', type=str, default=None)
     args = parser.parse_args()
 
     checkpoint = args.actor_checkpointing
@@ -574,9 +586,13 @@ if __name__ == '__main__':
     reducers = []
     assert num_reducers % args.num_reducers_per_node == 0
     num_reducer_nodes = num_reducers // args.num_reducers_per_node
+    reduce_redis_address, reduce_redis_port = args.reduce_redis_address.split(':')
     for i in range(num_reducer_nodes):
         for j in range(args.num_reducers_per_node):
-            reducers.append(init_reducer(i, node_resources, checkpoint, args=[i * args.num_reducers_per_node + j]))
+            reducers.append(init_reducer(i, node_resources, checkpoint,
+                                         args=[i * args.num_reducers_per_node + j,
+                                               reduce_redis_address,
+                                               reduce_redis_port]))
 
     time.sleep(1)
     # Make sure the reducers are initialized.
@@ -627,9 +643,6 @@ if __name__ == '__main__':
 
             print("Computing throughput...")
             compute_stats()
-
-            print("Writing latencies...")
-            write_latencies()
 
             if args.dump is not None:
                 print("Dumping...")
