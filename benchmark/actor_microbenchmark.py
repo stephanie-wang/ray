@@ -9,6 +9,7 @@ import time
 import argparse
 
 BATCH_SIZE = 100
+BATCH = False
 
 class A(object):
     def __init__(self, node_resource):
@@ -30,13 +31,23 @@ class A(object):
         batch_size = BATCH_SIZE
         if target_throughput < batch_size:
             batch_size = int(target_throughput)
+        batch = []
         while True:
-            self.b.f.remote()
+            if BATCH:
+                batch.append(self.b.f.remote_batch())
+            else:
+                self.b.f.remote()
             if i % batch_size == 0 and i > 0:
+                if BATCH:
+                    ray.worker.global_worker.submit_batch(batch)
+                    batch = []
                 end = time.time()
                 sleep_time = (batch_size / target_throughput) - (end - start2)
                 if sleep_time > 0.00003:
+                    print("Ahead by", sleep_time)
                     time.sleep(sleep_time)
+                else:
+                    print("Behind by", -1 * sleep_time)
                 start2 = time.time()
                 if end - start >= experiment_time:
                     break
