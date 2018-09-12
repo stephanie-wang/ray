@@ -880,10 +880,14 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     SubmitTask(task, uncommitted_lineage, /* forwarded = */ true);
     LogHandlerDelay(start, "ForwardTaskRequest2", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
 
+    std::unordered_map<ClientID, std::unordered_set<ObjectID>> pushes;
     for (size_t i = 0; i < message->push_objects()->size(); ++i) {
       ObjectID object_id = from_flatbuf(*message->push_objects()->Get(i));
       ClientID client_id = from_flatbuf(*message->push_clients()->Get(i));
-      object_manager_.Push(object_id, client_id);
+      auto inserted = pushes[client_id].insert(object_id);
+      if (inserted.second) {
+        object_manager_.Push(object_id, client_id);
+      }
     }
   } break;
   case protocol::MessageType::DisconnectClient: {
