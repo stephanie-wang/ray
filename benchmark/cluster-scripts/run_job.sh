@@ -4,6 +4,7 @@ NUM_REDUCERS=${3:-$NUM_RAYLETS}
 EXPERIMENT_TIME=${4:-60}
 GCS_DELAY_MS=${5:--1}
 USE_REDIS=${6:-0}
+USE_JSON=${7:-""}
 
 THROUGHPUT=150000
 
@@ -12,9 +13,9 @@ MAX_LINEAGE_SIZE=1
 
 HEAD_IP=$(head -n 1 workers.txt)
 
-OUTPUT_FILENAME="$NUM_RAYLETS-nodes-$NUM_REDIS_SHARDS-shards-$NUM_REDUCERS-reducers-100-timeslice-$GCS_DELAY_MS-gcs"
+OUTPUT_FILENAME="$NUM_RAYLETS-nodes-$NUM_REDIS_SHARDS-shards-$NUM_REDUCERS-reducers-100-timeslice-$GCS_DELAY_MS-gcs-$EXPERIMENT_TIME-s"
 
-if [ $# -gt 6 ] || [ $# -eq 0 ]
+if [ $# -gt 7 ] || [ $# -eq 0 ]
 then
     echo "Usage: ./run_jobs.sh <num raylets> <num shards> <num reducers> <experiment time> <gcs delay>"
     exit
@@ -56,5 +57,11 @@ then
     echo "...Redis up"
 fi
 
+JSON_ARG=""
+if [ ! -z $USE_JSON ]
+then
+    JSON_ARG="--use-json"
+fi
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing
+
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG

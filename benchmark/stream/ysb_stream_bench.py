@@ -157,13 +157,13 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes):
     num_return_vals = 1
     for i in range(start_index, num_nodes):
         for _ in range(num_projectors_per_node):
-            batches = filtered[start_idx : start_idx + num_projector_in]
+            batches = filtered[start_idx : start_idx + num_filter_in]
             shuffled.append(project_shuffle_no_json._submit(
                 args=[num_projector_out] + batches,
                 num_return_vals=num_return_vals,
                 resources={node_resources[i] : 1},
                 batch=BATCH))
-            start_idx += num_projector_in
+            start_idx += num_filter_in
     if BATCH:
         shuffled = ray.worker.global_worker.submit_batch(shuffled)
 
