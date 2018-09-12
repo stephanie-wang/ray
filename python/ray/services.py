@@ -1031,8 +1031,8 @@ def start_raylet(redis_address,
     raylet_name = "/tmp/raylet{}".format(random_name())
 
     # Create the command that the Raylet will use to start workers.
-    start_worker_command = ("numactl -C !0-1 {} {} "
-                            "--node-ip-address={} "
+    #start_worker_command = ("numactl -C !0-1 {} {} "
+    start_worker_command = ("{} {} "
                             "--object-store-name={} "
                             "--raylet-name={} "
                             "--redis-address={}".format(
