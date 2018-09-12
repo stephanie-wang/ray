@@ -1309,7 +1309,6 @@ def start_raylet_monitor(redis_address,
             Python process that imported services exits. This is True by
             default.
     """
-    return
     gcs_ip_address, gcs_port = redis_address.split(":")
     command = [RAYLET_MONITOR_EXECUTABLE, gcs_ip_address, gcs_port]
     p = subprocess.Popen(command, stdout=stdout_file, stderr=stderr_file)
