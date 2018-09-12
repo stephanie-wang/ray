@@ -1,29 +1,19 @@
 NUM_RAYLETS=$1
-THROUGHPUT=${2:-100000}
-NUM_REDIS_SHARDS=${3:-1}
-NUM_REDUCERS=${4:-$NUM_RAYLETS}
-LINEAGE_POLICY=1
-#EXPERIMENT_TIME=$5
+NUM_REDIS_SHARDS=${2:-1}
+NUM_REDUCERS=${3:-$NUM_RAYLETS}
+EXPERIMENT_TIME=${4:-60}
+GCS_DELAY_MS=${5:--1}
 
-MAX_LINEAGE_SIZE=100
-GCS_DELAY_MS=-1
+THROUGHPUT=150000
+
+LINEAGE_POLICY=1
+MAX_LINEAGE_SIZE=1
 
 HEAD_IP=$(head -n 1 workers.txt)
 
-if [ $# -eq 1 ]
+if [ $# -gt 5 ] || [ $# -eq 0 ]
 then
-	echo "Running job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, and $NUM_REDIS_SHARDS Redis shards..."
-elif [ $# -eq 2 ]
-then
-	echo "Running job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, throughput $THROUGHPUT, and $NUM_REDIS_SHARDS Redis shards..."
-elif [ $# -eq 3 ]
-then
-	echo "Running job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, throughput $THROUGHPUT, and $NUM_REDIS_SHARDS Redis shards..."
-elif [ $# -eq 4 ]
-then
-	echo "Running job with $NUM_RAYLETS raylets, lineage policy $LINEAGE_POLICY, GCS delay $GCS_DELAY_MS, throughput $THROUGHPUT, and $NUM_REDIS_SHARDS Redis shards..."
-else
-    echo "Usage: ./run_jobs.sh <num raylets> <throughput> <experiment time>"
+    echo "Usage: ./run_jobs.sh <num raylets> <num shards> <num reducers> <experiment time> <gcs delay>"
     exit
 fi
 
@@ -35,4 +25,10 @@ sleep 5
 
 echo "Starting job..."
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --actor-checkpointing --num-reducers $NUM_REDUCERS
+DUMP_ARG=""
+if [ $EXPERIMENT_TIME -le 60 ]
+then
+    DUMP_ARG="--dump dump.json"
+fi
+
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --actor-checkpointing --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG

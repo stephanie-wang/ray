@@ -36,7 +36,7 @@ def warmup_objectstore():
 def warmup(*args):
     return
 
-def ray_warmup(reducers, node_resources):
+def ray_warmup(reducers, node_resources, num_reducer_nodes):
     """
     Warmup Ray
     """
@@ -60,21 +60,23 @@ def ray_warmup(reducers, node_resources):
         with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
             start = time.time()
             if SEPARATE_REDUCERS:
-                args = [[time.time(), gen_dep] for _ in range(len(reducers), len(node_resources))]
-                start_index = len(reducers)
+                start_index = num_reducer_nodes
+                args = [[[time.time()], gen_dep] for _ in range(start_index, len(node_resources))]
             else:
-                args = [[time.time(), gen_dep] for _ in range(len(node_resources))]
+                args = [[[time.time()], gen_dep] for _ in range(len(node_resources))]
                 start_index = 0
             if BATCH:
                 for _ in range(5):
                     batch = []
                     for j, node_resource in enumerate(node_resources[start_index:]):
                         task = reduce_warmup._submit(
-                                        args=[args[j]],
+                                        args=args[j],
                                         resources={node_resource: 1},
                                         batch=True)
                         batch.append(task)
                     args = ray.worker.global_worker.submit_batch(batch)
+                    args = [[arg] for arg in args]
+                args = [arg[0] for arg in args]
                 batch = [reducer.foo.remote_batch(*args) for reducer in reducers]
                 ray.worker.global_worker.submit_batch(batch)
             else:
@@ -115,9 +117,9 @@ def reduce_warmup(timestamp, *args):
     else:
         return [timestamp]
 
-def submit_tasks(gen_dep, num_reducers):
+def submit_tasks(gen_dep, num_reducer_nodes):
     if SEPARATE_REDUCERS:
-        start_index = num_reducers
+        start_index = num_reducer_nodes
     else:
         start_index = 0
 
@@ -219,11 +221,11 @@ def write_latencies():
     f = open("lat.txt", "w+")
     lat_total, count = 0, 0
     mid_time = (end_time - start_time) / 2
-    for reducer in reducers:
-        lats = ray.get(reducer.get_latencies.remote())
+    latencies = ray.get([reducer.get_latencies.remote() for reducer in reducers])
+    for lats in latencies:
         for key in lats:
             if key[1] < end_time:
-                f.write(str(lats[key]) + "\n")
+                f.write(str(key[1]) + "," + str(lats[key]) + "\n")
                 lat_total += lats[key]
                 count += 1
     print("Average latency: ", lat_total/count)
@@ -303,20 +305,20 @@ def flatten(x):
     else:
         return [x]
 
-def init_actor(node_index, node_resources, actor_cls, checkpoint, args=None):
+def init_reducer(node_index, node_resources, checkpoint, args=None):
+    print("Starting reducer on node", node_index, "with args", args)
     if args is None:
         args = []
-    args.append(node_index)
 
     if checkpoint:
         actor = ray.remote(
 		num_cpus=0,
                 checkpoint_interval=int(WINDOW_SIZE_SEC / BATCH_SIZE_SEC),
-                resources={ node_resources[node_index]: 1, })(actor_cls).remote(*args)
+                resources={ node_resources[node_index]: 1, })(Reducer).remote(*args)
     else:
         actor = ray.remote(
 		num_cpus=0,
-                resources={ node_resources[node_index]: 1, })(actor_cls).remote(*args)
+                resources={ node_resources[node_index]: 1, })(Reducer).remote(*args)
     ray.get(actor.clear.remote())
     # Take a checkpoint once every window.
     actor.node_index = node_index
@@ -476,9 +478,9 @@ class Reducer(object):
                 latency = time.time() - window
                 self.latencies[key] = max(self.latencies[key], latency)
         if DEBUG and self.calls % 10 == 0:
-            for key, latency in self.latencies:
-                if latency > 0:
-                    print(latency)
+            key = (key[0], key[1] - 10)
+            if key in self.latencies:
+                print(self.latencies[key])
 
     def foo(self, *timestamps):
         """
@@ -490,7 +492,7 @@ class Reducer(object):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--dump', type=str, default='dump.json')
+    parser.add_argument('--dump', type=str, default=None)
     parser.add_argument('--exp-time', type=int, default=60)
     parser.add_argument('--no-hugepages', action='store_true')
     parser.add_argument('--actor-checkpointing', action='store_true')
@@ -500,6 +502,7 @@ if __name__ == '__main__':
     parser.add_argument('--num-nodes', type=int, required=True)
     parser.add_argument('--num-parsers', type=int, default=1)
     parser.add_argument('--num-reducers', type=int, default=1)
+    parser.add_argument('--num-reducers-per-node', type=int, default=1)
     parser.add_argument('--redis-address', type=str)
     parser.add_argument('--target-throughput', type=int, default=1e5)
     parser.add_argument('--test-throughput', action='store_true')
@@ -566,19 +569,22 @@ if __name__ == '__main__':
         partition %= num_reducers
     project_shuffle = ray.remote(project_shuffle)
 
-    print("Warming up...")
-    #ray_warmup(node_resources)
-
     print("Initializing generators...")
     print("Initializing reducers...")
-    reducers = [init_actor(i, node_resources, Reducer, checkpoint) for i in range(num_reducers)]
+    reducers = []
+    assert num_reducers % args.num_reducers_per_node == 0
+    num_reducer_nodes = num_reducers // args.num_reducers_per_node
+    for i in range(num_reducer_nodes):
+        for j in range(args.num_reducers_per_node):
+            reducers.append(init_reducer(i, node_resources, checkpoint, args=[i * args.num_reducers_per_node + j]))
+
     time.sleep(1)
     # Make sure the reducers are initialized.
     ray.get([reducer.clear.remote() for reducer in reducers])
     print("...finished initializing reducers:", len(reducers))
 
     print("Placing dependencies on nodes...")
-    gen_dep = ray_warmup(reducers, node_resources)
+    gen_dep = ray_warmup(reducers, node_resources, num_reducer_nodes)
 
     if exp_time > 0:
         try:
@@ -592,7 +598,7 @@ if __name__ == '__main__':
             time.sleep(10)
             for i in range(10):
                 round_start = time.time()
-                submit_tasks(gen_dep, num_reducers)
+                submit_tasks(gen_dep, num_reducer_nodes)
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -601,12 +607,13 @@ if __name__ == '__main__':
             time.sleep(10) # TODO non-deterministic, fix
 
             print("Measuring...")
-            start_time = time.time()
+            start_time = (time.time() // 1) + 1
             end_time = start_time + exp_time
+            time.sleep(start_time - time.time())
 
             while time.time() < end_time:
                 loop_start = time.time()
-                submit_tasks(gen_dep, num_reducers)
+                submit_tasks(gen_dep, num_reducer_nodes)
                 loop_end = time.time()
                 time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
                 if time_to_sleep > 0:
@@ -624,8 +631,9 @@ if __name__ == '__main__':
             print("Writing latencies...")
             write_latencies()
 
-            print("Dumping...")
-            ray.global_state.chrome_tracing_dump(filename=args.dump)
+            if args.dump is not None:
+                print("Dumping...")
+                ray.global_state.chrome_tracing_dump(filename=args.dump)
 
             print("Computing checkpoint overhead...")
             compute_checkpoint_overhead()
