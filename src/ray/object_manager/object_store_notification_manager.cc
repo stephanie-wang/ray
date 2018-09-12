@@ -13,6 +13,15 @@
 
 namespace ray {
 
+void LogHandlerDelay(uint64_t start_ms, const std::string &operation, const TaskID &task_id, const ActorID &actor_id) {
+  uint64_t end_ms = current_time_ms();
+  uint64_t interval = end_ms - start_ms;
+  if (interval > 100) {
+    RAY_LOG(WARNING) << "HANDLER: " << operation << " on task " << task_id
+                     << " for actor " << actor_id << " took " << interval << " ms ";
+  }
+}
+
 ObjectStoreNotificationManager::ObjectStoreNotificationManager(
     boost::asio::io_service &io_service, const std::string &store_socket_name)
     : store_client_(), socket_(io_service) {
@@ -64,15 +73,19 @@ void ObjectStoreNotificationManager::ProcessStoreNotification(
 }
 
 void ObjectStoreNotificationManager::ProcessStoreAdd(const ObjectInfoT &object_info) {
+  uint64_t start = current_time_ms();
   for (auto &handler : add_handlers_) {
     handler(object_info);
   }
+  LogHandlerDelay(start, "ObjectAdded", ObjectID::from_binary(object_info.object_id), ActorID::nil());
 }
 
 void ObjectStoreNotificationManager::ProcessStoreRemove(const ObjectID &object_id) {
+  uint64_t start = current_time_ms();
   for (auto &handler : rem_handlers_) {
     handler(object_id);
   }
+  LogHandlerDelay(start, "ObjectRemoved", object_id, ActorID::nil());
 }
 
 void ObjectStoreNotificationManager::SubscribeObjAdded(
