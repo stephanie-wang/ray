@@ -682,11 +682,11 @@ void NodeManager::ProcessClientMessage(
       task_execution_spec.SetLastTimestamp(current_sys_time_ms());
       TaskSpecification task_spec(*task_message->task_spec());
       Task task(task_execution_spec, task_spec);
-      io_service_.post([this, task]() {
+      //io_service_.post([this, task]() {
         // Submit the task to the local scheduler. Since the task was submitted
         // locally, there is no uncommitted lineage.
         SubmitTask(task, Lineage());
-      });
+      //});
     }
   } break;
   case protocol::MessageType::SubmitTask: {
