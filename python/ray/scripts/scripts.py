@@ -166,12 +166,17 @@ def cli():
     type=int,
     default=None,
     help="the maximum lineage size for the cache")
+@click.option(
+    "--worker-core-string",
+    required=False,
+    type=str,
+    help="The cores to pin the workers to")
 def start(node_ip_address, redis_address, redis_port, num_redis_shards,
           redis_max_clients, redis_shard_ports, object_manager_port,
           object_store_memory, num_workers, num_cpus, num_gpus, resources,
           head, no_ui, block, plasma_directory, huge_pages, autoscaling_config,
           use_raylet, gcs_delay_ms, lineage_cache_policy,
-          max_lineage_size):
+          max_lineage_size, worker_core_string):
     # Convert hostnames to numerical IP address.
     if node_ip_address is not None:
         node_ip_address = services.address_to_ip(node_ip_address)
@@ -255,7 +260,8 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
             use_raylet=use_raylet,
             gcs_delay_ms=gcs_delay_ms,
             lineage_cache_policy=lineage_cache_policy,
-            max_lineage_size=max_lineage_size)
+            max_lineage_size=max_lineage_size,
+            worker_core_string=worker_core_string)
         print(address_info)
         print("\nStarted Ray on this node. You can add additional nodes to "
               "the cluster by calling\n\n"
@@ -325,7 +331,8 @@ def start(node_ip_address, redis_address, redis_port, num_redis_shards,
             use_raylet=use_raylet,
             gcs_delay_ms=gcs_delay_ms,
             lineage_cache_policy=lineage_cache_policy,
-            max_lineage_size=max_lineage_size)
+            max_lineage_size=max_lineage_size,
+            worker_core_string=worker_core_string)
         print(address_info)
         print("\nStarted Ray on this node. If you wish to terminate the "
               "processes that have been started, run\n\n"
