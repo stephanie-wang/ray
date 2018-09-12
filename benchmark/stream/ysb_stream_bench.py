@@ -118,6 +118,61 @@ def reduce_warmup(timestamp, *args):
     else:
         return [timestamp]
 
+def submit_tasks_no_json(gen_dep, num_reducer_nodes):
+    if SEPARATE_REDUCERS:
+        start_index = num_reducer_nodes
+    else:
+        start_index = 0
+
+    generated = []
+    for i in range(start_index, num_nodes):
+        for _ in range(num_generators_per_node):
+            generated.append(generate._submit(
+                args=[gen_dep, time_slice_num_events],
+                resources={node_resources[i]: 1},
+                batch=BATCH))
+    if BATCH:
+        generated = ray.worker.global_worker.submit_batch(generated)
+    generated = flatten(generated)
+
+    filtered = []
+    partition_size = time_slice_num_events // num_parsers_per_node
+    for i, generate_output in zip(range(start_index, num_nodes), generated):
+        partition_start = 0
+        for j in range(num_parsers_per_node):
+            partition_end = partition_start + partition_size
+            if j < time_slice_num_events % num_parsers_per_node:
+                partition_end += 1
+
+            filtered.append(filter_no_json._submit(
+                args=[num_filter_out, partition_start, partition_end, generate_output],
+                num_return_vals=num_filter_out,
+                resources={node_resources[i] : 1},
+                batch=BATCH))
+    if BATCH:
+        filtered = ray.worker.global_worker.submit_batch(filtered)
+    filtered = flatten(filtered)
+
+    shuffled, start_idx = [], 0
+    num_return_vals = 1
+    for i in range(start_index, num_nodes):
+        for _ in range(num_projectors_per_node):
+            batches = filtered[start_idx : start_idx + num_projector_in]
+            shuffled.append(project_shuffle_no_json._submit(
+                args=[num_projector_out] + batches,
+                num_return_vals=num_return_vals,
+                resources={node_resources[i] : 1},
+                batch=BATCH))
+            start_idx += num_projector_in
+    if BATCH:
+        shuffled = ray.worker.global_worker.submit_batch(shuffled)
+
+    if BATCH:
+        batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
+        ray.worker.global_worker.submit_batch(batch)
+    else:
+        [reducer.reduce.remote(*shuffled) for reducer in reducers]
+
 def submit_tasks(gen_dep, num_reducer_nodes):
     if SEPARATE_REDUCERS:
         start_index = num_reducer_nodes
@@ -299,6 +354,15 @@ FIELDS = [
     u'event_time',
     u'ip_address',
     ]
+INDICES = [
+    (12, 48),
+    (61, 97),
+    (108, 144),
+    (157, 165),
+    (180, 190),
+    (205, 221),
+    (237, 244),
+    ]
 USER_ID    = 0
 PAGE_ID    = 1
 AD_ID      = 2
@@ -361,6 +425,50 @@ def parse_json(num_ret_vals, partition_start, partition_end, *batches):
         batch in batches for e in batch[partition_start:partition_end]])
     return parsed if num_ret_vals == 1 else tuple(np.array_split(parsed, num_ret_vals))
 
+def filter_view(record, start, end):
+    return record[start:end].tobytes().decode('ascii').strip() == u'"view"'
+
+@ray.remote
+def filter_no_json(num_ret_vals, partition_start, partition_end, batch):
+    """
+    Parse batch of JSON events
+    """
+    batch = batch[partition_start:partition_end]
+    start, end = INDICES[EVENT_TYPE]
+    batch = batch[np.apply_along_axis(filter_view, 1, batch, start, end)]
+    return batch
+
+def get_field(record, field):
+    start, end = INDICES[field]
+    return record[start:end].tobytes().decode('ascii')
+
+def project_shuffle_no_json(num_reducers, *batches):
+    shuffled = [defaultdict(int) for _ in range(num_reducers)]
+    for batch in batches:
+        window = ts_to_window(float(get_field(batch[0], EVENT_TIME)))
+        for e in batch:
+            ad_id = get_field(e, AD_ID).encode('ascii')
+            cid = AD_TO_CAMPAIGN_MAP[ad_id]
+            partition = CAMPAIGN_TO_PARTITION[cid]
+            shuffled[partition][(cid, window)] += 1
+
+    campaign_keys = [[] for _ in range(num_reducers)]
+    window_keys = [[] for _ in range(num_reducers)]
+    counts = [[] for _ in range(num_reducers)]
+    max_partition_size = max(len(partition) for partition in shuffled)
+    for i, partition in enumerate(shuffled):
+        partition_size = 0
+        for key, count in partition.items():
+            campaign_keys[i].append(key[0])
+            window_keys[i].append(key[1])
+            counts[i].append(count)
+            partition_size += 1
+        while partition_size < max_partition_size:
+            campaign_keys[i].append('')
+            window_keys[i].append(0)
+            counts[i].append(0)
+            partition_size += 1
+    return [np.array(campaign_keys), np.array(window_keys), np.array(counts)]
 
 @ray.remote
 def filter(num_ret_vals, *batches):
@@ -553,6 +661,7 @@ if __name__ == '__main__':
     parser.add_argument('--warmup-time', type=int, default=10)
     parser.add_argument('--reduce-redis-address', type=str, default=None)
     parser.add_argument('--output-filename', type=str, default="test")
+    parser.add_argument('--use-json', action='store_true')
     args = parser.parse_args()
 
     checkpoint = args.actor_checkpointing
@@ -613,6 +722,7 @@ if __name__ == '__main__':
         partition += 1
         partition %= num_reducers
     project_shuffle = ray.remote(project_shuffle)
+    project_shuffle_no_json = ray.remote(project_shuffle_no_json)
 
     print("Initializing generators...")
     print("Initializing reducers...")
@@ -644,10 +754,14 @@ if __name__ == '__main__':
             start_time = time.time()
             end_time = start_time + warmup_time
 
+            submit_tasks_fn = submit_tasks_no_json
+            if args.use_json:
+                submit_tasks_fn = submit_tasks
+
             time.sleep(10)
             for i in range(10):
                 round_start = time.time()
-                submit_tasks(gen_dep, num_reducer_nodes)
+                submit_tasks_fn(gen_dep, num_reducer_nodes)
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -663,7 +777,7 @@ if __name__ == '__main__':
 
             while time.time() < end_time:
                 loop_start = time.time()
-                submit_tasks(gen_dep, num_reducer_nodes)
+                submit_tasks_fn(gen_dep, num_reducer_nodes)
                 loop_end = time.time()
                 time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
                 if time_to_sleep > 0:
