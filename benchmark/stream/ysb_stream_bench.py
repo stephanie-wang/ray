@@ -183,6 +183,46 @@ def submit_tasks(gen_dep, num_reducer_nodes):
         [reducer.reduce.remote(*shuffled) for reducer in reducers]
 
 
+def collect_redis_stats(redis_address, redis_port, campaign_ids=None):
+    r = redis.StrictRedis(redis_address, port=redis_port)
+
+    if campaign_ids is None:
+        campaign_ids = []
+        for key in r.keys():
+            if b'seen_count' in r.hgetall(key):
+                continue
+            campaign_ids.append(key)
+
+    latencies = []
+    counts = defaultdict(int)
+    for campaign_id in campaign_ids:
+        windows = r.hgetall(campaign_id)
+        for window, window_id in windows.items():
+           seen, time_updated = r.hmget(window_id, [b'seen_count', b'time_updated'])
+           seen = int(seen)
+           time_updated = float(time_updated)
+           window = float(window)
+           counts[window] += seen
+           latencies.append((window, time_updated - window))
+    counts = sorted(counts.items(), key=lambda key: key[0])
+    print("Average latency:", np.mean([latency[1] for latency in latencies]))
+    return latencies, counts
+
+def write_stats(filename_prefix, redis_address, redis_port, campaign_ids=None):
+    latencies, throughputs = collect_redis_stats(redis_address, redis_port, campaign_ids)
+    with open("{}-latency.out".format(filename_prefix), 'w+') as f:
+        for window, latency in latencies:
+            f.write("{},{}\n".format(window, latency))
+    with open("{}-throughput.out".format(filename_prefix), 'w+') as f:
+        for window, throughput in throughputs:
+            # The number of events is measured per window.
+            throughput /= WINDOW_SIZE_SEC
+            # We multiply by 3 because the filter step filters out 1/3 of the
+            # events.
+            throughput *= 3
+            f.write("{},{}\n".format(window, throughput))
+
+
 def compute_stats():
     i, total = 0, 0
     missed_total, miss_time_total = 0, 0
@@ -217,20 +257,6 @@ def compute_checkpoint_overhead():
     end = time.time()
     print("Checkpoint pickle time", end - start)
     print("Checkpoint size(bytes):", [len(pickle) for pickle in pickles])
-
-def write_timeseries():
-    f = open("timeseries.txt", "w+")
-    total_lat = defaultdict(int)
-    total_count = defaultdict(int)
-    for reducer in reducers:
-        lats = ray.get(reducer.get_latencies.remote())
-        for key in lats:
-            if key[1] < end_time:
-                total_lat[key[1]] += lats[key]
-                total_count[key[1]] += 1
-    for key in total_lat:
-        f.write(str(key) + " " + str(total_lat[key]/total_count[key]) + "\n")
-    f.close()
 
 def get_node_names(num_nodes):
     node_names = set()
@@ -478,6 +504,7 @@ class Reducer(object):
                     pipe.hset(window_id, "seen_count", self.seen[(campaign_id, window)])
                     time_updated = time.time()
                     pipe.hset(window_id, "time_updated", time_updated)
+                print("LATENCY:", time.time() - keys_to_flush[0][1])
 
                 pipe.execute()
             else:
@@ -520,6 +547,7 @@ if __name__ == '__main__':
     parser.add_argument('--time-slice-ms', type=int, default=100)
     parser.add_argument('--warmup-time', type=int, default=10)
     parser.add_argument('--reduce-redis-address', type=str, default=None)
+    parser.add_argument('--output-filename', type=str, default="test")
     args = parser.parse_args()
 
     checkpoint = args.actor_checkpointing
@@ -625,7 +653,8 @@ if __name__ == '__main__':
             print("Measuring...")
             start_time = (time.time() // 1) + 1
             end_time = start_time + exp_time
-            time.sleep(start_time - time.time())
+            # Sleep 5ms less to account for latency from driver creating the tasks.
+            time.sleep(start_time - time.time() - 0.005)
 
             while time.time() < end_time:
                 loop_start = time.time()
@@ -642,7 +671,9 @@ if __name__ == '__main__':
             print("Finished in: ", (end_time - start_time), "s")
 
             print("Computing throughput...")
-            compute_stats()
+            if args.reduce_redis_address is not None:
+                write_stats(args.output_filename, reduce_redis_address,
+                            reduce_redis_port, campaign_ids=CAMPAIGN_IDS)
 
             if args.dump is not None:
                 print("Dumping...")
@@ -650,9 +681,6 @@ if __name__ == '__main__':
 
             print("Computing checkpoint overhead...")
             compute_checkpoint_overhead()
-
-            print("Writing timeseries...")
-            write_timeseries()
 
         except KeyboardInterrupt:
             print("Dumping current state...")
