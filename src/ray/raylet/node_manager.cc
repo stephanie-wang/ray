@@ -1582,9 +1582,8 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
       static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
       fbb.GetBufferPointer(), [this, task, node_id, start, size, num_entries](const ray::Status &status) {
         HandleTaskForwarded(status, task, node_id);
-        uint64_t end_ms = current_time_ms();
-        uint64_t interval = end_ms - start;
-        if (end_ms > 100) {
+        uint64_t interval = current_time_ms() - start;
+        if (interval > 100) {
           RAY_LOG(WARNING) << "HANDLER: WriteMessage " << task.GetTaskSpecification().TaskId()
                            << " to node " << node_id << " took " << interval << " ms "
                            << num_entries << " entries, " << size << " bytes";
