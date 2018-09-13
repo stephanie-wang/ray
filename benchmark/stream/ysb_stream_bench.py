@@ -375,6 +375,8 @@ AD_TYPE    = 3
 EVENT_TYPE = 4
 EVENT_TIME = 5
 IP_ADDRESS = 6
+# The below array decoded is "view".
+VIEW_EVENT_TYPE = np.array([ 34, 118, 105, 101, 119,  34,  32,  32,  32,  32], dtype=np.uint8)
 
 ########## helper functions #########
 
@@ -430,18 +432,15 @@ def parse_json(num_ret_vals, partition_start, partition_end, *batches):
         batch in batches for e in batch[partition_start:partition_end]])
     return parsed if num_ret_vals == 1 else tuple(np.array_split(parsed, num_ret_vals))
 
-def filter_view(record, start, end):
-    return record[start:end].tobytes().decode('ascii').strip() == u'"view"'
-
 @ray.remote
 def filter_no_json(num_ret_vals, partition_start, partition_end, batch):
     """
     Parse batch of JSON events
     """
     batch = batch[partition_start:partition_end]
-    start, end = INDICES[EVENT_TYPE]
-    batch = batch[np.apply_along_axis(filter_view, 1, batch, start, end)]
-    return batch
+    return batch[np.all(
+        batch[:, INDICES[EVENT_TYPE][0]:INDICES[EVENT_TYPE][1]] == VIEW_EVENT_TYPE,
+        axis=1)]
 
 def get_field(record, field):
     start, end = INDICES[field]
