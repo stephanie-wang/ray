@@ -928,6 +928,7 @@ void NodeManager::ScheduleTasks() {
     const ClientID client_id = task_schedule.second;
     if (client_id == gcs_client_->client_table().GetLocalClientId()) {
       local_task_ids.insert(task_id);
+      scheduling_buffer_.AddDecision(task_id, client_id);
     } else {
       // TODO(atumanov): need a better interface for task exit on forward.
       // (See design_docs/task_states.rst for the state transition diagram.)

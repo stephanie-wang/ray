@@ -100,6 +100,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
       std::uniform_int_distribution<int> distribution(0, client_keys.size() - 1);
       int client_key_index = distribution(gen_);
       decision[task_id] = client_keys[client_key_index];
+      RAY_LOG(INFO) << "No feasible node, giving task " << task_id << " to " << client_keys[client_key_index];
       //RAY_LOG(DEBUG) << "[SchedulingPolicy] idx=" << client_key_index << " " << task_id
       //               << " --> " << client_keys[client_key_index];
 
