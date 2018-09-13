@@ -803,7 +803,9 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   if (it != pull_requests_.end() && it->second.timer_set) {
     // NOTE: We purposely leave timer_set = true so that no one will retry Pull
     // while we're receiving the object.
-    it->second.retry_timer->cancel();
+    it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
+        TryPull(object_id);
+      });
   }
 }
 
