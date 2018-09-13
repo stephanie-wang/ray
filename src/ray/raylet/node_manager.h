@@ -202,7 +202,8 @@ class NodeManager {
   // NOTE(swang): For benchmark purposes only. -1 means use lineage stash. >= 0
   // means sleep for that many ms before writing to the GCS.
   int gcs_delay_ms_;
-  std::unordered_map<TaskID, Task> gcs_task_cache_;
+  std::unordered_map<TaskID, std::list<std::pair<Task, bool>>::iterator> gcs_task_cache_;
+  std::list<std::pair<Task, bool>> gcs_task_queue_;
 };
 
 }  // namespace raylet

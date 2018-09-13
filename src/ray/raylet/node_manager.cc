@@ -933,7 +933,10 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
     // GCS.
     _SubmitTask(task, uncommitted_lineage, forwarded);
   } else if (gcs_delay_ms_ == 0) {
-    gcs_task_cache_.emplace(task_id, task);
+    gcs_task_queue_.push_back({task, false});
+    auto it = gcs_task_queue_.end();
+    it--;
+    gcs_task_cache_.emplace(task_id, it);
     FlushTask(task_id);
   } else if (gcs_delay_ms_ > 0) {
     task_dependency_manager_.TaskPending(task);
@@ -944,7 +947,10 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
       RAY_CHECK(!error);
       FlushTask(task_id);
     });
-    gcs_task_cache_.emplace(task_id, task);
+    gcs_task_queue_.push_back({task, false});
+    auto it = gcs_task_queue_.end();
+    it--;
+    gcs_task_cache_.emplace(task_id, it);
   } else {
     _SubmitTask(task, uncommitted_lineage, forwarded);
   }
@@ -954,7 +960,7 @@ void NodeManager::FlushTask(const TaskID &task_id) {
   auto task_entry = gcs_task_cache_.find(task_id);
   RAY_CHECK(task_entry != gcs_task_cache_.end());
 
-  auto task = task_entry->second;
+  auto task = task_entry->second->first;
 
   flatbuffers::FlatBufferBuilder fbb;
   auto message = task.ToFlatbuffer(fbb);
@@ -966,9 +972,16 @@ void NodeManager::FlushTask(const TaskID &task_id) {
   gcs::raylet::TaskTable::WriteCallback task_callback = [this](
       ray::gcs::AsyncGcsClient *client, const TaskID &id,
       const protocol::TaskT &data) {
-    gcs_task_cache_.erase(id);
-    Task task(data);
-    _SubmitTask(task, Lineage(), /*forwarded=*/false);
+    auto it = gcs_task_cache_.find(id);
+    RAY_CHECK(it != gcs_task_cache_.end());
+    it->second->second = true;
+    gcs_task_cache_.erase(it);
+
+    while (!gcs_task_queue_.empty() && gcs_task_queue_.front().second) {
+      Task task(gcs_task_queue_.front().first);
+      _SubmitTask(task, Lineage(), /*forwarded=*/false);
+      gcs_task_queue_.pop_front();
+    }
   };
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
       task.GetTaskSpecification().DriverId(), task_id, task_data, task_callback));
