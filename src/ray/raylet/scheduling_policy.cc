@@ -33,12 +33,6 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
     // Get task's resource demand
     auto resource_demand = t.GetTaskSpecification().GetRequiredResources();
 
-    // TODO(swang): Hack to schedule reconstructed tasks that require
-    // custom resources that are no longer available.
-    if (t.GetTaskExecutionSpec().NumExecutions() > 0) {
-      resource_demand = resource_demand.GetCpuResources();
-    }
-
     const TaskID &task_id = t.GetTaskSpecification().TaskId();
     //RAY_LOG(DEBUG) << "[SchedulingPolicy]: task=" << task_id
     //               << " numforwards=" << t.GetTaskExecutionSpec().NumForwards()
