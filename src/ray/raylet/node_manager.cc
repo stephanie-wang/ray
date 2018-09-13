@@ -155,7 +155,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_server_connections_(),
       actor_registry_(),
       gcs_delay_ms_(config.gcs_delay_ms),
-      scheduling_buffer_(8192, 1024) {
+      scheduling_buffer_(8192, 1024),
+      retrying_tasks_(false) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -386,6 +387,7 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
   // TODO(swang): If we receive a notification for our own death, clean up and
   // exit immediately.
   const ClientID client_id = ClientID::from_binary(client_data.client_id);
+  RAY_LOG(INFO) << "Client removed " << client_id;
   //RAY_LOG(DEBUG) << "[ClientRemoved] received callback from client id " << client_id;
 
   RAY_CHECK(client_id != gcs_client_->client_table().GetLocalClientId())
@@ -397,13 +399,23 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
   // not be necessary.
 
   // Remove the client from the list of remote clients.
-  std::remove(remote_clients_.begin(), remote_clients_.end(), client_id);
+  for (auto it = remote_clients_.begin(); it != remote_clients_.end(); ) {
+    if (*it == client_id) {
+      it = remote_clients_.erase(it);
+    } else {
+      it++;
+    }
+  }
 
   // Remove the client from the resource map.
   cluster_resource_map_.erase(client_id);
 
   // Remove the remote server connection.
   remote_server_connections_.erase(client_id);
+
+  for (const auto &client : remote_clients_) {
+    RAY_CHECK(remote_server_connections_.count(client) != 0);
+  }
 }
 
 void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &client_id,
@@ -887,6 +899,7 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
       ObjectID object_id = from_flatbuf(*message->push_objects()->Get(i));
       ClientID client_id = from_flatbuf(*message->push_clients()->Get(i));
       auto inserted = pushes[client_id].insert(object_id);
+      RAY_LOG(INFO) << "Received push " << object_id << " to " << client_id;
       if (inserted.second) {
         object_manager_.Push(object_id, client_id);
       }
@@ -951,8 +964,17 @@ void NodeManager::ScheduleTasks() {
   // manager. TaskDependencyManager::TaskPending() is assumed to be idempotent.
   // TODO(atumanov): evaluate performance implications of registering all new tasks on
   // submission vs. registering remaining queued placeable tasks here.
-  for (const auto &task : local_queues_.GetPlaceableTasks()) {
-    task_dependency_manager_.TaskPending(task);
+  std::unordered_set<TaskID> infeasible_tasks;
+  for (const auto &t : local_queues_.GetPlaceableTasks()) {
+    //task_dependency_manager_.TaskPending(task);
+    infeasible_tasks.insert(t.GetTaskSpecification().TaskId());
+  }
+
+  if (infeasible_tasks.size() > 0) {
+    const auto tasks = local_queues_.RemoveTasks(infeasible_tasks);
+    for (const auto &task : tasks) {
+      HandleTaskScheduleFailure(task, /*set_timeout=*/false);
+    }
   }
 }
 
@@ -1469,6 +1491,9 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t recons
 
 void NodeManager::ResubmitTask(const Task &task) {
   RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId() << " for actor " << task.GetTaskSpecification().ActorId() << " counter " << task.GetTaskSpecification().ActorCounter();
+
+  scheduling_buffer_.ClearDecision(task.GetTaskSpecification().TaskId());
+
   if (!task.GetTaskSpecification().ReconstructionEnabled()) {
     TreatTaskAsFailed(task.GetTaskSpecification());
 
@@ -1643,6 +1668,106 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   return ray::Status::OK();
 }
 
+void NodeManager::RetryTasks() {
+  if (retrying_tasks_) {
+    return;
+  }
+
+  if (!failed_task_queue_.empty() && failed_task_queue_.front().second) {
+    Task task(failed_task_queue_.front().first);
+    task.SetNumExecutions(task.GetTaskExecutionSpec().NumExecutions() + 1);
+
+    ClientID node_id = ClientID::nil();
+    // Iterate through the object's arguments. NOTE(swang): We do not include
+    // the execution dependencies here since those cannot be transferred
+    // between nodes.
+    for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
+      int count = task.GetTaskSpecification().ArgIdCount(i);
+      for (int j = 0; j < count; j++) {
+        ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
+        ClientID previous_node_id = scheduling_buffer_.GetDecision(argument_id);
+        if (!previous_node_id.is_nil()) {
+          node_id = previous_node_id;
+        }
+      }
+    }
+    RAY_LOG(INFO) << "Retrying task " << task.GetTaskSpecification().TaskId() << " at node " << node_id;
+    for (const auto &client : remote_clients_) {
+      RAY_CHECK(remote_server_connections_.count(client) != 0);
+    }
+    if (node_id.is_nil()) {
+      node_id = scheduling_policy_.ScheduleInfeasibleTask(remote_clients_);
+    }
+    RAY_CHECK_OK(ForwardTask(task, node_id));
+
+    retrying_tasks_ = true;
+  }
+}
+
+void NodeManager::HandleTaskScheduleFailure(const Task &task, bool set_timeout) {
+  const TaskID task_id = task.GetTaskSpecification().TaskId();
+  // Mark the failed task as pending to let other raylets know that we still
+  // have the task. TaskDependencyManager::TaskPending() is assumed to be
+  // idempotent.
+  task_dependency_manager_.TaskPending(task);
+  // Remove the task from the lineage cache. The task will get added back
+  // once it is resubmitted.
+  lineage_cache_->RemoveWaitingTask(task_id);
+
+  auto failed_it = failed_tasks_.find(task_id);
+  if (failed_it == failed_tasks_.end()) {
+    failed_task_queue_.push_back({task, false});
+    auto it = failed_task_queue_.end();
+    it--;
+    failed_tasks_.emplace(task_id, it);
+  } else {
+    failed_it->second->second = false;
+    RAY_CHECK(failed_it->second == failed_task_queue_.begin());
+    retrying_tasks_ = false;
+  }
+
+  if (set_timeout) {
+  // Actor tasks can only be executed at the actor's location, so they are
+  // retried after a timeout. All other tasks that fail to be forwarded are
+  // deemed to be placeable again.
+  //if (task.GetTaskSpecification().IsActorTask()) {
+    // The task is for an actor on another node.  Create a timer to resubmit
+    // the task in a little bit. TODO(rkn): Really this should be a
+    // unique_ptr instead of a shared_ptr. However, it's a little harder to
+    // move unique_ptrs into lambdas.
+    auto retry_timer = std::make_shared<boost::asio::deadline_timer>(io_service_);
+    auto retry_duration = boost::posix_time::milliseconds(
+        RayConfig::instance().node_manager_forward_task_retry_timeout_milliseconds());
+    retry_timer->expires_from_now(retry_duration);
+    retry_timer->async_wait(
+        [this, task_id, retry_timer](const boost::system::error_code &error) {
+          // Timer killing will receive the boost::asio::error::operation_aborted,
+          // we only handle the timeout event.
+          RAY_CHECK(!error);
+          //RAY_LOG(DEBUG) << "Resubmitting task " << task_id
+          //               << " because ForwardTask failed.";
+          auto it = failed_tasks_.find(task_id);
+          RAY_CHECK(it != failed_tasks_.end());
+          it->second->second = true;
+
+          RetryTasks();
+
+        });
+  //} else {
+  //  // The task is not for an actor and may therefore be placed on another
+  //  // node immediately. Send it to the scheduling policy to be placed again.
+  //  local_queues_.QueuePlaceableTasks({task});
+  //  ScheduleTasks();
+  //}
+  } else {
+    auto it = failed_tasks_.find(task_id);
+    RAY_CHECK(it != failed_tasks_.end());
+    it->second->second = true;
+
+    RetryTasks();
+  }
+}
+
 void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &task, const ClientID &node_manager_id) {
   TaskID task_id = task.GetTaskSpecification().TaskId();
   if (status.ok()) {
@@ -1653,49 +1778,21 @@ void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &tas
     // Preemptively push any local arguments to the receiving node. For now, we
     // only do this with actor tasks, since actor tasks must be executed by a
     // specific process and therefore have affinity to the receiving node.
+    auto it = failed_tasks_.find(task_id);
+    if (it != failed_tasks_.end()) {
+      RAY_LOG(INFO) << "Retry task SUCCESS " << task_id << " at node " << node_manager_id;
+      RAY_CHECK(it->second == failed_task_queue_.begin());
+      failed_tasks_.erase(it);
+      failed_task_queue_.pop_front();
+
+      retrying_tasks_ = false;
+      RetryTasks();
+    }
   } else {
     RAY_LOG(INFO) << "Failed to forward task " << task_id << " to node manager "
                   << node_manager_id;
-    // Mark the failed task as pending to let other raylets know that we still
-    // have the task. TaskDependencyManager::TaskPending() is assumed to be
-    // idempotent.
-    task_dependency_manager_.TaskPending(task);
-    // Remove the task from the lineage cache. The task will get added back
-    // once it is resubmitted.
-    lineage_cache_->RemoveWaitingTask(task_id);
-
-    // Actor tasks can only be executed at the actor's location, so they are
-    // retried after a timeout. All other tasks that fail to be forwarded are
-    // deemed to be placeable again.
-    //if (task.GetTaskSpecification().IsActorTask()) {
-      // The task is for an actor on another node.  Create a timer to resubmit
-      // the task in a little bit. TODO(rkn): Really this should be a
-      // unique_ptr instead of a shared_ptr. However, it's a little harder to
-      // move unique_ptrs into lambdas.
-      auto retry_timer = std::make_shared<boost::asio::deadline_timer>(io_service_);
-      auto retry_duration = boost::posix_time::milliseconds(
-          RayConfig::instance().node_manager_forward_task_retry_timeout_milliseconds());
-      retry_timer->expires_from_now(retry_duration);
-      retry_timer->async_wait(
-          [this, task, task_id, retry_timer](const boost::system::error_code &error) {
-            // Timer killing will receive the boost::asio::error::operation_aborted,
-            // we only handle the timeout event.
-            RAY_CHECK(!error);
-            //RAY_LOG(DEBUG) << "Resubmitting task " << task_id
-            //               << " because ForwardTask failed.";
-            Task task_copy(task);
-            task_copy.SetNumExecutions(task.GetTaskExecutionSpec().NumExecutions() + 1);
-            SubmitTask(task_copy, Lineage());
-          });
-      // Remove the task from the lineage cache. The task will get added back
-      // once it is resubmitted.
-      lineage_cache_->RemoveWaitingTask(task_id);
-    //} else {
-    //  // The task is not for an actor and may therefore be placed on another
-    //  // node immediately. Send it to the scheduling policy to be placed again.
-    //  local_queues_.QueuePlaceableTasks({task});
-    //  ScheduleTasks();
-    //}
+    scheduling_buffer_.ClearDecision(task_id);
+    HandleTaskScheduleFailure(task, /*set_timeout=*/true);
   }
 }
 

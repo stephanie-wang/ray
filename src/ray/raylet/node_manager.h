@@ -161,6 +161,9 @@ class NodeManager {
   void _SubmitTask(const Task &task, const Lineage &uncommitted_lineage, bool forwarded);
   void FlushTask(const TaskID &task_id);
 
+  void RetryTasks();
+  void HandleTaskScheduleFailure(const Task &task, bool set_timeout);
+
   boost::asio::io_service &io_service_;
   ObjectManager &object_manager_;
   /// A Plasma object store client. This is used exclusively for creating new
@@ -206,6 +209,9 @@ class NodeManager {
   std::unordered_map<TaskID, std::list<std::pair<Task, bool>>::iterator> gcs_task_cache_;
   std::list<std::pair<Task, bool>> gcs_task_queue_;
   SchedulingBuffer scheduling_buffer_;
+  std::unordered_map<TaskID, std::list<std::pair<Task, bool>>::iterator> failed_tasks_;
+  std::list<std::pair<Task, bool>> failed_task_queue_;
+  bool retrying_tasks_;
 };
 
 }  // namespace raylet

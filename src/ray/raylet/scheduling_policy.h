@@ -22,6 +22,8 @@ class SchedulingPolicy {
   /// \return Void.
   SchedulingPolicy(const SchedulingQueue &scheduling_queue);
 
+  ClientID ScheduleInfeasibleTask(const std::vector<ClientID> &others);
+
   /// Perform a scheduling operation, given a set of cluster resources and
   /// producing a mapping of tasks to node managers.
   ///

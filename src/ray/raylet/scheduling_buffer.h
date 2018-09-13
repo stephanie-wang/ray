@@ -23,6 +23,10 @@ class SchedulingBuffer {
 
   bool AddPush(const ObjectID &object_id, const ClientID &client_id);
 
+  void ClearDecision(const TaskID &task_id);
+
+  ClientID GetDecision(const ObjectID &object_id) const;
+
   std::deque<std::pair<ObjectID, ClientID>> GetPushes(const ClientID &client_id);
 
  private:
