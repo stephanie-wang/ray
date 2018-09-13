@@ -155,7 +155,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_server_connections_(),
       actor_registry_(),
       gcs_delay_ms_(config.gcs_delay_ms),
-      scheduling_buffer_(10, 102) {
+      scheduling_buffer_(10, 1024) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -386,6 +386,7 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
   // TODO(swang): If we receive a notification for our own death, clean up and
   // exit immediately.
   const ClientID client_id = ClientID::from_binary(client_data.client_id);
+  RAY_LOG(INFO) << "Client removed " << client_id;
   //RAY_LOG(DEBUG) << "[ClientRemoved] received callback from client id " << client_id;
 
   RAY_CHECK(client_id != gcs_client_->client_table().GetLocalClientId())
@@ -910,7 +911,7 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
 void NodeManager::ScheduleTasks() {
   auto policy_decision = scheduling_policy_.Schedule(
       cluster_resource_map_, gcs_client_->client_table().GetLocalClientId(),
-      remote_clients_);
+      remote_clients_, scheduling_buffer_);
 #ifndef NDEBUG
   //RAY_LOG(DEBUG) << "[NM ScheduleTasks] policy decision:";
   for (const auto &pair : policy_decision) {
@@ -953,6 +954,12 @@ void NodeManager::ScheduleTasks() {
   // submission vs. registering remaining queued placeable tasks here.
   for (const auto &task : local_queues_.GetPlaceableTasks()) {
     task_dependency_manager_.TaskPending(task);
+  }
+
+  auto pushes = scheduling_buffer_.GetPushes(gcs_client_->client_table().GetLocalClientId());
+  for (const auto &push : pushes) {
+    RAY_LOG(INFO) << "Pushing object " << push.first << " from local client to client " << push.second;
+    object_manager_.Push(push.first, push.second);
   }
 }
 
@@ -1572,6 +1579,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   lineage_cache_entry_task.IncrementNumForwards();
 
   flatbuffers::FlatBufferBuilder fbb;
+  scheduling_buffer_.AddDecision(task, node_id);
   auto pushes = scheduling_buffer_.GetPushes(node_id);
   for (const auto &push : pushes) {
     RAY_LOG(INFO) << "Pushing object " << push.first << " from client " << node_id << " to client " << push.second;
@@ -1623,7 +1631,6 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // node will not have any missing lineage.
   lineage_cache_->MarkTaskAsForwarded(task_id, node_id);
 
-  scheduling_buffer_.AddDecision(task, node_id);
   if (task.GetTaskSpecification().IsActorTask()) {
     // Iterate through the object's arguments. NOTE(swang): We do not include
     // the execution dependencies here since those cannot be transferred

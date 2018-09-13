@@ -20,6 +20,8 @@ class SchedulingBuffer {
   /// this actor. This includes the actor's node manager location.
   SchedulingBuffer(size_t max_decision_buffer, size_t max_push_buffer);
 
+  ClientID GetDecision(const ObjectID &object_id) const;
+
   void AddDecision(const Task &task, const ClientID &client_id);
 
   std::vector<std::pair<ObjectID, ClientID>> GetPushes(const ClientID &client_id);
@@ -42,6 +44,8 @@ class SchedulingBuffer {
     }
   };
 
+  std::unordered_map<TaskID, ClientID> task_decision_buffer_;
+  std::deque<TaskID> task_decision_buffer_its_;
   std::unordered_map<ClientID, std::deque<TaskID>> decision_buffer_;
   std::unordered_map<ObjectID, std::vector<ClientID>> push_requests_;
   std::deque<ObjectID> push_request_its_;
