@@ -9,6 +9,8 @@ import redis
 import ujson
 import uuid
 import sys
+import subprocess
+import os
 
 import ray
 import ray.cloudpickle as pickle
@@ -641,6 +643,21 @@ class Reducer(object):
         print("foo latency:", time.time() - timestamp - 0.05 * 5)
 
 
+def kill_node(node):
+    print("Killing node", node)
+    command = [
+            "ssh",
+            "-i",
+            "/home/ubuntu/devenv-key.pem",
+            node,
+            "PATH=/home/ubuntu/anaconda3/bin/:$PATH",
+            "ray",
+            "stop",
+            ]
+    with open(os.devnull, 'w') as fnull:
+        subprocess.Popen(command, stdout=fnull, stderr=fnull)
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--dump', type=str, default=None)
@@ -662,6 +679,7 @@ if __name__ == '__main__':
     parser.add_argument('--reduce-redis-address', type=str, default=None)
     parser.add_argument('--output-filename', type=str, default="test")
     parser.add_argument('--use-json', action='store_true')
+    parser.add_argument('--node-failure', type=str, default=None)
     args = parser.parse_args()
 
     checkpoint = args.actor_checkpointing
@@ -772,13 +790,23 @@ if __name__ == '__main__':
             print("Measuring...")
             start_time = (time.time() // 1) + 1
             end_time = start_time + exp_time
+            failure_time = start_time + exp_time * 0.25
             # Sleep 5ms less to account for latency from driver creating the tasks.
             time.sleep(start_time - time.time() - 0.005)
 
             while time.time() < end_time:
                 loop_start = time.time()
+
                 submit_tasks_fn(gen_dep, num_reducer_nodes)
+
+                if args.node_failure is not None and time.time() > failure_time:
+                    kill_node(args.node_failure)
+                    # Set the half time equal to the end time so that we only
+                    # kill a node once.
+                    failure_time = end_time
+
                 loop_end = time.time()
+
                 time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
                 if time_to_sleep > 0:
                     time.sleep(time_to_sleep)
