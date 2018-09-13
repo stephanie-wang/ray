@@ -185,7 +185,7 @@ class Lineage {
   /// all task and object entries in the lineage.
   flatbuffers::Offset<protocol::ForwardTaskRequest> ToFlatbuffer(
       flatbuffers::FlatBufferBuilder &fbb, const TaskID &entry_id,
-      const std::deque<std::pair<ObjectID, ClientID>> &pushes) const;
+      const std::vector<std::pair<ObjectID, ClientID>> &pushes) const;
 
  private:
   /// The lineage entries.

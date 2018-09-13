@@ -155,7 +155,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_server_connections_(),
       actor_registry_(),
       gcs_delay_ms_(config.gcs_delay_ms),
-      scheduling_buffer_(8192, 1024) {
+      scheduling_buffer_(10, 102) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -928,7 +928,6 @@ void NodeManager::ScheduleTasks() {
     const ClientID client_id = task_schedule.second;
     if (client_id == gcs_client_->client_table().GetLocalClientId()) {
       local_task_ids.insert(task_id);
-      scheduling_buffer_.AddDecision(task_id, client_id);
     } else {
       // TODO(atumanov): need a better interface for task exit on forward.
       // (See design_docs/task_states.rst for the state transition diagram.)
@@ -943,6 +942,7 @@ void NodeManager::ScheduleTasks() {
   if (local_task_ids.size() > 0) {
     std::vector<Task> tasks = local_queues_.RemoveTasks(local_task_ids);
     for (const auto &t : tasks) {
+      scheduling_buffer_.AddDecision(t, gcs_client_->client_table().GetLocalClientId());
       EnqueuePlaceableTask(t);
     }
   }
@@ -1573,6 +1573,9 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
   flatbuffers::FlatBufferBuilder fbb;
   auto pushes = scheduling_buffer_.GetPushes(node_id);
+  for (const auto &push : pushes) {
+    RAY_LOG(INFO) << "Pushing object " << push.first << " from client " << node_id << " to client " << push.second;
+  }
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id, pushes);
   fbb.Finish(request);
   size_t size = fbb.GetSize();
@@ -1620,7 +1623,7 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   // node will not have any missing lineage.
   lineage_cache_->MarkTaskAsForwarded(task_id, node_id);
 
-  scheduling_buffer_.AddDecision(task_id, node_id);
+  scheduling_buffer_.AddDecision(task, node_id);
   if (task.GetTaskSpecification().IsActorTask()) {
     // Iterate through the object's arguments. NOTE(swang): We do not include
     // the execution dependencies here since those cannot be transferred
@@ -1632,10 +1635,6 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
         // If the argument is local, then push it to the receiving node.
         if (task_dependency_manager_.CheckObjectLocal(argument_id)) {
           object_manager_.Push(argument_id, node_id);
-        } else {
-          // Record that this object should be pushed to the node where
-          // the task was forwarded.
-          scheduling_buffer_.AddPush(argument_id, node_id);
         }
       }
     }
