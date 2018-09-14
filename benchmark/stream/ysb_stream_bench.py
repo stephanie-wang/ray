@@ -644,7 +644,7 @@ class Reducer(object):
 
 
 def kill_node(node):
-    print("Killing node", node)
+    print("Killing node", node, "at", time.time())
     command = [
             "ssh",
             "-i",
