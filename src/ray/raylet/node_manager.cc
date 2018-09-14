@@ -1478,6 +1478,17 @@ void NodeManager::ResubmitTask(const Task &task) {
   RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId()
       << " for actor " << task.GetTaskSpecification().ActorId() << " counter "
       << task.GetTaskSpecification().ActorCounter() << " at " << current_sys_time_ms();
+
+  for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
+    int count = task.GetTaskSpecification().ArgIdCount(i);
+    for (int j = 0; j < count; j++) {
+      ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
+      RAY_LOG(INFO) << "Task " << task.GetTaskSpecification().TaskId()
+          << " depends on " << argument_id;
+
+    }
+  }
+
   if (!task.GetTaskSpecification().ReconstructionEnabled()) {
     TreatTaskAsFailed(task.GetTaskSpecification());
 
@@ -1517,6 +1528,7 @@ void NodeManager::ResubmitTask(const Task &task) {
 }
 
 void NodeManager::HandleObjectLocal(const ObjectID &object_id) {
+  RAY_LOG(INFO) << "Object local " << object_id << " at " << current_sys_time_ms();
   // Notify the task dependency manager that this object is local.
   const auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(object_id);
   // Transition the tasks whose dependencies are now fulfilled to the ready state.
