@@ -3,6 +3,7 @@ from __future__ import division
 from __future__ import print_function
 
 import atexit
+import boto3
 import collections
 import colorama
 import hashlib
@@ -39,6 +40,9 @@ from ray.utils import (
     random_string,
     thread_safe_client,
 )
+
+S3_BUCKET_NAME = "actor-checkpoints"
+S3_CHECKPOINTING = True
 
 SCRIPT_MODE = 0
 WORKER_MODE = 1
@@ -249,6 +253,24 @@ class Worker(object):
         self.serialization_context_map = {}
         # Identity of the driver that this worker is processing.
         self.task_driver_id = None
+
+        if S3_CHECKPOINTING:
+            self.S3_CLIENT = boto3.client('s3')
+            self.S3_CLIENT.put_object(
+                    Bucket=S3_BUCKET_NAME,
+                    Key=ray.utils.binary_to_hex(ray.utils.random_string()),
+                    Body="worker")
+            ## The below lines are only necessary if the bucket has
+            ## never been created before.
+            #try:
+            #    self.S3_CLIENT.create_bucket(
+            #            ACL="private",
+            #            Bucket=self.S3_BUCKET_NAME,
+            #            CreateBucketConfiguration={
+            #                "LocationConstraint": "us-west-2",
+            #                })
+            #except:
+            #    pass
 
     def get_serialization_context(self, driver_id):
         """Get the SerializationContext of the driver that this worker is processing.

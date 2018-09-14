@@ -20,9 +20,7 @@ from ray.utils import (
     is_cython,
     push_error_to_driver,
 )
-import boto3
 
-S3_CHECKPOINTING = True
 DEFAULT_ACTOR_METHOD_NUM_RETURN_VALS = 1
 
 
@@ -1018,24 +1016,6 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
     # Modify the class to have an additional method that will be used for
     # terminating the worker.
     class Class(cls):
-        S3_BUCKET_NAME = "actor-checkpoints"
-
-        def __ray_init_s3_client__(self):
-            if S3_CHECKPOINTING:
-                if getattr(self, "S3_CLIENT", None) is None:
-                    with ray.profile("init_s3_client"):
-                        self.S3_CLIENT = boto3.client('s3')
-                        ## The below lines are only necessary if the bucket has
-                        ## never been created before.
-                        #try:
-                        #    self.S3_CLIENT.create_bucket(
-                        #            ACL="private",
-                        #            Bucket=self.S3_BUCKET_NAME,
-                        #            CreateBucketConfiguration={
-                        #                "LocationConstraint": "us-west-2",
-                        #                })
-                        #except:
-                        #    pass
 
         def __ray_terminate__(self):
             worker = ray.worker.get_global_worker()
@@ -1074,7 +1054,6 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             frontier according to the local scheduler, and the checkpoint index
             (number of tasks executed so far).
             """
-            self.__ray_init_s3_client__()
             worker = ray.worker.global_worker
             checkpoint_index = worker.actor_task_counter
             # Get the state to save.
@@ -1087,10 +1066,10 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             actor_id = ray.ObjectID(worker.actor_id)
             frontier = worker.local_scheduler_client.get_actor_frontier(
                 actor_id)
-            if S3_CHECKPOINTING:
+            if ray.worker.S3_CHECKPOINTING:
                 checkpoint_key = "{}/{}".format(actor_id.hex(), checkpoint_index)
-                self.S3_CLIENT.put_object(
-                        Bucket=self.S3_BUCKET_NAME,
+                ray.worker.global_worker.S3_CLIENT.put_object(
+                        Bucket=ray.worker.S3_BUCKET_NAME,
                         Key=checkpoint_key,
                         Body=checkpoint)
                 checkpoint = checkpoint_key
@@ -1109,8 +1088,6 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             Returns:
                 A bool indicating whether a checkpoint was resumed.
             """
-            self.__ray_init_s3_client__()
-
             worker = ray.worker.global_worker
             # Get the most recent checkpoint stored, if any.
             checkpoint_index, checkpoint, frontier = get_actor_checkpoint(
@@ -1118,9 +1095,9 @@ def make_actor(cls, num_cpus, num_gpus, resources, actor_method_cpus,
             # Try to resume from the checkpoint.
             checkpoint_resumed = False
             if checkpoint_index is not None:
-                if S3_CHECKPOINTING:
-                    checkpoint = self.S3_CLIENT.get_object(
-                            Bucket=self.S3_BUCKET_NAME,
+                if ray.worker.S3_CHECKPOINTING:
+                    checkpoint = ray.worker.global_worker.S3_CLIENT.get_object(
+                            Bucket=ray.worker.S3_BUCKET_NAME,
                             Key=checkpoint.decode('ascii'))['Body'].read()
                 # Load the actor state from the checkpoint.
                 worker.actors[worker.actor_id] = (
