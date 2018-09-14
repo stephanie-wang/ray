@@ -386,7 +386,7 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
   // TODO(swang): If we receive a notification for our own death, clean up and
   // exit immediately.
   const ClientID client_id = ClientID::from_binary(client_data.client_id);
-  RAY_LOG(INFO) << "Client removed " << client_id;
+  RAY_LOG(INFO) << "Client removed " << client_id << " at " << current_sys_time_ms();
   //RAY_LOG(DEBUG) << "[ClientRemoved] received callback from client id " << client_id;
 
   RAY_CHECK(client_id != gcs_client_->client_table().GetLocalClientId())
@@ -874,7 +874,7 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     int64_t interval = current_sys_time_ms() - task.GetTaskExecutionSpec().LastTimestamp();
     if (interval > 100) {
       RAY_LOG(WARNING) << "HANDLER: ForwardTask receive took " << interval << "ms"
-                       << " for " << uncommitted_lineage.GetEntries().size() << " tasks";
+                       << " for " << " task " << task_id << " with " << uncommitted_lineage.GetEntries().size() << " tasks";
     }
     LogHandlerDelay(start, "ForwardTaskRequest1", task.GetTaskSpecification().TaskId(), task.GetTaskSpecification().ActorId());
     //RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
