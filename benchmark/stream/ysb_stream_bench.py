@@ -26,6 +26,7 @@ log.setLevel(logging.INFO)
 BATCH = True
 USE_OBJECTS = True
 SEPARATE_REDUCERS = True
+CHECKPOINT_INTERVAL = 1  # Take a checkpoint every second.
 
 CAMPAIGN_TO_PARTITION = {}
 
@@ -129,8 +130,9 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes):
     generated = []
     for i in range(start_index, num_nodes):
         for _ in range(num_generators_per_node):
+            timestamp = (str(time.time())).encode('ascii')[:16]
             generated.append(generate._submit(
-                args=[gen_dep, time_slice_num_events],
+                args=[gen_dep, timestamp, time_slice_num_events],
                 resources={node_resources[i]: 1},
                 batch=BATCH))
     if BATCH:
@@ -184,8 +186,9 @@ def submit_tasks(gen_dep, num_reducer_nodes):
     generated = []
     for i in range(start_index, num_nodes):
         for _ in range(num_generators_per_node):
+            timestamp = (str(time.time())).encode('ascii')[:16]
             generated.append(generate._submit(
-                args=[gen_dep, time_slice_num_events],
+                args=[gen_dep, timestamp, time_slice_num_events],
                 resources={node_resources[i]: 1},
                 batch=BATCH))
     if BATCH:
@@ -396,7 +399,7 @@ def init_reducer(node_index, node_resources, checkpoint, args=None):
     if checkpoint:
         actor = ray.remote(
 		num_cpus=0,
-                checkpoint_interval=int(WINDOW_SIZE_SEC / BATCH_SIZE_SEC),
+                checkpoint_interval=int(CHECKPOINT_INTERVAL / BATCH_SIZE_SEC),
                 resources={ node_resources[node_index]: 1, })(Reducer).remote(*args)
     else:
         actor = ray.remote(
@@ -558,7 +561,8 @@ class Reducer(object):
         self.__init__(checkpoint["reduce_index"],
                       checkpoint.get("redis_address", None),
                       checkpoint.get("redis_port", None))
-        self.seen = checkpoint["seen"]
+        for key, value in checkpoint["seen"]:
+            self.seen[key] = value
         self.count = checkpoint["count"]
 
     def seen(self):
@@ -792,7 +796,7 @@ if __name__ == '__main__':
             end_time = start_time + exp_time
             failure_time = start_time + exp_time * 0.25
             # Sleep 5ms less to account for latency from driver creating the tasks.
-            time.sleep(start_time - time.time() - 0.005)
+            time.sleep(start_time - time.time())
 
             while time.time() < end_time:
                 loop_start = time.time()
