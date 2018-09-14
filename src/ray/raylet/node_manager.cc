@@ -155,7 +155,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_server_connections_(),
       actor_registry_(),
       gcs_delay_ms_(config.gcs_delay_ms),
-      scheduling_buffer_(10, 1024) {
+      scheduling_buffer_(100, 1024) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -469,6 +469,7 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     // actor was resumed from a checkpoint.
     if (inserted.first->second.GetNodeManagerId() != actor_registration.GetNodeManagerId()) {
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
+      scheduling_buffer_.UpdateActorPushes(actor_id, actor_registration.GetNodeManagerId());
     }
   }
 

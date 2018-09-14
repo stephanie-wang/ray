@@ -22,7 +22,11 @@ class SchedulingBuffer {
 
   ClientID GetDecision(const ObjectID &object_id) const;
 
+  void AddPush(const ObjectID &argument_id, const ClientID &client_id);
+
   void AddDecision(const Task &task, const ClientID &client_id);
+
+  void UpdateActorPushes(const ActorID &actor_id, const ClientID &client_id);
 
   std::vector<std::pair<ObjectID, ClientID>> GetPushes(const ClientID &client_id);
 
@@ -49,6 +53,7 @@ class SchedulingBuffer {
   std::unordered_map<ClientID, std::deque<TaskID>> decision_buffer_;
   std::unordered_map<ObjectID, std::vector<ClientID>> push_requests_;
   std::deque<ObjectID> push_request_its_;
+  std::unordered_map<ActorID, std::deque<ObjectID>> actor_push_requests_;
   std::unordered_set<PushRequest, push_hash> previous_pushes_;
   std::deque<PushRequest> previous_push_its_;
 
