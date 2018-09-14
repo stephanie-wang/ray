@@ -1478,15 +1478,9 @@ void NodeManager::ResubmitTask(const Task &task) {
   RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId()
       << " for actor " << task.GetTaskSpecification().ActorId() << " counter "
       << task.GetTaskSpecification().ActorCounter() << " at " << current_sys_time_ms();
-
-  for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
-    int count = task.GetTaskSpecification().ArgIdCount(i);
-    for (int j = 0; j < count; j++) {
-      ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
-      RAY_LOG(INFO) << "Task " << task.GetTaskSpecification().TaskId()
-          << " depends on " << argument_id;
-
-    }
+  for (const auto &argument_id : task.GetDependencies()) {
+    RAY_LOG(INFO) << "Task " << task.GetTaskSpecification().TaskId()
+        << " depends on " << argument_id;
   }
 
   if (!task.GetTaskSpecification().ReconstructionEnabled()) {
@@ -1531,6 +1525,9 @@ void NodeManager::HandleObjectLocal(const ObjectID &object_id) {
   RAY_LOG(INFO) << "Object local " << object_id << " at " << current_sys_time_ms();
   // Notify the task dependency manager that this object is local.
   const auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(object_id);
+  for (const auto &id : ready_task_ids) {
+    RAY_LOG(INFO) << "Task now ready " << id << " at " << current_sys_time_ms();
+  }
   // Transition the tasks whose dependencies are now fulfilled to the ready state.
   if (ready_task_ids.size() > 0) {
     std::unordered_set<TaskID> ready_task_id_set(ready_task_ids.begin(),
@@ -1737,7 +1734,7 @@ void GetDuplicateActorTasksFromList(
 void NodeManager::SetActorFrontier(const protocol::ActorFrontier &frontier_data) {
   // Parse the frontier data.
   const ActorID actor_id = from_flatbuf(*frontier_data.actor_id());
-  RAY_LOG(INFO) << "Setting actor frontier for " << actor_id;
+  RAY_LOG(INFO) << "Setting actor frontier for " << actor_id << " at " << current_sys_time_ms();
   std::unordered_map<ActorHandleID, ActorRegistration::FrontierLeaf> frontier;
   for (size_t i = 0; i < frontier_data.handle_ids()->size(); ++i) {
     ActorID handle_id = from_flatbuf(*frontier_data.handle_ids()->Get(i));
