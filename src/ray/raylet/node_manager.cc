@@ -1437,8 +1437,8 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
 }
 
 void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t reconstruction_attempt) {
-  RAY_LOG(INFO) << "Reconstructing task " << task_id << " on client "
-                << gcs_client_->client_table().GetLocalClientId();
+  //RAY_LOG(INFO) << "Reconstructing task " << task_id << " on client "
+  //              << gcs_client_->client_table().GetLocalClientId();
   // Retrieve the task spec in order to re-execute the task.
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id,
@@ -1475,7 +1475,9 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id, int64_t recons
 }
 
 void NodeManager::ResubmitTask(const Task &task) {
-  RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId() << " for actor " << task.GetTaskSpecification().ActorId() << " counter " << task.GetTaskSpecification().ActorCounter();
+  RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId()
+      << " for actor " << task.GetTaskSpecification().ActorId() << " counter "
+      << task.GetTaskSpecification().ActorCounter() << " at " << current_sys_time_ms();
   if (!task.GetTaskSpecification().ReconstructionEnabled()) {
     TreatTaskAsFailed(task.GetTaskSpecification());
 

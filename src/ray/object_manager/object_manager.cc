@@ -250,7 +250,7 @@ void ObjectManager::TryPull(const ObjectID &object_id) {
 
 bool ObjectManager::PullEstablishConnection(const ObjectID &object_id,
                                             const ClientID &client_id) {
-  //RAY_LOG(INFO) << "Sending pull request " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Sending pull request " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   // Acquire a message connection and send pull request.
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
