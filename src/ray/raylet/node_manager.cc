@@ -1091,7 +1091,7 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
             TreatTaskAsFailed(spec);
           } else {
             // Queue the task for local execution, bypassing placement.
-            EnqueuePlaceableTask(task);
+            EnqueuePlaceableTask(task, actor_entry->second.NumReconstructions() > 0);
           }
         }
       } else {
@@ -1103,7 +1103,7 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
           if (spec.ReconstructionEnabled()) {
             ObjectID actor_creation_object = spec.ActorCreationDummyObjectId();
             reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object,
-                                                             false);
+                                                             true);
             local_queues_.QueueMethodsWaitingForActorCreation({task});
             task_dependency_manager_.TaskPending(task);
           } else {
@@ -1234,7 +1234,7 @@ void NodeManager::HandleWorkerUnblocked(std::shared_ptr<Worker> worker) {
   worker->MarkUnblocked();
 }
 
-void NodeManager::EnqueuePlaceableTask(const Task &task) {
+void NodeManager::EnqueuePlaceableTask(const Task &task, bool fast_reconstruction) {
   uint64_t start = current_time_ms();
   // We started running the task, so the task is ready to write to GCS.
   if (!lineage_cache_->AddReadyTask(task)) {
@@ -1249,7 +1249,7 @@ void NodeManager::EnqueuePlaceableTask(const Task &task) {
   // TODO(atumanov): add task lookup hashmap and change EnqueuePlaceableTask to take
   // a vector of TaskIDs. Trigger MoveTask internally.
   // Subscribe to the task's dependencies.
-  bool fast_reconstruction = (task.GetTaskExecutionSpec().NumExecutions() > 0);
+  fast_reconstruction = fast_reconstruction || (task.GetTaskExecutionSpec().NumExecutions() > 0);
   bool args_ready = task_dependency_manager_.SubscribeDependencies(
       task.GetTaskSpecification().TaskId(), task.GetDependencies(), fast_reconstruction);
   // Enqueue the task. If all dependencies are available, then the task is queued

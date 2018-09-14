@@ -87,10 +87,15 @@ class ActorRegistration {
   /// \return Void.
   void MarkDead();
 
+  size_t NumReconstructions() const {
+    return num_reconstructions_;
+  }
+
   void ResetNodeManagerId(const ClientID &node_manager_id) {
     // TODO(swang): What should the execution_dependency_ be set to?
     alive_ = true;
     actor_table_data_.node_manager_id = node_manager_id.binary();
+    num_reconstructions_++;
   }
 
  private:
@@ -107,6 +112,7 @@ class ActorRegistration {
   /// executed so far and which tasks may execute next, based on execution
   /// dependencies. This is indexed by handle.
   std::unordered_map<ActorHandleID, FrontierLeaf> frontier_;
+  size_t num_reconstructions_;
 };
 
 }  // namespace raylet

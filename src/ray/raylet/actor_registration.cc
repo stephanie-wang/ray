@@ -10,7 +10,8 @@ ActorRegistration::ActorRegistration(const ActorTableDataT &actor_table_data)
     : actor_table_data_(actor_table_data),
       alive_(true),
       execution_dependency_(ObjectID::nil()),
-      frontier_() {}
+      frontier_(),
+      num_reconstructions_(0) {}
 
 const ClientID ActorRegistration::GetNodeManagerId() const {
   return ClientID::from_binary(actor_table_data_.node_manager_id);
