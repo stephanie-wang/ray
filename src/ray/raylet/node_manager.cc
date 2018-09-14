@@ -1699,8 +1699,8 @@ void NodeManager::HandleTaskForwarded(const ray::Status &status, const Task &tas
       // unique_ptr instead of a shared_ptr. However, it's a little harder to
       // move unique_ptrs into lambdas.
       auto retry_timer = std::make_shared<boost::asio::deadline_timer>(io_service_);
-      auto retry_duration = boost::posix_time::milliseconds(
-          RayConfig::instance().node_manager_forward_task_retry_timeout_milliseconds());
+      auto retry_duration = boost::posix_time::milliseconds(100);
+          //RayConfig::instance().node_manager_forward_task_retry_timeout_milliseconds());
       retry_timer->expires_from_now(retry_duration);
       retry_timer->async_wait(
           [this, task, task_id, retry_timer](const boost::system::error_code &error) {
