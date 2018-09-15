@@ -71,8 +71,33 @@ void SchedulingBuffer::AddDecision(const Task &task, const ClientID &client_id) 
   }
 } 
 
-std::deque<ObjectID> SchedulingBuffer::GetActorPushes(const ActorID &actor_id) {
-  return actor_push_requests_[actor_id];
+std::vector<ObjectID> SchedulingBuffer::GetActorPushes(const ActorID &actor_id, const ClientID &local_node_id, const ClientID &push_to_client_id) {
+  std::vector<ObjectID> pushes;
+  for (const auto object_id : actor_push_requests_[actor_id]) {
+    auto push = RecordPush(local_node_id, object_id, push_to_client_id);
+    if (push) {
+      pushes.push_back(object_id);
+    }
+  }
+  return pushes;
+}
+
+bool SchedulingBuffer::RecordPush(const ObjectID object_id, const ClientID from_client_id, const ClientID &to_client_id) {
+  PushRequest push;
+  push.push_from_client_id = from_client_id;
+  push.object_id = object_id;
+  push.push_to_client_id = to_client_id;
+  auto inserted = previous_pushes_.insert(push);
+  if (inserted.second) {
+    previous_push_its_.push_back(push);
+    if (previous_pushes_.size() > max_push_buffer_) {
+      previous_pushes_.erase(previous_push_its_.front());
+      previous_push_its_.pop_front();
+    }
+    return true;
+  } else {
+    return false;
+  }
 }
 
 std::pair<std::vector<std::pair<ObjectID, ClientID>>,
@@ -88,20 +113,10 @@ std::pair<std::vector<std::pair<ObjectID, ClientID>>,
         if (push_request.first == client_id) {
           continue;
         }
-        PushRequest push;
-        push.push_from_client_id = client_id;
-        push.object_id = return_id;
-        push.push_to_client_id = push_request.first;
-        auto inserted = previous_pushes_.insert(push);
-        if (inserted.second) {
-          pushes.push_back({push.object_id, push.push_to_client_id});
+        auto push = RecordPush(return_id, client_id, push_request.first);
+        if (push) {
+          pushes.push_back({return_id, push_request.first});
           actor_ids.insert(push_request.second);
-
-          previous_push_its_.push_back(push);
-          if (previous_pushes_.size() > max_push_buffer_) {
-            previous_pushes_.erase(previous_push_its_.front());
-            previous_push_its_.pop_front();
-          }
         }
       }
     }

@@ -26,7 +26,7 @@ class SchedulingBuffer {
 
   void RecordActorPush(const ActorID &actor_id, const ObjectID &object_id);
 
-  std::deque<ObjectID> GetActorPushes(const ActorID &actor_id);
+  std::vector<ObjectID> GetActorPushes(const ActorID &actor_id, const ClientID &local_node_id, const ClientID &push_to_client_id);
 
   void AddDecision(const Task &task, const ClientID &client_id);
 
@@ -51,6 +51,8 @@ class SchedulingBuffer {
       return v.push_from_client_id.hash() + v.object_id.hash() + v.push_to_client_id.hash();
     }
   };
+
+  bool RecordPush(const ObjectID object_id, const ClientID from_client_id, const ClientID &to_client_id);
 
   std::unordered_map<TaskID, ClientID> task_decision_buffer_;
   std::deque<TaskID> task_decision_buffer_its_;

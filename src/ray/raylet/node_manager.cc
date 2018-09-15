@@ -470,7 +470,7 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     if (inserted.first->second.GetNodeManagerId() != actor_registration.GetNodeManagerId()) {
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
       if (actor_registration.GetNodeManagerId() != gcs_client_->client_table().GetLocalClientId()) {
-        auto pushes = scheduling_buffer_.GetActorPushes(actor_id);
+        auto pushes = scheduling_buffer_.GetActorPushes(actor_id, gcs_client_->client_table().GetLocalClientId(), actor_registration.GetNodeManagerId());
         for (const auto &object_id : pushes) {
           RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
           object_manager_.Push(object_id, actor_registration.GetNodeManagerId());
