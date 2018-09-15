@@ -104,7 +104,7 @@ void ObjectManager::HandleObjectAdded(const ObjectInfoT &object_info) {
   // Handle the unfulfilled_push_requests_ which contains the push request that is not
   // completed due to unsatisfied local objects.
   auto iter = unfulfilled_push_requests_.find(object_id);
-  //RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
   if (iter != unfulfilled_push_requests_.end()) {
     for (auto &pair : iter->second) {
       auto &client_id = pair.first;
@@ -389,7 +389,7 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
                                       uint64_t start) {
   RAY_LOG(DEBUG) << "ExecuteSendObject " << client_id << " " << object_id << " "
                  << chunk_index;
-  //RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", starting after " << current_sys_time_ms() - start;
+  RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", starting after " << current_sys_time_ms() - start;
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
   connection_pool_.GetSender(ConnectionPool::ConnectionType::TRANSFER, client_id, &conn);
