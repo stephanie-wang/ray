@@ -3,10 +3,12 @@ NUM_REDIS_SHARDS=${2:-1}
 NUM_REDUCERS=${3:-$NUM_RAYLETS}
 EXPERIMENT_TIME=${4:-60}
 GCS_DELAY_MS=${5:--1}
-USE_REDIS=${6:-0}
-KILL_MAPPER=${7:-0}
+KILL_MAPPER=${6:-0}
+WINDOW_SIZE=${7:-10}
 USE_JSON=${8:-""}
+OUTPUT_FILENAME=${9:-""}
 
+USE_REDIS=1
 THROUGHPUT=150000
 
 LINEAGE_POLICY=1
@@ -17,7 +19,7 @@ HEAD_IP=$(head -n 1 workers.txt)
 OUTPUT_FILENAME="$NUM_RAYLETS-nodes-$NUM_REDIS_SHARDS-shards-$NUM_REDUCERS-reducers-100-timeslice-$GCS_DELAY_MS-gcs-$EXPERIMENT_TIME-s"
 
 JSON_ARG=""
-if [ ! -z $USE_JSON ]
+if [ $USE_JSON -eq 1 ]
 then
     JSON_ARG="--use-json"
     OUTPUT_FILENAME="$OUTPUT_FILENAME-json"
@@ -37,7 +39,7 @@ else
 fi
 echo "this job will kill a $DEAD_NODE_TYPE node, $DEAD_NODE"
 
-if [ $# -gt 8 ] || [ $# -eq 0 ]
+if [ $# -gt 9 ] || [ $# -eq 0 ]
 then
     echo "Usage: ./run_jobs.sh <num raylets> <num shards> <num reducers> <experiment time> <gcs delay> <use json> <kill mapper>"
     exit
@@ -56,7 +58,7 @@ echo "Starting job..."
 DUMP_ARG=""
 if [ $EXPERIMENT_TIME -le 60 ]
 then
-    DUMP_ARG="--dump dump.json"
+    DUMP_ARG="--dump $OUTPUT_FILENAME.json"
 fi
 
 REDIS_ADDRESS=""
@@ -80,4 +82,4 @@ then
 fi
 
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE --window-size $WINDOW_SIZE

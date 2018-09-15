@@ -121,7 +121,7 @@ def reduce_warmup(timestamp, *args):
     else:
         return [timestamp]
 
-def submit_tasks_no_json(gen_dep, num_reducer_nodes):
+def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
     if SEPARATE_REDUCERS:
         start_index = num_reducer_nodes
     else:
@@ -163,7 +163,7 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes):
         for _ in range(num_projectors_per_node):
             batches = filtered[start_idx : start_idx + num_filter_in]
             shuffled.append(project_shuffle_no_json._submit(
-                args=[num_projector_out] + batches,
+                args=[num_projector_out, window_size] + batches,
                 num_return_vals=num_return_vals,
                 resources={node_resources[i] : 1},
                 batch=BATCH))
@@ -177,7 +177,7 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes):
     else:
         [reducer.reduce.remote(*shuffled) for reducer in reducers]
 
-def submit_tasks(gen_dep, num_reducer_nodes):
+def submit_tasks(gen_dep, num_reducer_nodes, window_size):
     if SEPARATE_REDUCERS:
         start_index = num_reducer_nodes
     else:
@@ -232,7 +232,7 @@ def submit_tasks(gen_dep, num_reducer_nodes):
         for _ in range(num_projectors_per_node):
             batches = filtered[start_idx : start_idx + num_projector_in]
             shuffled.append(project_shuffle._submit(
-                args=[num_projector_out] + batches,
+                args=[num_projector_out, window_size] + batches,
                 num_return_vals=num_return_vals,
                 resources={node_resources[i] : 1},
                 batch=BATCH))
@@ -269,6 +269,7 @@ def collect_redis_stats(redis_address, redis_port, campaign_ids=None):
            counts[window] += seen
            latencies.append((window, time_updated - window))
     counts = sorted(counts.items(), key=lambda key: key[0])
+    latencies = sorted(latencies, key=lambda key: key[0])
     print("Average latency:", np.mean([latency[1] for latency in latencies]))
     return latencies, counts
 
@@ -384,8 +385,8 @@ def generate_id():
     return str(uuid.uuid4()).encode('ascii')
 
 # Take the ceiling of a timestamp to the end of the window.
-def ts_to_window(timestamp):
-    return ((float(timestamp) // WINDOW_SIZE_SEC) + 1) * WINDOW_SIZE_SEC
+def ts_to_window(timestamp, window_size):
+    return ((float(timestamp) // window_size) + 1) * window_size
 
 def flatten(x):
     if isinstance(x, Iterable):
@@ -446,10 +447,10 @@ def get_field(record, field):
     start, end = INDICES[field]
     return record[start:end].tobytes().decode('ascii')
 
-def project_shuffle_no_json(num_reducers, *batches):
+def project_shuffle_no_json(num_reducers, window_size, *batches):
     shuffled = [defaultdict(int) for _ in range(num_reducers)]
     for batch in batches:
-        window = ts_to_window(float(get_field(batch[0], EVENT_TIME)))
+        window = ts_to_window(float(get_field(batch[0], EVENT_TIME)), window_size)
         for e in batch:
             ad_id = get_field(e, AD_ID).encode('ascii')
             cid = AD_TO_CAMPAIGN_MAP[ad_id]
@@ -489,7 +490,7 @@ def filter(num_ret_vals, *batches):
         filtered = filtered_batches[0]
     return filtered if num_ret_vals == 1 else tuple(np.array_split(filtered, num_ret_vals))
 
-def project_shuffle(num_reducers, *batches):
+def project_shuffle(num_reducers, window_size, *batches):
     """
     Project: e -> (campaign_id, window)
     Count by: (campaign_id, window)
@@ -497,7 +498,7 @@ def project_shuffle(num_reducers, *batches):
     """
     shuffled = [defaultdict(int) for _ in range(num_reducers)]
     for batch in batches:
-        window = ts_to_window(batch[0][EVENT_TIME])
+        window = ts_to_window(batch[0][EVENT_TIME], window_size)
         for e in batch:
             cid = AD_TO_CAMPAIGN_MAP[e[AD_ID].encode('ascii')]
             partition = CAMPAIGN_TO_PARTITION[cid]
@@ -683,6 +684,7 @@ if __name__ == '__main__':
     parser.add_argument('--output-filename', type=str, default="test")
     parser.add_argument('--use-json', action='store_true')
     parser.add_argument('--node-failure', type=str, default=None)
+    parser.add_argument('--window-size', type=float, default=10)
     args = parser.parse_args()
 
     checkpoint = args.actor_checkpointing
@@ -782,7 +784,7 @@ if __name__ == '__main__':
             time.sleep(10)
             for i in range(10):
                 round_start = time.time()
-                submit_tasks_fn(gen_dep, num_reducer_nodes)
+                submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -801,7 +803,7 @@ if __name__ == '__main__':
             while time.time() < end_time:
                 loop_start = time.time()
 
-                submit_tasks_fn(gen_dep, num_reducer_nodes)
+                submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
 
                 if args.node_failure is not None and time.time() > failure_time:
                     kill_node(args.node_failure)
@@ -830,8 +832,8 @@ if __name__ == '__main__':
                 print("Dumping...")
                 ray.global_state.chrome_tracing_dump(filename=args.dump)
 
-            print("Computing checkpoint overhead...")
-            compute_checkpoint_overhead()
+            #print("Computing checkpoint overhead...")
+            #compute_checkpoint_overhead()
 
         except KeyboardInterrupt:
             print("Dumping current state...")
