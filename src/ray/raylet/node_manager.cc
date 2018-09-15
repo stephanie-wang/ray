@@ -469,10 +469,12 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     // actor was resumed from a checkpoint.
     if (inserted.first->second.GetNodeManagerId() != actor_registration.GetNodeManagerId()) {
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
-      auto pushes = scheduling_buffer_.GetActorPushes(actor_id);
-      for (const auto &object_id : pushes) {
-        RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
-        object_manager_.Push(object_id, actor_registration.GetNodeManagerId());
+      if (actor_registration.GetNodeManagerId() != gcs_client_->client_table().GetLocalClientId()) {
+        auto pushes = scheduling_buffer_.GetActorPushes(actor_id);
+        for (const auto &object_id : pushes) {
+          RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
+          object_manager_.Push(object_id, actor_registration.GetNodeManagerId());
+        }
       }
     }
   }

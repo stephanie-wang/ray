@@ -322,7 +322,7 @@ void ObjectManager::HandlePushTaskTimeout(const ObjectID &object_id,
 }
 
 void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
-  //RAY_LOG(INFO) << "Object push requested " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Object push requested " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   if (local_objects_.count(object_id) == 0) {
     // Avoid setting duplicated timer for the same object and client pair.
     auto &clients = unfulfilled_push_requests_[object_id];
@@ -366,7 +366,7 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
         uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
         uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
         for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
-          //RAY_LOG(INFO) << "Pushing object " << object_id << " of size " << data_size << " to " << client_id << " at " << current_sys_time_ms();
+          RAY_LOG(INFO) << "Pushing object " << object_id << " of size " << data_size << " to " << client_id << " at " << current_sys_time_ms();
           uint64_t start = current_sys_time_ms();
           send_service_.post([this, client_id, object_id, data_size, metadata_size,
                               chunk_index, info, start]() {
