@@ -405,14 +405,6 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
 
   // Remove the remote server connection.
   remote_server_connections_.erase(client_id);
-
-  for (const auto &actor_entry : actor_registry_) {
-    if (actor_entry.second.GetNodeManagerId() == client_id) {
-      ObjectID actor_creation_object = actor_entry.second.GetActorCreationDependency();
-      reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object,
-                                                       true);
-    }
-  }
 }
 
 void NodeManager::HeartbeatAdded(gcs::AsyncGcsClient *client, const ClientID &client_id,
@@ -1112,7 +1104,7 @@ void NodeManager::_SubmitTask(const Task &task, const Lineage &uncommitted_linea
           if (spec.ReconstructionEnabled()) {
             ObjectID actor_creation_object = spec.ActorCreationDummyObjectId();
             reconstruction_policy_.ListenAndMaybeReconstruct(actor_creation_object,
-                                                             false);
+                                                             true);
             local_queues_.QueueMethodsWaitingForActorCreation({task});
             task_dependency_manager_.TaskPending(task);
           } else {
