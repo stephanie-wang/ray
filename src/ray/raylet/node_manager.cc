@@ -469,7 +469,10 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     // actor was resumed from a checkpoint.
     if (inserted.first->second.GetNodeManagerId() != actor_registration.GetNodeManagerId()) {
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
-      scheduling_buffer_.UpdateActorPushes(actor_id, actor_registration.GetNodeManagerId());
+      auto pushes = scheduling_buffer_.GetActorPushes(actor_id);
+      for (const auto &object_id : pushes) {
+        object_manager_.Push(object_id, actor_registration.GetNodeManagerId());
+      }
     }
   }
 
@@ -891,6 +894,10 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
       auto inserted = pushes[client_id].insert(object_id);
       if (inserted.second) {
         object_manager_.Push(object_id, client_id);
+        for (size_t j = 0; j < message->push_actors()->size(); ++j) {
+          ActorID actor_id = from_flatbuf(*message->push_actors()->Get(j));
+          scheduling_buffer_.RecordActorPush(actor_id, object_id);
+        }
       }
     }
   } break;
@@ -958,7 +965,7 @@ void NodeManager::ScheduleTasks() {
   }
 
   auto pushes = scheduling_buffer_.GetPushes(gcs_client_->client_table().GetLocalClientId());
-  for (const auto &push : pushes) {
+  for (const auto &push : pushes.first) {
     //RAY_LOG(INFO) << "Pushing object " << push.first << " from local client to client " << push.second;
     object_manager_.Push(push.first, push.second);
   }
@@ -1589,7 +1596,10 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   flatbuffers::FlatBufferBuilder fbb;
   scheduling_buffer_.AddDecision(task, node_id);
   auto pushes = scheduling_buffer_.GetPushes(node_id);
-  auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id, pushes);
+  for (const auto &push : pushes.first) {
+    RAY_LOG(INFO) << "Pushing object " << push.first << " from client " << node_id << " to client " << push.second;
+  }
+  auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id, pushes.first, pushes.second);
   fbb.Finish(request);
   size_t size = fbb.GetSize();
   size_t num_entries = uncommitted_lineage.GetEntries().size();

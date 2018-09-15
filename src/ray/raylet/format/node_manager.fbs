@@ -146,6 +146,7 @@ table ForwardTaskRequest {
   uncommitted_tasks: [Task];
   push_objects: [string];
   push_clients: [string];
+  push_actors: [string];
 }
 
 table ReconstructObjects {

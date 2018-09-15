@@ -22,13 +22,17 @@ class SchedulingBuffer {
 
   ClientID GetDecision(const ObjectID &object_id) const;
 
-  void AddPush(const ObjectID &argument_id, const ClientID &client_id);
+  void AddPush(const ObjectID &argument_id, const ClientID &client_id, const ActorID &actor_id);
+
+  void RecordActorPush(const ActorID &actor_id, const ObjectID &object_id);
+
+  std::deque<ObjectID> GetActorPushes(const ActorID &actor_id);
 
   void AddDecision(const Task &task, const ClientID &client_id);
 
-  void UpdateActorPushes(const ActorID &actor_id, const ClientID &client_id);
-
-  std::vector<std::pair<ObjectID, ClientID>> GetPushes(const ClientID &client_id);
+  //void UpdateActorPushes(const ActorID &actor_id, const ClientID &client_id);
+  std::pair<std::vector<std::pair<ObjectID, ClientID>>,
+          std::unordered_set<ActorID>> GetPushes(const ClientID &client_id);
 
  private:
   struct PushRequest {
@@ -51,11 +55,11 @@ class SchedulingBuffer {
   std::unordered_map<TaskID, ClientID> task_decision_buffer_;
   std::deque<TaskID> task_decision_buffer_its_;
   std::unordered_map<ClientID, std::deque<TaskID>> decision_buffer_;
-  std::unordered_map<ObjectID, std::vector<ClientID>> push_requests_;
+  std::unordered_map<ObjectID, std::vector<std::pair<ClientID, ActorID>>> push_requests_;
   std::deque<ObjectID> push_request_its_;
-  std::unordered_map<ActorID, std::deque<ObjectID>> actor_push_requests_;
   std::unordered_set<PushRequest, push_hash> previous_pushes_;
   std::deque<PushRequest> previous_push_its_;
+  std::unordered_map<ActorID, std::deque<ObjectID>> actor_push_requests_;
 
   size_t max_decision_buffer_;
   size_t max_push_buffer_;

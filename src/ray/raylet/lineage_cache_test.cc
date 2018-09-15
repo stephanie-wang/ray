@@ -329,7 +329,7 @@ TEST_F(LineageCacheTest, TestForwardTasksRoundTrip) {
     ASSERT_TRUE(lineage_cache_.RemoveWaitingTask(task_id));
     // Simulate receiving the task again. Make sure we can add the task back.
     flatbuffers::FlatBufferBuilder fbb;
-    auto uncommitted_lineage_message = uncommitted_lineage.ToFlatbuffer(fbb, task_id, {});
+    auto uncommitted_lineage_message = uncommitted_lineage.ToFlatbuffer(fbb, task_id, {}, {});
     fbb.Finish(uncommitted_lineage_message);
     uncommitted_lineage = Lineage(
         *flatbuffers::GetRoot<protocol::ForwardTaskRequest>(fbb.GetBufferPointer()));
