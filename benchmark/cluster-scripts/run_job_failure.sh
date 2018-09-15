@@ -4,8 +4,8 @@ NUM_REDUCERS=${3:-$NUM_RAYLETS}
 EXPERIMENT_TIME=${4:-60}
 GCS_DELAY_MS=${5:--1}
 USE_REDIS=${6:-0}
-USE_JSON=${7:-""}
-KILL_MAPPER=${8:-0}
+KILL_MAPPER=${7:-0}
+USE_JSON=${8:-""}
 
 THROUGHPUT=150000
 
@@ -15,6 +15,27 @@ MAX_LINEAGE_SIZE=1
 HEAD_IP=$(head -n 1 workers.txt)
 
 OUTPUT_FILENAME="$NUM_RAYLETS-nodes-$NUM_REDIS_SHARDS-shards-$NUM_REDUCERS-reducers-100-timeslice-$GCS_DELAY_MS-gcs-$EXPERIMENT_TIME-s"
+
+JSON_ARG=""
+if [ ! -z $USE_JSON ]
+then
+    JSON_ARG="--use-json"
+    OUTPUT_FILENAME="$OUTPUT_FILENAME-json"
+fi
+
+# Pick a node that isn't the reducer for now.
+WORKER_RAYLETS=$(( $NUM_RAYLETS - 1 ))
+if [ $KILL_MAPPER -eq 1 ]
+then
+    DEAD_NODE=$(tail -n $NUM_RAYLETS workers.txt | tail -n $(( $RANDOM % $WORKER_RAYLETS )) | head -n 1)
+    DEAD_NODE_TYPE="mapper"
+    OUTPUT_FILENAME="$OUTPUT_FILENAME-map"
+else
+    DEAD_NODE=$(tail -n $NUM_RAYLETS workers.txt | head -n 1)
+    DEAD_NODE_TYPE="reducer"
+    OUTPUT_FILENAME="$OUTPUT_FILENAME-reduce"
+fi
+echo "this job will kill a $DEAD_NODE_TYPE node, $DEAD_NODE"
 
 if [ $# -gt 8 ] || [ $# -eq 0 ]
 then
@@ -57,24 +78,6 @@ then
     REDIS_ADDRESS="--reduce-redis-address $HEAD_IP:6380"
     echo "...Redis up"
 fi
-
-JSON_ARG=""
-if [ ! -z $USE_JSON ]
-then
-    JSON_ARG="--use-json"
-fi
-
-# Pick a node that isn't the reducer for now.
-WORKER_RAYLETS=$(( $NUM_RAYLETS - 1 ))
-if [ $KILL_MAPPER -eq 1 ]
-then
-    DEAD_NODE=$(tail -n $NUM_RAYLETS workers.txt | tail -n $(( $RANDOM % $WORKER_RAYLETS )) | head -n 1)
-    DEAD_NODE_TYPE="mapper"
-else
-    DEAD_NODE=$(tail -n $NUM_RAYLETS workers.txt | head -n 1)
-    DEAD_NODE_TYPE="reducer"
-fi
-echo "this job will kill a $DEAD_NODE_TYPE node, $DEAD_NODE"
 
 
 python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE

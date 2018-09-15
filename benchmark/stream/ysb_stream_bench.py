@@ -793,9 +793,10 @@ if __name__ == '__main__':
             print("Measuring...")
             start_time = (time.time() // 1) + 1
             end_time = start_time + exp_time
-            failure_time = start_time + exp_time * 0.25
             # Sleep 5ms less to account for latency from driver creating the tasks.
             time.sleep(start_time - time.time())
+            # Fail a node at a random time in a window 1/4 of the way through the experiment.
+            failure_time = start_time + exp_time * 0.25 + WINDOW_SIZE_SEC * np.random.rand()
 
             while time.time() < end_time:
                 loop_start = time.time()
