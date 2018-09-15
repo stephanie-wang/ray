@@ -87,8 +87,10 @@ class ActorRegistration {
   /// \return Void.
   void MarkDead();
 
-  size_t NumReconstructions() const {
-    return num_reconstructions_;
+  size_t NumReconstructions() {
+    size_t num_reconstructions = num_reconstructions_;
+    num_reconstructions_ = 0;
+    return num_reconstructions;
   }
 
   void ResetNodeManagerId(const ClientID &node_manager_id) {

@@ -1479,10 +1479,10 @@ void NodeManager::ResubmitTask(const Task &task) {
   RAY_LOG(INFO) << "Resubmitting task " << task.GetTaskSpecification().TaskId()
       << " for actor " << task.GetTaskSpecification().ActorId() << " counter "
       << task.GetTaskSpecification().ActorCounter() << " at " << current_sys_time_ms();
-  for (const auto &argument_id : task.GetDependencies()) {
-    RAY_LOG(INFO) << "Task " << task.GetTaskSpecification().TaskId()
-        << " depends on " << argument_id;
-  }
+  //for (const auto &argument_id : task.GetDependencies()) {
+  //  RAY_LOG(INFO) << "Task " << task.GetTaskSpecification().TaskId()
+  //      << " depends on " << argument_id;
+  //}
 
   if (!task.GetTaskSpecification().ReconstructionEnabled()) {
     TreatTaskAsFailed(task.GetTaskSpecification());
