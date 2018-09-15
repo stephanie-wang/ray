@@ -26,7 +26,7 @@ void SchedulingBuffer::AddPush(const ObjectID &argument_id, const ClientID &clie
   if (inserted.second) {
     push_request_its_.push_back(argument_id);
     if (push_requests_.size() > max_push_buffer_) {
-      RAY_LOG(INFO) << "Evicting push request " << push_request_its_.front();
+      //RAY_LOG(INFO) << "Evicting push request " << push_request_its_.front();
       push_requests_.erase(push_request_its_.front());
       push_request_its_.pop_front();
     }
@@ -37,11 +37,11 @@ void SchedulingBuffer::AddPush(const ObjectID &argument_id, const ClientID &clie
 
 void SchedulingBuffer::AddDecision(const Task &task, const ClientID &client_id) {
   const TaskID task_id = task.GetTaskSpecification().TaskId();
-  RAY_LOG(INFO) << "Added decision " << task_id << " on client " << client_id;
+  //RAY_LOG(INFO) << "Added decision " << task_id << " on client " << client_id;
 
   decision_buffer_[client_id].push_back(task_id);
   if (decision_buffer_[client_id].size() > max_decision_buffer_) {
-    RAY_LOG(INFO) << "Evicting decision " << decision_buffer_[client_id].front() << " on client " << client_id;
+    //RAY_LOG(INFO) << "Evicting decision " << decision_buffer_[client_id].front() << " on client " << client_id;
     decision_buffer_[client_id].pop_front();
   }
 
@@ -53,7 +53,7 @@ void SchedulingBuffer::AddDecision(const Task &task, const ClientID &client_id) 
     for (int j = 0; j < count; j++) {
       ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
       AddPush(argument_id, client_id);
-      RAY_LOG(INFO) << "Added push request " << argument_id;
+      //RAY_LOG(INFO) << "Added push request " << argument_id;
 
       if (is_actor_task) {
         actor_push_requests_[actor_id].push_back(argument_id);

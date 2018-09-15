@@ -959,7 +959,7 @@ void NodeManager::ScheduleTasks() {
 
   auto pushes = scheduling_buffer_.GetPushes(gcs_client_->client_table().GetLocalClientId());
   for (const auto &push : pushes) {
-    RAY_LOG(INFO) << "Pushing object " << push.first << " from local client to client " << push.second;
+    //RAY_LOG(INFO) << "Pushing object " << push.first << " from local client to client " << push.second;
     object_manager_.Push(push.first, push.second);
   }
 }
@@ -1523,12 +1523,8 @@ void NodeManager::ResubmitTask(const Task &task) {
 }
 
 void NodeManager::HandleObjectLocal(const ObjectID &object_id) {
-  RAY_LOG(INFO) << "Object local " << object_id << " at " << current_sys_time_ms();
   // Notify the task dependency manager that this object is local.
   const auto ready_task_ids = task_dependency_manager_.HandleObjectLocal(object_id);
-  for (const auto &id : ready_task_ids) {
-    RAY_LOG(INFO) << "Task now ready " << id << " at " << current_sys_time_ms();
-  }
   // Transition the tasks whose dependencies are now fulfilled to the ready state.
   if (ready_task_ids.size() > 0) {
     std::unordered_set<TaskID> ready_task_id_set(ready_task_ids.begin(),
@@ -1593,9 +1589,6 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   flatbuffers::FlatBufferBuilder fbb;
   scheduling_buffer_.AddDecision(task, node_id);
   auto pushes = scheduling_buffer_.GetPushes(node_id);
-  for (const auto &push : pushes) {
-    RAY_LOG(INFO) << "Pushing object " << push.first << " from client " << node_id << " to client " << push.second;
-  }
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id, pushes);
   fbb.Finish(request);
   size_t size = fbb.GetSize();
