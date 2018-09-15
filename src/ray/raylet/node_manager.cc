@@ -471,6 +471,7 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
       auto pushes = scheduling_buffer_.GetActorPushes(actor_id);
       for (const auto &object_id : pushes) {
+        RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
         object_manager_.Push(object_id, actor_registration.GetNodeManagerId());
       }
     }
@@ -1596,9 +1597,9 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   flatbuffers::FlatBufferBuilder fbb;
   scheduling_buffer_.AddDecision(task, node_id);
   auto pushes = scheduling_buffer_.GetPushes(node_id);
-  for (const auto &push : pushes.first) {
-    RAY_LOG(INFO) << "Pushing object " << push.first << " from client " << node_id << " to client " << push.second;
-  }
+  //for (const auto &push : pushes.first) {
+  //  RAY_LOG(INFO) << "Pushing object " << push.first << " from client " << node_id << " to client " << push.second << " actors: " << pushes.second.size();
+  //}
   auto request = uncommitted_lineage.ToFlatbuffer(fbb, task_id, pushes.first, pushes.second);
   fbb.Finish(request);
   size_t size = fbb.GetSize();
