@@ -777,7 +777,7 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
-  //RAY_LOG(INFO) << "Receiving push " << object_id << " of size " << data_size << " at " << current_sys_time_ms();
+  RAY_LOG(INFO) << "Receiving push " << object_id << " of size " << data_size << " at " << current_sys_time_ms();
 
   uint64_t start = current_sys_time_ms();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn, start]() {
@@ -817,7 +817,7 @@ bool ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
   RAY_LOG(DEBUG) << "ExecuteReceiveObject " << client_id << " " << object_id << " "
                  << chunk_index;
 
-  //RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", starting after " << current_sys_time_ms() - start;
+  RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", starting after " << current_sys_time_ms() - start;
   std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status =
       buffer_pool_.CreateChunk(object_id, data_size, metadata_size, chunk_index);
   ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
