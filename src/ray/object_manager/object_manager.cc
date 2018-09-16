@@ -866,6 +866,7 @@ bool ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     success = true;
     // TODO(hme): If the object isn't local, create a pull request for this chunk.
   }
+  RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", received after " << current_sys_time_ms() - start;
   conn.ProcessMessages();
   RAY_LOG(DEBUG) << "ReceiveCompleted " << client_id_ << " " << object_id << " "
                  << "/" << config_.max_receives;
