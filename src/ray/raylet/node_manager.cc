@@ -162,8 +162,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
   cluster_resource_map_.emplace(local_client_id,
                                 SchedulingResources(config.resource_config));
 
-  RAY_CHECK_OK(object_manager_.SubscribeObjAdded([this](const ObjectInfoT &object_info) {
-    ObjectID object_id = ObjectID::from_binary(object_info.object_id);
+  RAY_CHECK_OK(object_manager_.SubscribeObjAdded([this](const ObjectID &object_id) {
     if (!task_dependency_manager_.CheckObjectLocal(object_id)) {
       HandleObjectLocal(object_id);
     }

@@ -231,14 +231,14 @@ class TestObjectManager : public TestObjectManagerBase {
   void TestNotifications() {
     ray::Status status = ray::Status::OK();
     status = server1->object_manager_.SubscribeObjAdded(
-        [this](const ObjectInfoT &object_info) {
-          object_added_handler_1(ObjectID::from_binary(object_info.object_id));
+        [this](const ObjectID &object_id) {
+          object_added_handler_1(object_id);
           NotificationTestCompleteIfSatisfied();
         });
     RAY_CHECK_OK(status);
     status = server2->object_manager_.SubscribeObjAdded(
-        [this](const ObjectInfoT &object_info) {
-          object_added_handler_2(ObjectID::from_binary(object_info.object_id));
+        [this](const ObjectID &object_id) {
+          object_added_handler_2(object_id);
           NotificationTestCompleteIfSatisfied();
         });
     RAY_CHECK_OK(status);

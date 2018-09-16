@@ -97,30 +97,37 @@ void ObjectManager::StopIOService() {
 void ObjectManager::HandleObjectAdded(const ObjectInfoT &object_info) {
   // Notify the object directory that the object has been added to this node.
   ObjectID object_id = ObjectID::from_binary(object_info.object_id);
-  local_objects_[object_id] = object_info;
-  ray::Status status =
-      object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
+  auto inserted = local_objects_.insert({object_id, object_info});
+  if (inserted.second) {
+    local_objects_[object_id] = object_info;
+    ray::Status status =
+        object_directory_->ReportObjectAdded(object_id, client_id_, object_info);
 
-  // Handle the unfulfilled_push_requests_ which contains the push request that is not
-  // completed due to unsatisfied local objects.
-  auto iter = unfulfilled_push_requests_.find(object_id);
-  RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
-  if (iter != unfulfilled_push_requests_.end()) {
-    for (auto &pair : iter->second) {
-      auto &client_id = pair.first;
-      Push(object_id, client_id);
-      // When push timeout is set to -1, there will be an empty timer in pair.second.
-      if (pair.second != nullptr) {
-        pair.second->cancel();
+    // Handle the unfulfilled_push_requests_ which contains the push request that is not
+    // completed due to unsatisfied local objects.
+    auto iter = unfulfilled_push_requests_.find(object_id);
+    RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
+    if (iter != unfulfilled_push_requests_.end()) {
+      for (auto &pair : iter->second) {
+        auto &client_id = pair.first;
+        Push(object_id, client_id);
+        // When push timeout is set to -1, there will be an empty timer in pair.second.
+        if (pair.second != nullptr) {
+          pair.second->cancel();
+        }
       }
+      unfulfilled_push_requests_.erase(iter);
     }
-    unfulfilled_push_requests_.erase(iter);
+
+
+    // The object is local, so we no longer need to Pull it from a remote
+    // manager. Cancel any outstanding Pull requests for this object.
+    CancelPull(object_id);
+
+    for (const auto &callback : object_local_callbacks_) {
+      callback(object_id);
+    }
   }
-
-
-  // The object is local, so we no longer need to Pull it from a remote
-  // manager. Cancel any outstanding Pull requests for this object.
-  CancelPull(object_id);
 }
 
 void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
@@ -130,8 +137,8 @@ void ObjectManager::NotifyDirectoryObjectDeleted(const ObjectID &object_id) {
 }
 
 ray::Status ObjectManager::SubscribeObjAdded(
-    std::function<void(const ObjectInfoT &)> callback) {
-  store_notification_.SubscribeObjAdded(callback);
+    std::function<void(const ObjectID &object_id)> callback) {
+  object_local_callbacks_.push_back(callback);
   return ray::Status::OK();
 }
 
@@ -797,7 +804,13 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
     bool success = ExecuteReceiveObject(conn->GetClientID(), object_id, data_size, metadata_size,
                          chunk_index, *conn, start);
     // If we failed to receive the object, then retry the pull.
-    if (!success) {
+    if (success) {
+      ObjectInfoT object_info;
+      object_info.object_id = object_id.binary();
+      main_service_->post([this, object_info]() {
+          HandleObjectAdded(object_info);
+          });
+    } else {
       main_service_->post([this, object_id]() {
         auto it = pull_requests_.find(object_id);
         if (it != pull_requests_.end() && it->second.timer_set) {

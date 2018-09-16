@@ -91,7 +91,7 @@ class ObjectManager : public ObjectManagerInterface {
   /// already exist in the local store.
   /// \param callback The callback to invoke when objects are added to the local store.
   /// \return Status of whether adding the subscription succeeded.
-  ray::Status SubscribeObjAdded(std::function<void(const ObjectInfoT &)> callback);
+  ray::Status SubscribeObjAdded(std::function<void(const ObjectID &)> callback);
 
   /// Subscribe to notifications of objects deleted from local store.
   ///
@@ -375,6 +375,7 @@ class ObjectManager : public ObjectManagerInterface {
       unfulfilled_push_requests_;
 
   std::unordered_map<ObjectID, PullRequest> pull_requests_;
+  std::vector<std::function<void(const ObjectID &)>> object_local_callbacks_;
 };
 
 }  // namespace ray
