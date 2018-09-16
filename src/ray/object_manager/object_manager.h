@@ -83,6 +83,8 @@ class ObjectManager : public ObjectManagerInterface {
   /// Register GCS-related functionality.
   void RegisterGcs();
 
+  void WarmupTransferConnections(const RemoteConnectionInfo &connection_info);
+
   /// Subscribe to notifications of objects added to local store.
   /// Upon subscribing, the callback will be invoked for all objects that
   ///

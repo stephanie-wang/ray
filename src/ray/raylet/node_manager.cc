@@ -380,6 +380,9 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
         RAY_LOG(WARNING) << "Failed to connect to remote node manager " << client_id;
       }
       });
+
+  RemoteConnectionInfo info(client_id, address, client_info.object_manager_port);
+  object_manager_.WarmupTransferConnections(info);
 }
 
 void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {

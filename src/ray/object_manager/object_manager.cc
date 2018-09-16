@@ -382,6 +382,19 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
       }));
 }
 
+void ObjectManager::WarmupTransferConnections(const RemoteConnectionInfo &connection_info) {
+  for (int i = 0; i < config_.max_sends; i++) {
+    send_service_.post([this, connection_info]() {
+      auto conn = CreateTransferConnection(connection_info);
+      if (conn != nullptr) {
+        connection_pool_.RegisterSender(ConnectionPool::ConnectionType::TRANSFER,
+                                        connection_info.client_id, conn);
+        connection_pool_.ReleaseSender(ConnectionPool::ConnectionType::TRANSFER, conn);
+      }
+    });
+  }
+}
+
 void ObjectManager::ExecuteSendObject(const ClientID &client_id,
                                       const ObjectID &object_id, uint64_t data_size,
                                       uint64_t metadata_size, uint64_t chunk_index,
