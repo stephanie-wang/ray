@@ -6,9 +6,10 @@ namespace ray {
 
 namespace raylet {
 
-SchedulingBuffer::SchedulingBuffer(size_t max_decision_buffer, size_t max_push_buffer)
+SchedulingBuffer::SchedulingBuffer(size_t max_decision_buffer, size_t max_push_buffer, size_t max_actor_pushes)
     : max_decision_buffer_(max_decision_buffer),
-      max_push_buffer_(max_push_buffer) {}
+      max_push_buffer_(max_push_buffer),
+      max_actor_pushes_(max_actor_pushes) {}
 
 ClientID SchedulingBuffer::GetDecision(const ObjectID &object_id) const {
   const TaskID task_id = ComputeTaskId(object_id);
@@ -37,7 +38,7 @@ void SchedulingBuffer::AddPush(const ObjectID &argument_id, const ClientID &clie
 
 void SchedulingBuffer::RecordActorPush(const ActorID &actor_id, const ObjectID &object_id) {
   actor_push_requests_[actor_id].push_back(object_id);
-  if (actor_push_requests_[actor_id].size() > max_decision_buffer_) {
+  if (actor_push_requests_[actor_id].size() > max_actor_pushes_) {
     actor_push_requests_[actor_id].pop_front();
   }
 }

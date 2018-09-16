@@ -18,7 +18,7 @@ class SchedulingBuffer {
   ///
   /// \param actor_table_data Information from the global actor table about
   /// this actor. This includes the actor's node manager location.
-  SchedulingBuffer(size_t max_decision_buffer, size_t max_push_buffer);
+  SchedulingBuffer(size_t max_decision_buffer, size_t max_push_buffer, size_t max_actor_pushes);
 
   ClientID GetDecision(const ObjectID &object_id) const;
 
@@ -65,6 +65,7 @@ class SchedulingBuffer {
 
   size_t max_decision_buffer_;
   size_t max_push_buffer_;
+  size_t max_actor_pushes_;
 };
 
 }  // namespace raylet
