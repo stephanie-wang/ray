@@ -902,21 +902,17 @@ class Worker(object):
             RayGetArgumentError: This exception is raised if a task that
                 created one of the arguments failed.
         """
+        arg_ids = [arg for arg in serialized_args if isinstance(arg, ray.ObjectID)]
+        values = self.get_object(arg_ids)
         arguments = []
-        for (i, arg) in enumerate(serialized_args):
-            if isinstance(arg, ray.ObjectID):
-                # get the object from the local object store
-                argument = self.get_object([arg])[0]
-                if isinstance(argument, RayTaskError):
-                    # If the result is a RayTaskError, then the task that
-                    # created this object failed, and we should propagate the
-                    # error message here.
-                    raise RayGetArgumentError(function_name, i, arg, argument)
-            else:
-                # pass the argument by value
-                argument = arg
-
-            arguments.append(argument)
+        value_index = 0
+        arguments = [values.pop(0) if isinstance(arg, ray.ObjectID) else serialized_args[i] for i, arg in enumerate(serialized_args)]
+        for i, argument in enumerate(arguments):
+            if isinstance(argument, RayTaskError):
+                # If the result is a RayTaskError, then the task that
+                # created this object failed, and we should propagate the
+                # error message here.
+                raise RayGetArgumentError(function_name, i, serialized_args[i], argument)
         return arguments
 
     def _store_outputs_in_objstore(self, object_ids, outputs):
