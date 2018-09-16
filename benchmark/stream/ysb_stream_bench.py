@@ -647,19 +647,11 @@ class Reducer(object):
         print("foo latency:", time.time() - timestamp - 0.05 * 5)
 
 
-def kill_node(node):
-    print("Killing node", node, "at", time.time())
-    command = [
-            "ssh",
-            "-i",
-            "/home/ubuntu/devenv-key.pem",
-            node,
-            "PATH=/home/ubuntu/anaconda3/bin/:$PATH",
-            "ray",
-            "stop",
-            ]
+def restart_node(head_node_ip, node_ip, node_index):
+    print("Killing node", node_ip, "at", time.time())
+    command = "ssh -i ~/devenv-key.pem {} bash -s < /home/ubuntu/ray/benchmark/cluster-scripts/restart_worker.sh {} {} 1 1 -1".format(node_ip, head_node_ip, node_index)
     with open(os.devnull, 'w') as fnull:
-        subprocess.Popen(command, stdout=fnull, stderr=fnull)
+        subprocess.Popen(command.split(), stdout=fnull, stderr=fnull)
 
 
 if __name__ == '__main__':
@@ -683,7 +675,7 @@ if __name__ == '__main__':
     parser.add_argument('--reduce-redis-address', type=str, default=None)
     parser.add_argument('--output-filename', type=str, default="test")
     parser.add_argument('--use-json', action='store_true')
-    parser.add_argument('--node-failure', type=str, default=None)
+    parser.add_argument('--node-failure', type=int, default=-1)
     parser.add_argument('--window-size', type=float, default=10)
     args = parser.parse_args()
 
@@ -769,6 +761,12 @@ if __name__ == '__main__':
     gen_dep = ray_warmup(reducers, node_resources, num_reducer_nodes)
 
     if exp_time > 0:
+        if args.node_failure >= 0:
+            workers = []
+            with open('/home/ubuntu/ray/benchmark/cluster-scripts/workers.txt', 'r') as f:
+                workers.append(f.readline().strip())
+            head_node_ip = workers.pop(0)
+            node_to_restart = workers[args.node_failure]
         try:
             time_to_sleep = BATCH_SIZE_SEC
             time.sleep(10) # TODO non-deterministic, fix
@@ -806,7 +804,7 @@ if __name__ == '__main__':
                 submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
 
                 if args.node_failure is not None and time.time() > failure_time:
-                    kill_node(args.node_failure)
+                    restart_node(head_node_ip, node_to_restart, args.node_failure)
                     # Set the half time equal to the end time so that we only
                     # kill a node once.
                     failure_time = end_time
