@@ -155,7 +155,7 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_server_connections_(),
       actor_registry_(),
       gcs_delay_ms_(config.gcs_delay_ms),
-      scheduling_buffer_(100, 1024, 20),
+      scheduling_buffer_(10, 1024, 20),
       gen_(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.

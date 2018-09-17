@@ -53,14 +53,15 @@ void SchedulingBuffer::AddDecision(const Task &task, const ClientID &client_id) 
     decision_buffer_[client_id].pop_front();
   }
 
-  const ActorID actor_id = task.GetTaskSpecification().ActorId();
-
-  for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
-    int count = task.GetTaskSpecification().ArgIdCount(i);
-    for (int j = 0; j < count; j++) {
-      ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
-      AddPush(argument_id, client_id, actor_id);
-      //RAY_LOG(INFO) << "Added push request " << argument_id;
+  if (task.GetTaskSpecification().IsActorTask()) {
+    const ActorID actor_id = task.GetTaskSpecification().ActorId();
+    for (int i = 0; i < task.GetTaskSpecification().NumArgs(); ++i) {
+      int count = task.GetTaskSpecification().ArgIdCount(i);
+      for (int j = 0; j < count; j++) {
+        ObjectID argument_id = task.GetTaskSpecification().ArgId(i, j);
+        AddPush(argument_id, client_id, actor_id);
+        //RAY_LOG(INFO) << "Added push request " << argument_id;
+      }
     }
   }
 
