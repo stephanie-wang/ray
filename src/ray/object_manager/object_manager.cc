@@ -106,7 +106,7 @@ void ObjectManager::HandleObjectAdded(const ObjectInfoT &object_info) {
     // Handle the unfulfilled_push_requests_ which contains the push request that is not
     // completed due to unsatisfied local objects.
     auto iter = unfulfilled_push_requests_.find(object_id);
-    RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
+    //RAY_LOG(INFO) << "Object " << object_id << " local, unfulfilled push requests? " << static_cast<int>(iter != unfulfilled_push_requests_.end()) << " at " << current_sys_time_ms();
     if (iter != unfulfilled_push_requests_.end()) {
       for (auto &pair : iter->second) {
         auto &client_id = pair.first;
@@ -329,7 +329,7 @@ void ObjectManager::HandlePushTaskTimeout(const ObjectID &object_id,
 }
 
 void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
-  RAY_LOG(INFO) << "Object push requested " << object_id << " to " << client_id << " at " << current_sys_time_ms();
+  //RAY_LOG(INFO) << "Object push requested " << object_id << " to " << client_id << " at " << current_sys_time_ms();
   if (local_objects_.count(object_id) == 0) {
     // Avoid setting duplicated timer for the same object and client pair.
     auto &clients = unfulfilled_push_requests_[object_id];
@@ -373,7 +373,7 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
         uint64_t metadata_size = static_cast<uint64_t>(object_info.metadata_size);
         uint64_t num_chunks = buffer_pool_.GetNumChunks(data_size);
         for (uint64_t chunk_index = 0; chunk_index < num_chunks; ++chunk_index) {
-          RAY_LOG(INFO) << "Pushing object " << object_id << " of size " << data_size << " to " << client_id << " at " << current_sys_time_ms();
+          //RAY_LOG(INFO) << "Pushing object " << object_id << " of size " << data_size << " to " << client_id << " at " << current_sys_time_ms();
           uint64_t start = current_sys_time_ms();
           send_service_.post([this, client_id, object_id, data_size, metadata_size,
                               chunk_index, info, start]() {
@@ -409,7 +409,7 @@ void ObjectManager::ExecuteSendObject(const ClientID &client_id,
                                       uint64_t start) {
   RAY_LOG(DEBUG) << "ExecuteSendObject " << client_id << " " << object_id << " "
                  << chunk_index;
-  RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", starting after " << current_sys_time_ms() - start;
+  //RAY_LOG(INFO) << "SendObject: object " << object_id << " to " << client_id << ", starting after " << current_sys_time_ms() - start;
   ray::Status status;
   std::shared_ptr<SenderConnection> conn;
   connection_pool_.GetSender(ConnectionPool::ConnectionType::TRANSFER, client_id, &conn);
@@ -797,7 +797,7 @@ void ObjectManager::ReceivePushRequest(std::shared_ptr<TcpClientConnection> &con
   uint64_t chunk_index = object_header->chunk_index();
   uint64_t data_size = object_header->data_size();
   uint64_t metadata_size = object_header->metadata_size();
-  RAY_LOG(INFO) << "Receiving push " << object_id << " of size " << data_size << " at " << current_sys_time_ms();
+  //RAY_LOG(INFO) << "Receiving push " << object_id << " of size " << data_size << " at " << current_sys_time_ms();
 
   uint64_t start = current_sys_time_ms();
   receive_service_.post([this, object_id, data_size, metadata_size, chunk_index, conn, start]() {
@@ -843,7 +843,7 @@ bool ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
   RAY_LOG(DEBUG) << "ExecuteReceiveObject " << client_id << " " << object_id << " "
                  << chunk_index;
 
-  RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", starting after " << current_sys_time_ms() - start;
+  //RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", starting after " << current_sys_time_ms() - start;
   std::pair<const ObjectBufferPool::ChunkInfo &, ray::Status> chunk_status =
       buffer_pool_.CreateChunk(object_id, data_size, metadata_size, chunk_index);
   ObjectBufferPool::ChunkInfo chunk_info = chunk_status.first;
@@ -879,7 +879,7 @@ bool ObjectManager::ExecuteReceiveObject(const ClientID &client_id,
     success = true;
     // TODO(hme): If the object isn't local, create a pull request for this chunk.
   }
-  RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", received after " << current_sys_time_ms() - start;
+  //RAY_LOG(INFO) << "Push: object " << object_id << " from " << client_id << ", received after " << current_sys_time_ms() - start;
   conn.ProcessMessages();
   RAY_LOG(DEBUG) << "ReceiveCompleted " << client_id_ << " " << object_id << " "
                  << "/" << config_.max_receives;
