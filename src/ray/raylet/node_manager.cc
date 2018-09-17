@@ -472,19 +472,19 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
     // actor was resumed from a checkpoint.
     if (inserted.first->second.GetNodeManagerId() != actor_registration.GetNodeManagerId()) {
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
-      if (actor_registration.GetNodeManagerId() != gcs_client_->client_table().GetLocalClientId()) {
-        auto pushes = scheduling_buffer_.GetActorPushes(actor_id, gcs_client_->client_table().GetLocalClientId(), actor_registration.GetNodeManagerId());
-        auto client_id = actor_registration.GetNodeManagerId();
-        std::uniform_int_distribution<int> distribution(0, 100);
-        for (const auto &object_id : pushes) {
-          auto sleep = boost::posix_time::milliseconds(distribution(gen_));
-          auto timer = std::make_shared<boost::asio::deadline_timer>(io_service_, sleep);
-          timer->async_wait([this, object_id, client_id, actor_id](const boost::system::error_code &error) {
-            RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
-            object_manager_.Push(object_id, client_id);
-          });
-        }
-      }
+      //if (actor_registration.GetNodeManagerId() != gcs_client_->client_table().GetLocalClientId()) {
+      //  auto pushes = scheduling_buffer_.GetActorPushes(actor_id, gcs_client_->client_table().GetLocalClientId(), actor_registration.GetNodeManagerId());
+      //  auto client_id = actor_registration.GetNodeManagerId();
+      //  std::uniform_int_distribution<int> distribution(0, 100);
+      //  for (const auto &object_id : pushes) {
+      //    auto sleep = boost::posix_time::milliseconds(distribution(gen_));
+      //    auto timer = std::make_shared<boost::asio::deadline_timer>(io_service_, sleep);
+      //    timer->async_wait([this, object_id, client_id, actor_id](const boost::system::error_code &error) {
+      //      RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
+      //      object_manager_.Push(object_id, client_id);
+      //    });
+      //  }
+      //}
     }
   }
 
