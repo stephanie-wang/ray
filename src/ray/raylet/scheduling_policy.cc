@@ -103,15 +103,21 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
           }
         }
         RAY_CHECK(!client_keys.empty());
-        int client_key_index = 0;
-        if (!t.GetTaskSpecification().IsActorCreationTask()) {
+        if (t.GetTaskSpecification().IsActorCreationTask()) {
+          for (const auto &node : buffer.GetActorLocations()) {
+            if (cluster_resources.count(node) != 0) {
+              node_decision = node;
+            }
+          }
+          RAY_CHECK(!node_decision.is_nil());
+        } else {
           // Choose index at random.
           // Initialize a uniform integer distribution over the key space.
           // TODO(atumanov): change uniform random to discrete, weighted by resource capacity.
           std::uniform_int_distribution<int> distribution(0, client_keys.size() - 1);
-          client_key_index = distribution(gen_);
+          int client_key_index = distribution(gen_);
+          node_decision = client_keys[client_key_index];
         }
-        node_decision = client_keys[client_key_index];
         //RAY_LOG(DEBUG) << "[SchedulingPolicy] idx=" << client_key_index << " " << task_id
         //               << " --> " << client_keys[client_key_index];
 

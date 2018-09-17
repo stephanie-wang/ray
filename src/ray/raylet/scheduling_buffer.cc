@@ -126,6 +126,15 @@ std::pair<std::vector<std::pair<ObjectID, ClientID>>,
   return {pushes, actor_ids};
 }
 
+void SchedulingBuffer::RecordActorCreation(const ClientID &client_id) {
+  actor_locations_.insert(client_id);
+}
+
+std::unordered_set<ClientID> SchedulingBuffer::GetActorLocations() const {
+  return actor_locations_;
+}
+
+
 }  // namespace raylet
 
 }  // namespace ray

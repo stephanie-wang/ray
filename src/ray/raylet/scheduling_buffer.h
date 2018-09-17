@@ -34,6 +34,10 @@ class SchedulingBuffer {
   std::pair<std::vector<std::pair<ObjectID, ClientID>>,
           std::unordered_set<ActorID>> GetPushes(const ClientID &client_id);
 
+  void RecordActorCreation(const ClientID &client_id);
+
+  std::unordered_set<ClientID> GetActorLocations() const;
+
  private:
   struct PushRequest {
     ClientID push_from_client_id;
@@ -62,6 +66,7 @@ class SchedulingBuffer {
   std::unordered_set<PushRequest, push_hash> previous_pushes_;
   std::deque<PushRequest> previous_push_its_;
   std::unordered_map<ActorID, std::deque<ObjectID>> actor_push_requests_;
+  std::unordered_set<ClientID> actor_locations_;
 
   size_t max_decision_buffer_;
   size_t max_push_buffer_;

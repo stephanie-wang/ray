@@ -953,6 +953,9 @@ void NodeManager::ScheduleTasks() {
       // TODO(atumanov): need a better interface for task exit on forward.
       // (See design_docs/task_states.rst for the state transition diagram.)
       const auto task = local_queues_.RemoveTask(task_id);
+      if (task.GetTaskSpecification().IsActorCreationTask()) {
+        scheduling_buffer_.RecordActorCreation(client_id);
+      }
       // Attempt to forward the task. If this fails to forward the task,
       // the task will be resubmit locally.
       RAY_CHECK_OK(ForwardTask(task, client_id));
