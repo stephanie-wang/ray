@@ -155,7 +155,8 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
       remote_server_connections_(),
       actor_registry_(),
       gcs_delay_ms_(config.gcs_delay_ms),
-      scheduling_buffer_(100, 1024, 20) {
+      scheduling_buffer_(100, 1024, 20),
+      gen_(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -381,7 +382,7 @@ void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
       });
 
   RemoteConnectionInfo info(client_id, address, client_info.object_manager_port);
-  object_manager_.WarmupTransferConnections(info);
+  //object_manager_.WarmupTransferConnections(info);
 }
 
 void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
@@ -473,9 +474,15 @@ void NodeManager::HandleActorCreation(const ActorID &actor_id,
       inserted.first->second.ResetNodeManagerId(actor_registration.GetNodeManagerId());
       if (actor_registration.GetNodeManagerId() != gcs_client_->client_table().GetLocalClientId()) {
         auto pushes = scheduling_buffer_.GetActorPushes(actor_id, gcs_client_->client_table().GetLocalClientId(), actor_registration.GetNodeManagerId());
+        auto client_id = actor_registration.GetNodeManagerId();
+        std::uniform_int_distribution<int> distribution(0, 100);
         for (const auto &object_id : pushes) {
-          RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
-          object_manager_.Push(object_id, actor_registration.GetNodeManagerId());
+          auto sleep = boost::posix_time::milliseconds(distribution(gen_));
+          auto timer = std::make_shared<boost::asio::deadline_timer>(io_service_, sleep);
+          timer->async_wait([this, object_id, client_id, actor_id](const boost::system::error_code &error) {
+            RAY_LOG(INFO) << "Resending push " << object_id << " for actor " << actor_id;
+            object_manager_.Push(object_id, client_id);
+          });
         }
       }
     }

@@ -663,7 +663,7 @@ std::shared_ptr<SenderConnection> ObjectManager::CreateTransferConnection(
   ConnectionPool::ConnectionType type = ConnectionPool::ConnectionType::TRANSFER;
   uint64_t start = current_sys_time_ms();
   const auto ip = info.ip;
-  RAY_LOG(INFO) << "CreateTransferConnection to " << ip << " at " << start;
+  RAY_LOG(INFO) << "CreateTransferConnection to " << ip << ":" << info.port << " at " << start;
   auto conn = SenderConnection::CreateTransferConnection(*main_service_, info.client_id, info.ip, info.port);
   if (conn != nullptr) {
     // Prepare client connection info buffer

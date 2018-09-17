@@ -206,6 +206,8 @@ class NodeManager {
   std::unordered_map<TaskID, std::list<std::pair<Task, bool>>::iterator> gcs_task_cache_;
   std::list<std::pair<Task, bool>> gcs_task_queue_;
   SchedulingBuffer scheduling_buffer_;
+  /// Internally maintained random number generator.
+  std::mt19937_64 gen_;
 };
 
 }  // namespace raylet
