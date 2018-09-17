@@ -59,7 +59,7 @@ def ray_warmup(reducers, node_resources, num_reducer_nodes):
                 })
     ray.get(gen_dep)
 
-    num_rounds = 50
+    num_rounds = 0
     for i in range(num_rounds):
         with ray.profiling.profile("reduce_round", worker=ray.worker.global_worker):
             start = time.time()
@@ -135,33 +135,33 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
                 args=[gen_dep, timestamp, time_slice_num_events],
                 resources={node_resources[i]: 1},
                 batch=BATCH))
-    if BATCH:
-        generated = ray.worker.global_worker.submit_batch(generated)
-    generated = flatten(generated)
+    #if BATCH:
+    #    generated = ray.worker.global_worker.submit_batch(generated)
+    #generated = flatten(generated)
 
     filtered = []
     partition_size = time_slice_num_events // num_parsers_per_node
     for i, generate_output in zip(range(start_index, num_nodes), generated):
+        generate_output = generate_output.returns()[0]
         partition_start = 0
         for j in range(num_parsers_per_node):
             partition_end = partition_start + partition_size
             if j < time_slice_num_events % num_parsers_per_node:
                 partition_end += 1
-
             filtered.append(filter_no_json._submit(
                 args=[num_filter_out, partition_start, partition_end, generate_output],
                 num_return_vals=num_filter_out,
                 resources={node_resources[i] : 1},
                 batch=BATCH))
     if BATCH:
-        filtered = ray.worker.global_worker.submit_batch(filtered)
+        filtered = ray.worker.global_worker.submit_batch(generated + filtered)[len(generated):]
     filtered = flatten(filtered)
 
     shuffled, start_idx = [], 0
     num_return_vals = 1
     for i in range(start_index, num_nodes):
         for _ in range(num_projectors_per_node):
-            batches = filtered[start_idx : start_idx + num_filter_in]
+            batches = [task.returns()[0] for task in filtered[start_idx : start_idx + num_filter_in]]
             shuffled.append(project_shuffle_no_json._submit(
                 args=[num_projector_out, window_size] + batches,
                 num_return_vals=num_return_vals,
@@ -176,6 +176,9 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
         ray.worker.global_worker.submit_batch(batch)
     else:
         [reducer.reduce.remote(*shuffled) for reducer in reducers]
+
+    batch = [warmup._submit(args=[], resources={node_resource: 1}, batch=True) for node_resource in node_resources]
+    ray.worker.global_worker.submit_batch(batch)
 
 def submit_tasks(gen_dep, num_reducer_nodes, window_size):
     if SEPARATE_REDUCERS:
@@ -273,11 +276,13 @@ def collect_redis_stats(redis_address, redis_port, campaign_ids=None):
     print("Average latency:", np.mean([latency[1] for latency in latencies]))
     return latencies, counts
 
-def write_stats(filename_prefix, redis_address, redis_port, campaign_ids=None):
+def write_stats(filename_prefix, redis_address, redis_port, campaign_ids=None, kill_time=None):
     latencies, throughputs = collect_redis_stats(redis_address, redis_port, campaign_ids)
     with open("{}-latency.out".format(filename_prefix), 'w+') as f:
         for window, latency in latencies:
             f.write("{},{}\n".format(window, latency))
+        if kill_time is not None:
+            f.write("KILL: {}".format(kill_time))
     with open("{}-throughput.out".format(filename_prefix), 'w+') as f:
         for window, throughput in throughputs:
             # The number of events is measured per window.
@@ -648,8 +653,20 @@ class Reducer(object):
 
 
 def restart_node(head_node_ip, node_ip, node_index):
-    print("Killing node", node_ip, "at", time.time())
+    print("Restarting node", node_ip, "at", time.time())
     command = "ssh -i ~/devenv-key.pem {} bash -s < /home/ubuntu/ray/benchmark/cluster-scripts/restart_worker.sh {} {} 1 1 -1".format(node_ip, head_node_ip, node_index)
+    with open(os.devnull, 'w') as fnull:
+        subprocess.Popen(command.split(), stdout=fnull, stderr=fnull)
+
+def kill_node(head_node_ip, node_ip, node_index):
+    print("Killing node", node_ip, "at", time.time())
+    command = "ssh -i ~/devenv-key.pem {} PATH=/home/ubuntu/anaconda3/bin/:$PATH ray stop".format(node_ip)
+    with open(os.devnull, 'w') as fnull:
+        subprocess.Popen(command.split(), stdout=fnull, stderr=fnull)
+
+def start_node(head_node_ip, node_ip, node_index):
+    print("Starting node", node_ip, "at", time.time())
+    command = "ssh -i ~/devenv-key.pem {} bash -s < /home/ubuntu/ray/benchmark/cluster-scripts/start_worker.sh {} {} 128 1 1 -1 0".format(node_ip, head_node_ip, node_index)
     with open(os.devnull, 'w') as fnull:
         subprocess.Popen(command.split(), stdout=fnull, stderr=fnull)
 
@@ -764,9 +781,11 @@ if __name__ == '__main__':
         if args.node_failure >= 0:
             workers = []
             with open('/home/ubuntu/ray/benchmark/cluster-scripts/workers.txt', 'r') as f:
-                workers.append(f.readline().strip())
+                for line in f.readlines():
+                    workers.append(line.strip())
             head_node_ip = workers.pop(0)
-            node_to_restart = workers[args.node_failure]
+            node_to_kill = workers[args.node_failure]
+            node_to_restart = workers[-1]
         try:
             time_to_sleep = BATCH_SIZE_SEC
             time.sleep(10) # TODO non-deterministic, fix
@@ -791,22 +810,25 @@ if __name__ == '__main__':
             time.sleep(10) # TODO non-deterministic, fix
 
             print("Measuring...")
-            start_time = (time.time() // 1) + 1
+            start_time = (time.time() // WINDOW_SIZE_SEC) * WINDOW_SIZE_SEC + WINDOW_SIZE_SEC
             end_time = start_time + exp_time
             # Sleep 5ms less to account for latency from driver creating the tasks.
             time.sleep(start_time - time.time())
             # Fail a node at a random time in a window 1/4 of the way through the experiment.
-            failure_time = start_time + exp_time * 0.25 + WINDOW_SIZE_SEC * np.random.rand()
+            failure_time = start_time + exp_time * 0.5 + WINDOW_SIZE_SEC * np.random.rand()
 
             while time.time() < end_time:
                 loop_start = time.time()
 
                 submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
 
-                if args.node_failure is not None and time.time() > failure_time:
-                    restart_node(head_node_ip, node_to_restart, args.node_failure)
+                if args.node_failure >= 0 and time.time() > failure_time:
+                    #restart_node(head_node_ip, node_to_restart, args.node_failure)
+                    kill_node(head_node_ip, node_to_kill, args.node_failure)
+                    #start_node(head_node_ip, node_to_restart, args.node_failure)
                     # Set the half time equal to the end time so that we only
                     # kill a node once.
+                    killed_time = failure_time
                     failure_time = end_time
 
                 loop_end = time.time()
@@ -823,8 +845,12 @@ if __name__ == '__main__':
 
             print("Computing throughput...")
             if args.reduce_redis_address is not None:
+                kill_time = None
+                if args.node_failure >= 0:
+                    kill_time = killed_time
                 write_stats(args.output_filename, reduce_redis_address,
-                            reduce_redis_port, campaign_ids=CAMPAIGN_IDS)
+                            reduce_redis_port, campaign_ids=CAMPAIGN_IDS,
+                            kill_time=kill_time)
 
             if args.dump is not None:
                 print("Dumping...")

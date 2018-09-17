@@ -5,16 +5,18 @@ import time
 import os
 import redis
 from collections import defaultdict
+import numpy as np
 
-EXPERIMENT_TIME = 300
+EXPERIMENT_TIME = 180
 SLEEP_TIME = 10
 NUM_TRIALS = 100
 
-WINDOWS = [0.1, 1, 10]
+WINDOWS = [10]
 RAYLETS = [128]
 SHARDS = [4]
-USE_JSON = [False, True]
-KILL_MAPPER = [True, False]
+USE_JSON = [True]
+#KILL_MAPPER = [True, False]
+KILL_MAPPER = [False]
 USE_LINEAGE_STASH = [True, False]
 
 
@@ -158,7 +160,7 @@ def run_experiment(num_raylets, num_redis_shards, use_lineage_stash, window,
 
     command = [
             "bash",
-            "./run_job.sh",
+            "./run_job_failure.sh",
             str(num_raylets),
             str(num_redis_shards),
             "4",  # number of reducers
@@ -166,16 +168,16 @@ def run_experiment(num_raylets, num_redis_shards, use_lineage_stash, window,
             "-1" if use_lineage_stash else "0",
             "1" if mapper else "0",
             str(window),
+            "1" if json else "0",
             filename,
             ]
     print(command)
-    return
     with open("job.out", 'a+') as f:
         pid = subprocess.Popen(command, stdout=f, stderr=f)
         start = time.time()
 
         # Allow 90s for startup time.
-        max_experiment_time = EXPERIMENT_TIME + 90
+        max_experiment_time = EXPERIMENT_TIME + 240
 
         time.sleep(SLEEP_TIME)
         sleep_time = SLEEP_TIME
@@ -193,7 +195,10 @@ def run_experiment(num_raylets, num_redis_shards, use_lineage_stash, window,
             print("ERROR: Killed job with output {}\n".format(filename))
             success = False
 
-    write_stats(filename, "localhost", 6380)
+            try:
+                write_stats(filename, "localhost", 6380)
+            except:
+                pass
 
 def run_all_experiments():
     for trial in range(NUM_TRIALS):

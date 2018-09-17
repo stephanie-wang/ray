@@ -4,7 +4,7 @@ NUM_REDUCERS=${3:-$NUM_RAYLETS}
 EXPERIMENT_TIME=${4:-60}
 GCS_DELAY_MS=${5:--1}
 USE_REDIS=${6:-0}
-USE_JSON=${7:-""}
+USE_JSON=${7:-0}
 
 THROUGHPUT=150000
 
@@ -14,6 +14,13 @@ MAX_LINEAGE_SIZE=1
 HEAD_IP=$(head -n 1 workers.txt)
 
 OUTPUT_FILENAME="$NUM_RAYLETS-nodes-$NUM_REDIS_SHARDS-shards-$NUM_REDUCERS-reducers-100-timeslice-$GCS_DELAY_MS-gcs-$EXPERIMENT_TIME-s"
+
+JSON_ARG=""
+if [ $USE_JSON -eq 1 ]
+then
+    JSON_ARG="--use-json"
+    OUTPUT_FILENAME="$OUTPUT_FILENAME-json"
+fi
 
 if [ $# -gt 7 ] || [ $# -eq 0 ]
 then
@@ -34,7 +41,7 @@ echo "Starting job..."
 DUMP_ARG=""
 if [ $EXPERIMENT_TIME -le 60 ]
 then
-    DUMP_ARG="--dump dump.json"
+    DUMP_ARG="--dump $OUTPUT_FILENAME.json"
 fi
 
 REDIS_ADDRESS=""
@@ -57,11 +64,5 @@ then
     echo "...Redis up"
 fi
 
-JSON_ARG=""
-if [ ! -z $USE_JSON ]
-then
-    JSON_ARG="--use-json"
-fi
 
-
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 4 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 4 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 2 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG
