@@ -159,13 +159,24 @@ void ReconstructionPolicy::HandleTaskLeaseExpired(const TaskID &task_id) {
   SetTaskTimeout(it, initial_reconstruction_timeout_ms_);
 }
 
+void ReconstructionPolicy::HandleClientRemoved(const ClientID &client_id) {
+  for (const auto &entry : listening_tasks_) {
+    if (entry.second.client_id == client_id) {
+      HandleTaskLeaseExpired(entry.first);
+    }
+  }
+}
+
 void ReconstructionPolicy::HandleTaskLeaseNotification(const TaskID &task_id,
+                                                       const ClientID &client_id,
                                                        int64_t lease_timeout_ms) {
   auto it = listening_tasks_.find(task_id);
   if (it == listening_tasks_.end()) {
     // We are no longer listening for this task, so ignore the notification.
     return;
   }
+
+  it->second.client_id = client_id;
 
   if (lease_timeout_ms == 0) {
     HandleTaskLeaseExpired(task_id);

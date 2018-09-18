@@ -143,11 +143,13 @@ class ReconstructionPolicyTest : public ::testing::Test {
     mock_gcs_.Subscribe(
         [this](gcs::AsyncGcsClient *client, const TaskID &task_id,
                const TaskLeaseDataT &task_lease) {
+          const ClientID node_manager_id = ClientID::from_binary(task_lease.node_manager_id);
           reconstruction_policy_->HandleTaskLeaseNotification(task_id,
+                                                              node_manager_id,
                                                               task_lease.timeout);
         },
         [this](gcs::AsyncGcsClient *client, const TaskID &task_id) {
-          reconstruction_policy_->HandleTaskLeaseNotification(task_id, 0);
+          reconstruction_policy_->HandleTaskLeaseNotification(task_id, ClientID::nil(), 0);
         });
   }
 
