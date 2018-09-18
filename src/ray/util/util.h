@@ -15,11 +15,11 @@
 ///
 /// \return The number of milliseconds since the steady clock epoch.
 inline int64_t current_time_ms() {
-  return 0;
-  //std::chrono::milliseconds ms_since_epoch =
-  //    std::chrono::duration_cast<std::chrono::milliseconds>(
-  //        std::chrono::steady_clock::now().time_since_epoch());
-  //return ms_since_epoch.count();
+  //return 0;
+  std::chrono::milliseconds ms_since_epoch =
+      std::chrono::duration_cast<std::chrono::milliseconds>(
+          std::chrono::steady_clock::now().time_since_epoch());
+  return ms_since_epoch.count();
 }
 
 inline int64_t current_sys_time_ms() {
