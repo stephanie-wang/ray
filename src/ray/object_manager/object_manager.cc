@@ -192,9 +192,13 @@ ray::Status ObjectManager::Pull(const ObjectID &object_id) {
             // Pull from one.  If we fail to receive an object within the pull
             // timeout, then this will try the rest of the clients in the list
             // in succession.
-            it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
-                TryPull(object_id);
-              });
+            if ((current_time_ms() - it->second.start_time_ms) >= config_.pull_timeout_ms) {
+              TryPull(object_id);
+            } else {
+              it->second.SetTimer(*main_service_, config_.pull_timeout_ms, [this, object_id]() {
+                  TryPull(object_id);
+                });
+            }
           }
         }
       });

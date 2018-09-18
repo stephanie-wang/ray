@@ -177,7 +177,7 @@ class ObjectManager : public ObjectManagerInterface {
   friend class TestObjectManager;
 
   struct PullRequest {
-    PullRequest() : retry_timer(nullptr), timer_set(false), client_locations() {}
+    PullRequest() : retry_timer(nullptr), timer_set(false), client_locations(), start_time_ms(current_time_ms()) {}
     void SetTimer(boost::asio::io_service &service, uint timeout_ms, const std::function<void()> &handler) {
       if (retry_timer == nullptr) {
         // Set the timer if we haven't already.
@@ -203,6 +203,7 @@ class ObjectManager : public ObjectManagerInterface {
     std::unique_ptr<boost::asio::deadline_timer> retry_timer;
     bool timer_set;
     std::vector<ClientID> client_locations;
+    uint64_t start_time_ms;
   };
 
   struct WaitState {
