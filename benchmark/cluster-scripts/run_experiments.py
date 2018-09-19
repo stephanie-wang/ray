@@ -20,6 +20,8 @@ RAYLETS = [32]
 SHARDS = [1, 2, 4, 8, 16, 24, 32, 48, 64]
 K = [100]
 
+MAX_QUEUE_SIZE = 20000
+
 
 def get_filename(num_raylets, lineage_cache_policy, max_lineage_size,
         gcs_delay, num_redis_shards, target_throughput, trial):
@@ -61,11 +63,15 @@ def parse_experiment_throughput(num_raylets, lineage_cache_policy,
             line = f.readline()
             while line:
                 if "Lineage" in line:
-                    lineage_overloaded = True
-                    throughput = -1
+                    stash_size  = int(line.split()[-1])
+                    if stash_size >= MAX_QUEUE_SIZE:
+                        lineage_overloaded = True
+                        throughput = -1
                 elif "Queue" in line:
-                    queue_overloaded = True
-                    throughput = -1
+                    queue_size = int(line.split()[-1])
+                    if queue_size >= MAX_QUEUE_SIZE:
+                        queue_overloaded = True
+                        throughput = -1
                 line = f.readline()
         return throughput, lineage_overloaded, queue_overloaded, timed_out
     except:

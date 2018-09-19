@@ -268,11 +268,11 @@ void NodeManager::Heartbeat() {
   heartbeats_++;
   heartbeats_ = heartbeats_ % 1;
   if (heartbeats_ % 1 == 0) {
-    if (lineage_cache_->NumEntries() > 20000) {
+    if (lineage_cache_->NumEntries() > 0) {
       RAY_LOG(INFO) << "Lineage cache size on " << gcs_client_->client_table().GetLocalClientId() << " is " << lineage_cache_->NumEntries();
     }
     size_t queue_size = local_queues_.GetQueueSize() + gcs_task_cache_.size() + gcs_task_queue_.size();
-    if (queue_size > 20000) {
+    if (queue_size > 0) {
       RAY_LOG(INFO) << "Queue length on " << gcs_client_->client_table().GetLocalClientId() << " is " << queue_size;
     }
   }
@@ -1530,15 +1530,10 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   }
 
   auto &server_conn = it->second;
-  auto start = current_sys_time_ms();
   server_conn->WriteMessageAsync(
       static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
-      fbb.GetBufferPointer(), [this, task, node_id, start](const ray::Status &status) {
+      fbb.GetBufferPointer(), [this, task, node_id](const ray::Status &status) {
         HandleTaskForwarded(status, task, node_id);
-        auto end = current_sys_time_ms();
-        if ((end - start) > 10) {
-          RAY_LOG(WARNING) << "ForwardTask WriteMessage took " << end - start;
-        }
       });
   return ray::Status::OK();
 }
