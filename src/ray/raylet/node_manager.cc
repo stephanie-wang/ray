@@ -271,7 +271,7 @@ void NodeManager::Heartbeat() {
     if (lineage_cache_->NumEntries() > 20000) {
       RAY_LOG(INFO) << "Lineage cache size on " << gcs_client_->client_table().GetLocalClientId() << " is " << lineage_cache_->NumEntries();
     }
-    size_t queue_size = local_queues_.GetQueueSize() + gcs_task_cache_.size();
+    size_t queue_size = local_queues_.GetQueueSize() + gcs_task_cache_.size() + gcs_task_queue_.size();
     if (queue_size > 20000) {
       RAY_LOG(INFO) << "Queue length on " << gcs_client_->client_table().GetLocalClientId() << " is " << queue_size;
     }
