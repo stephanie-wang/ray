@@ -134,7 +134,7 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size, batch_start_ti
     generated = []
     for i in range(start_index, num_nodes):
         for _ in range(num_generators_per_node):
-            timestamp = (str(time.time())).encode('ascii')[:16]
+            timestamp = (str(batch_round_tstamp)).encode('ascii')[:16]
             generated.append(generate._submit(
                 args=[gen_dep, timestamp, time_slice_num_events],
                 resources={node_resources[i]: 1},
