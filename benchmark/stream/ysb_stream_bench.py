@@ -815,7 +815,13 @@ if __name__ == '__main__':
             time.sleep(10)
             for i in range(10):
                 round_start = time.time()
-                submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size, round_start)
+                # generate (tstamp, [g,f,p,r])
+                tstamp, batch_round = \
+                    submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size, round_start)
+                # submit g
+                ray.worker.global_worker.submit_batch(batch_round[0])
+                # submit [f,p,r]
+                ray.worker.global_worker.submit_batch([item for sublist in batch_round[1:] for item in sublist])
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -844,7 +850,7 @@ if __name__ == '__main__':
             # aggregate batch rounds in the vector
             # all_batch_rounds = [ (t, [g,f,p,r]), (t, [g,f,p,r]), (t, [g,f,p,r]) ]
             all_batch_rounds = []
-            for i in range(exp_time/BATCH_SIZE_SEC):
+            for i in range(int(exp_time/BATCH_SIZE_SEC)):
                 batch_round_tstamp, batch_round = \
                     submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size, start_time+i*BATCH_SIZE_SEC)
                 all_batch_rounds.append((batch_round_tstamp, batch_round))
