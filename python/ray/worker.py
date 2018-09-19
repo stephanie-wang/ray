@@ -656,6 +656,21 @@ class Worker(object):
                     returns.append(object_ids)
             return returns
 
+    def submit_batch_preprocess(self, tasks):
+        ''' This function should do everything submit_batch does but without
+            a submission of the task batch to the local scheduler.
+        '''
+        returns = []
+        for task in tasks:
+            object_ids = task.returns()
+            if task.actor_id().id() != NIL_ACTOR_ID:
+                object_ids.pop(-1)
+            if len(object_ids) == 1:
+                returns += object_ids
+            else:
+                returns.append(object_ids)
+        return returns
+
     def create_task(self,
                     function_id,
                     args,

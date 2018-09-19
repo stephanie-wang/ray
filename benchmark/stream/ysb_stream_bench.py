@@ -32,6 +32,7 @@ CAMPAIGN_TO_PARTITION = {}
 
 @ray.remote
 def warmup_objectstore():
+    pass  # return to skip warmup for faster testing
     x = np.ones(10 ** 8)
     for _ in range(100):
         ray.put(x)
@@ -121,7 +122,10 @@ def reduce_warmup(timestamp, *args):
     else:
         return [timestamp]
 
-def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
+def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size, batch_start_time):
+    batch_round = [] # a list containing a round of generate, filter, project, reduce batches
+    batch_round_tstamp = batch_start_time # batch timestamp for this round of task batches
+
     if SEPARATE_REDUCERS:
         start_index = num_reducer_nodes
     else:
@@ -154,7 +158,12 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
                 resources={node_resources[i] : 1},
                 batch=BATCH))
     if BATCH:
-        filtered = ray.worker.global_worker.submit_batch(generated + filtered)[len(generated):]
+        # filtered = ray.worker.global_worker.submit_batch(generated + filtered)[len(generated):]
+        # Append the generate and filtered batch to the container.
+        batch_round.append(generated)
+        batch_round.append(filtered)
+        filtered = ray.worker.global_worker.submit_batch_preprocess(filtered)
+
     filtered = flatten(filtered)
 
     shuffled, start_idx = [], 0
@@ -169,16 +178,21 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
                 batch=BATCH))
             start_idx += num_filter_in
     if BATCH:
-        shuffled = ray.worker.global_worker.submit_batch(shuffled)
+        #shuffled = ray.worker.global_worker.submit_batch(shuffled)
+        batch_round.append(shuffled)
+        shuffled = ray.worker.global_worker.submit_batch_preprocess(shuffled)
 
     if BATCH:
         batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
-        ray.worker.global_worker.submit_batch(batch)
+        #ray.worker.global_worker.submit_batch(batch)
+        batch_round.append(batch)
     else:
         [reducer.reduce.remote(*shuffled) for reducer in reducers]
 
-    batch = [warmup._submit(args=[], resources={node_resource: 1}, batch=True) for node_resource in node_resources]
-    ray.worker.global_worker.submit_batch(batch)
+    # Prepare a batch of warmup tasks, if needed to trigger the push optimizations
+    # batch = [warmup._submit(args=[], resources={node_resource: 1}, batch=True) for node_resource in node_resources]
+    # ray.worker.global_worker.submit_batch(batch)
+    return batch_round_tstamp, batch_round
 
 def submit_tasks(gen_dep, num_reducer_nodes, window_size):
     if SEPARATE_REDUCERS:
@@ -801,7 +815,7 @@ if __name__ == '__main__':
             time.sleep(10)
             for i in range(10):
                 round_start = time.time()
-                submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
+                submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size, round_start)
                 time.sleep(time_to_sleep)
                 ray.wait([reducer.clear.remote() for reducer in reducers],
                          num_returns = len(reducers))
@@ -814,28 +828,62 @@ if __name__ == '__main__':
             failure_time = start_time + exp_time * 0.5 + WINDOW_SIZE_SEC * np.random.rand()
             killed = False
 
+            # Make batch submission start time be a multiple of window size (10s)
             start_time = (time.time() // WINDOW_SIZE_SEC) * WINDOW_SIZE_SEC + WINDOW_SIZE_SEC
+            # The first generate batch tstamp should be start time start_time
+            # Subsequent generate tstamps = start_time + i* BATCH_SIZE_SEC
             end_time = start_time + exp_time
             next_round_time = start_time + BATCH_SIZE_SEC
             time.sleep(start_time - time.time())
 
-            while next_round_time < end_time:
-                submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
+            # call submit_tasks_fn (gen_dep, num_reducer_nodes, args.window_size, start_time,
+            # for every round of batches
+            # for every time stamp, call submit
+            ### create a for loop that generates a vector of batch rounds by calling submit_tasks_fn in a loop
+            # for the total expected number of rounds
+            # aggregate batch rounds in the vector
+            # all_batch_rounds = [ (t, [g,f,p,r]), (t, [g,f,p,r]), (t, [g,f,p,r]) ]
+            all_batch_rounds = []
+            for i in range(exp_time/BATCH_SIZE_SEC):
+                batch_round_tstamp, batch_round = \
+                    submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size, start_time+i*BATCH_SIZE_SEC)
+                all_batch_rounds.append((batch_round_tstamp, batch_round))
 
+            # Go through all the generated batch rounds, submit generate batch to simulate
+            # application activity for interval [ts, ts+BATCH_SIZE_SEC], sleep until
+            # ts+BATCH_SIZE_SEC, submit the rest of the batch round
+
+            # Start with submitting the initial generate batch
+            # all_batch_rounds = [ (t, [g,f,p,r]), (t, [g,f,p,r]), (t, [g,f,p,r]) ]
+            assert(len(all_batch_rounds) > 0)
+            assert(len(all_batch_rounds[0][1]) > 0)
+            # we expect all_batch_rounds[0][1][0] to be a list of generate tasks
+            assert(len(all_batch_rounds[0][1][0]) > 0)
+            ray.worker.global_worker.submit_batch(all_batch_rounds[0][1][0])
+            for i in range(len(all_batch_rounds)):
+                # get the next batch
+                batch_round_tstamp, batch_round = all_batch_rounds[i]
+                # The code below is triggering node failure if configured by experiment.
                 if args.node_failure >= 0 and time.time() > failure_time and not killed:
                     #restart_node(head_node_ip, node_to_restart, args.node_failure)
                     kill_node(head_node_ip, node_to_kill, args.node_failure)
                     #start_node(head_node_ip, node_to_restart, args.node_failure)
                     killed = True
 
-                loop_end = time.time()
-
-                time_to_sleep = next_round_time - time.time()
-                next_round_time += BATCH_SIZE_SEC
+                # Calculate time to sleep and sleep until submitting the rest of round i
+                time_to_sleep = batch_round_tstamp + BATCH_SIZE_SEC - time.time()
                 if time_to_sleep > 0:
                     time.sleep(time_to_sleep)
                 else:
                     print("WARNING: behind by", time_to_sleep * -1)
+
+                # Submit the remaining task batches for this round of batches
+                ray.worker.global_worker.submit_batch([item for sublist in batch_round[1:] for item in sublist])
+                # Submit the generate batch from the next round of batches
+                if i < len(all_batch_rounds) - 1:
+                    tsnext, batch_round_next = all_batch_rounds[i+1]
+                    next_generate_batch = batch_round_next[0] # generate batch is first in the batch round
+                    ray.worker.global_worker.submit_batch(next_generate_batch)
 
             end_time = time.time()
 
