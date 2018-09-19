@@ -161,7 +161,7 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size):
     num_return_vals = 1
     for i in range(start_index, num_nodes):
         for _ in range(num_projectors_per_node):
-            batches = [task.returns()[0] for task in filtered[start_idx : start_idx + num_filter_in]]
+            batches = filtered[start_idx : start_idx + num_filter_in]
             shuffled.append(project_shuffle_no_json._submit(
                 args=[num_projector_out, window_size] + batches,
                 num_return_vals=num_return_vals,
@@ -810,30 +810,28 @@ if __name__ == '__main__':
             time.sleep(10) # TODO non-deterministic, fix
 
             print("Measuring...")
-            start_time = (time.time() // WINDOW_SIZE_SEC) * WINDOW_SIZE_SEC + WINDOW_SIZE_SEC
-            end_time = start_time + exp_time
-            # Sleep 5ms less to account for latency from driver creating the tasks.
-            time.sleep(start_time - time.time())
             # Fail a node at a random time in a window 1/4 of the way through the experiment.
             failure_time = start_time + exp_time * 0.5 + WINDOW_SIZE_SEC * np.random.rand()
+            killed = False
 
-            while time.time() < end_time:
-                loop_start = time.time()
+            start_time = (time.time() // WINDOW_SIZE_SEC) * WINDOW_SIZE_SEC + WINDOW_SIZE_SEC
+            end_time = start_time + exp_time
+            next_round_time = start_time + BATCH_SIZE_SEC
+            time.sleep(start_time - time.time())
 
+            while next_round_time < end_time:
                 submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size)
 
-                if args.node_failure >= 0 and time.time() > failure_time:
+                if args.node_failure >= 0 and time.time() > failure_time and not killed:
                     #restart_node(head_node_ip, node_to_restart, args.node_failure)
                     kill_node(head_node_ip, node_to_kill, args.node_failure)
                     #start_node(head_node_ip, node_to_restart, args.node_failure)
-                    # Set the half time equal to the end time so that we only
-                    # kill a node once.
-                    killed_time = failure_time
-                    failure_time = end_time
+                    killed = True
 
                 loop_end = time.time()
 
-                time_to_sleep = BATCH_SIZE_SEC - (loop_end - loop_start)
+                time_to_sleep = next_round_time - time.time()
+                next_round_time += BATCH_SIZE_SEC
                 if time_to_sleep > 0:
                     time.sleep(time_to_sleep)
                 else:
@@ -847,7 +845,7 @@ if __name__ == '__main__':
             if args.reduce_redis_address is not None:
                 kill_time = None
                 if args.node_failure >= 0:
-                    kill_time = killed_time
+                    kill_time = failure_time
                 write_stats(args.output_filename, reduce_redis_address,
                             reduce_redis_port, campaign_ids=CAMPAIGN_IDS,
                             kill_time=kill_time)
