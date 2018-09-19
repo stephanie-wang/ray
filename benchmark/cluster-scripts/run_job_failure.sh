@@ -28,7 +28,6 @@ WORKER_RAYLETS=$(( $NUM_RAYLETS - 2 ))
 if [ $KILL_MAPPER -eq 1 ]
 then
     DEAD_NODE=$(( $RANDOM % $WORKER_RAYLETS + 2 ))
-    DEAD_NODE=2
     DEAD_NODE_TYPE="mapper"
     #OUTPUT_FILENAME="$OUTPUT_FILENAME-map"
 else
@@ -81,4 +80,4 @@ then
 fi
 
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 2 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 2 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE --window-size $WINDOW_SIZE
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 4 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 2 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE --window-size $WINDOW_SIZE

@@ -15,9 +15,8 @@ WINDOWS = [10]
 RAYLETS = [128]
 SHARDS = [4]
 USE_JSON = [True]
-#KILL_MAPPER = [True, False]
-KILL_MAPPER = [False]
-USE_LINEAGE_STASH = [True, False]
+KILL_MAPPER = [True, False]
+USE_LINEAGE_STASH = [False, True]
 
 
 def collect_redis_stats(redis_address, redis_port, campaign_ids=None):
@@ -206,8 +205,8 @@ def run_all_experiments():
             for num_redis_shards in SHARDS:
                 for window in WINDOWS:
                     for json in USE_JSON:
-                        for kill_mapper in KILL_MAPPER:
-                            for use_lineage_stash in USE_LINEAGE_STASH:
+                        for use_lineage_stash in USE_LINEAGE_STASH:
+                            for kill_mapper in KILL_MAPPER:
                                 trial_ran = parse_experiment(num_raylets, num_redis_shards,
                                         use_lineage_stash, window, kill_mapper, json, trial)
                                 if trial_ran:
