@@ -19,8 +19,18 @@ ray::Status TcpConnect(boost::asio::ip::tcp::socket &socket,
 }
 
 template <class T>
+std::shared_ptr<ServerConnection<T>> ServerConnection<T>::Create(boost::asio::basic_stream_socket<T> &&socket) {
+  std::shared_ptr<ServerConnection<T>> self(
+      new ServerConnection(std::move(socket)));
+  return self;
+}
+
+template <class T>
 ServerConnection<T>::ServerConnection(boost::asio::basic_stream_socket<T> &&socket)
-    : socket_(std::move(socket)) {}
+    : socket_(std::move(socket)),
+      write_queue_(),
+      writing_(false),
+      max_messages_(1) {}
 
 template <class T>
 Status ServerConnection<T>::WriteBuffer(
@@ -84,6 +94,66 @@ ray::Status ServerConnection<T>::WriteMessage(int64_t type, int64_t length,
 }
 
 template <class T>
+void ServerConnection<T>::WriteSome() {
+  // Make sure we were not writing to the socket.
+  RAY_CHECK(!writing_);
+  writing_ = true;
+
+  // Do an async write of everything currently in the queue to the socket.
+  std::vector<boost::asio::const_buffer> message_buffers;
+  size_t num_messages = 0;
+  for (const auto &write_buffer : write_queue_) {
+    message_buffers.push_back(boost::asio::buffer(&write_buffer->write_version, sizeof(write_buffer->write_version)));
+    message_buffers.push_back(boost::asio::buffer(&write_buffer->write_type, sizeof(write_buffer->write_type)));
+    message_buffers.push_back(boost::asio::buffer(&write_buffer->write_length, sizeof(write_buffer->write_length)));
+    message_buffers.push_back(boost::asio::buffer(write_buffer->write_message));
+    num_messages++;
+    if (num_messages == max_messages_) {
+      break;
+    }
+  }
+  auto this_ptr = this->shared_from_this();
+  boost::asio::async_write(ServerConnection<T>::socket_, message_buffers,
+      [this, this_ptr, num_messages](const boost::system::error_code &error, size_t
+        bytes_transferred){
+    ray::Status status = ray::Status::OK();
+    if (error.value() != boost::system::errc::errc_t::success) {
+      status = boost_to_ray_status(error);
+    }
+    // Call the handlers for the written messages.
+    for (size_t i = 0; i < num_messages; i++) {
+      auto write_buffer = std::move(write_queue_.front());
+      write_buffer->handler(status);
+      write_queue_.pop_front();
+    }
+    // We finished writing, so mark that we're no longer doing an async write.
+    writing_ = false;
+    // If there is more to write, try to write the rest.
+    if (!write_queue_.empty()) {
+      WriteSome();
+    }
+  });
+}
+
+template <class T>
+void ServerConnection<T>::WriteMessageAsync(int64_t type, int64_t length, const
+    uint8_t *message, const std::function<void(const ray::Status&)>
+    &handler) {
+  auto write_buffer = std::make_shared<WriteBufferData>();
+  write_buffer->write_type = type;
+  write_buffer->write_length = length;
+  write_buffer->write_message.resize(length);
+  write_buffer->write_message.assign(message, message + length);
+  write_buffer->handler = handler;
+  write_queue_.push_back(write_buffer);
+
+  if (!writing_) {
+    WriteSome();
+  }
+}
+
+
+template <class T>
 std::shared_ptr<ClientConnection<T>> ClientConnection<T>::Create(
     ClientHandler<T> &client_handler, MessageHandler<T> &message_handler,
     boost::asio::basic_stream_socket<T> &&socket, const std::string &debug_label) {
@@ -144,7 +214,7 @@ void ClientConnection<T>::ProcessMessages(bool sync) {
   } else {
     boost::asio::async_read(
         ServerConnection<T>::socket_, header,
-        boost::bind(&ClientConnection<T>::ProcessMessageHeader, this->shared_from_this(),
+        boost::bind(&ClientConnection<T>::ProcessMessageHeader, shared_ClientConnection_from_this(),
                     boost::asio::placeholders::error, sync));
   }
 }
@@ -183,7 +253,7 @@ void ClientConnection<T>::ProcessMessageHeader(const boost::system::error_code &
   } else {
     boost::asio::async_read(
         ServerConnection<T>::socket_, boost::asio::buffer(read_message_),
-        boost::bind(&ClientConnection<T>::ProcessMessage, this->shared_from_this(),
+        boost::bind(&ClientConnection<T>::ProcessMessage, shared_ClientConnection_from_this(),
                     boost::asio::placeholders::error));
   }
 }
@@ -195,7 +265,7 @@ void ClientConnection<T>::ProcessMessage(const boost::system::error_code &error)
   }
 
   uint64_t start_ms = current_time_ms();
-  message_handler_(this->shared_from_this(), read_type_, read_message_.data());
+  message_handler_(shared_ClientConnection_from_this(), read_type_, read_message_.data());
   uint64_t interval = current_time_ms() - start_ms;
   if (interval > RayConfig::instance().handler_warning_timeout_ms()) {
     RAY_LOG(WARNING) << "[" << debug_label_ << "]ProcessMessage with type " << read_type_
