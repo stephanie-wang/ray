@@ -452,7 +452,7 @@ class LineageCacheKFlush : public LineageCacheInterface {
   /// evicted task's children that are in UNCOMMITTED_READY state.  Returns an
   /// optional reference to the evicted task that is empty if the task was not
   /// in the lineage cache.
-  void EvictTask(const TaskID &task_id);
+  boost::optional<LineageEntry> EvictTask(const TaskID &task_id);
   /// Evict a remote task and its lineage. This should only be called if we
   /// are sure that the remote task and its lineage are committed.
   void EvictRemoteLineage(const TaskID &task_id);
@@ -462,7 +462,7 @@ class LineageCacheKFlush : public LineageCacheInterface {
   /// Unsubscribe from notifications for a task. Returns whether the operation
   /// was successful (whether we were subscribed).
   bool UnsubscribeTask(const TaskID &task_id);
-  void AddUncommittedLineage(const TaskID &task_id, const Lineage &uncommitted_lineage);
+  void AddUncommittedLineage(const TaskID &task_id, const Lineage &uncommitted_lineage, std::unordered_set<TaskID> &subscribe_tasks);
 
   /// The client ID, used to request notifications for specific tasks.
   /// TODO(swang): Move the ClientID into the generic Table implementation.
@@ -589,7 +589,7 @@ class LineageCacheFlush : public LineageCacheInterface {
   /// Unsubscribe from notifications for a task. Returns whether the operation
   /// was successful (whether we were subscribed).
   bool UnsubscribeTask(const TaskID &task_id);
-  void AddUncommittedLineage(const TaskID &task_id, const Lineage &uncommitted_lineage);
+  void AddUncommittedLineage(const TaskID &task_id, const Lineage &uncommitted_lineage, std::unordered_set<TaskID> &subscribe_tasks);
 
   /// The client ID, used to request notifications for specific tasks.
   /// TODO(swang): Move the ClientID into the generic Table implementation.
