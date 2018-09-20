@@ -837,7 +837,6 @@ void NodeManager::ProcessNodeManagerMessage(TcpClientConnection &node_manager_cl
     const Task &task = uncommitted_lineage.GetEntry(task_id)->TaskData();
     RAY_LOG(DEBUG) << "got task " << task.GetTaskSpecification().TaskId()
                    << " spillback=" << task.GetTaskExecutionSpec().NumForwards();
-    RAY_LOG(INFO) << "Task received after " << current_sys_time_ms() - task.GetTaskExecutionSpec().LastTimestamp() << "ms";
     SubmitTask(task, uncommitted_lineage, /* forwarded = */ true);
   } break;
   case protocol::MessageType::DisconnectClient: {
@@ -1513,9 +1512,6 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
 
   // Increment forward count for the forwarded task.
   lineage_cache_entry_task.IncrementNumForwards();
-  int64_t current_sys_time = current_sys_time_ms();
-  RAY_LOG(INFO) << "[ForwardTask] time spent on this raylet "
-      << (current_sys_time - lineage_cache_entry_task.GetTaskExecutionSpec().LastTimestamp());
   lineage_cache_entry_task.SetLastTimestamp(current_sys_time_ms());
 
   flatbuffers::FlatBufferBuilder fbb;
@@ -1536,15 +1532,10 @@ ray::Status NodeManager::ForwardTask(const Task &task, const ClientID &node_id) 
   }
 
   auto &server_conn = it->second;
-  auto start = current_sys_time_ms();
   server_conn->WriteMessageAsync(
       static_cast<int64_t>(protocol::MessageType::ForwardTaskRequest), fbb.GetSize(),
-      fbb.GetBufferPointer(), [this, task, node_id, start](const ray::Status &status) {
+      fbb.GetBufferPointer(), [this, task, node_id](const ray::Status &status) {
         HandleTaskForwarded(status, task, node_id);
-        auto end = current_sys_time_ms();
-        if ((end - start) > 10) {
-          RAY_LOG(WARNING) << "ForwardTask WriteMessage took " << end - start;
-        }
       });
   return ray::Status::OK();
 }
