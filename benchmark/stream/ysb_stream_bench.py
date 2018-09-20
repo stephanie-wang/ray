@@ -194,7 +194,10 @@ def submit_tasks_no_json(gen_dep, num_reducer_nodes, window_size, batch_start_ti
     # ray.worker.global_worker.submit_batch(batch)
     return batch_round_tstamp, batch_round
 
-def submit_tasks(gen_dep, num_reducer_nodes, window_size):
+def submit_tasks(gen_dep, num_reducer_nodes, window_size, batch_start_time):
+    batch_round = [] # a list containing a round of generate, filter, project, reduce batches
+    batch_round_tstamp = batch_start_time # batch timestamp for this round of task batches
+
     if SEPARATE_REDUCERS:
         start_index = num_reducer_nodes
     else:
@@ -203,13 +206,14 @@ def submit_tasks(gen_dep, num_reducer_nodes, window_size):
     generated = []
     for i in range(start_index, num_nodes):
         for _ in range(num_generators_per_node):
-            timestamp = (str(time.time())).encode('ascii')[:16]
+            timestamp = (str(batch_round_tstamp)).encode('ascii')[:16]
             generated.append(generate._submit(
                 args=[gen_dep, timestamp, time_slice_num_events],
                 resources={node_resources[i]: 1},
                 batch=BATCH))
     if BATCH:
-        generated = ray.worker.global_worker.submit_batch(generated)
+        batch_round.append(generated)
+        generated = ray.worker.global_worker.submit_batch_preprocess(generated)
     generated = flatten(generated)
 
     parsed, start_idx = [], 0
@@ -227,7 +231,8 @@ def submit_tasks(gen_dep, num_reducer_nodes, window_size):
                 batch=BATCH))
             partition_start = partition_end
     if BATCH:
-        parsed = ray.worker.global_worker.submit_batch(parsed)
+        batch_round.append(parsed)
+        parsed = ray.worker.global_worker.submit_batch_preprocess(parsed)
     parsed = flatten(parsed)
 
     filtered, start_idx = [], 0
@@ -240,7 +245,8 @@ def submit_tasks(gen_dep, num_reducer_nodes, window_size):
                 batch=BATCH))
             start_idx += num_filter_in
     if BATCH:
-        filtered = ray.worker.global_worker.submit_batch(filtered)
+        batch_round.append(filtered)
+        filtered = ray.worker.global_worker.submit_batch_preprocess(filtered)
     filtered = flatten(filtered)
 
     shuffled, start_idx = [], 0
@@ -255,13 +261,16 @@ def submit_tasks(gen_dep, num_reducer_nodes, window_size):
                 batch=BATCH))
             start_idx += num_projector_in
     if BATCH:
-        shuffled = ray.worker.global_worker.submit_batch(shuffled)
+        batch_round.append(shuffled)
+        shuffled = ray.worker.global_worker.submit_batch_preprocess(shuffled)
 
     if BATCH:
-        batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
-        ray.worker.global_worker.submit_batch(batch)
+        reduce_batch = [reducer.reduce.remote_batch(*shuffled) for reducer in reducers]
+        batch_round.append(reduce_batch)
     else:
         [reducer.reduce.remote(*shuffled) for reducer in reducers]
+
+    return batch_round_tstamp, batch_round
 
 
 def collect_redis_stats(redis_address, redis_port, campaign_ids=None):
@@ -279,12 +288,14 @@ def collect_redis_stats(redis_address, redis_port, campaign_ids=None):
     for campaign_id in campaign_ids:
         windows = r.hgetall(campaign_id)
         for window, window_id in windows.items():
-           seen, time_updated = r.hmget(window_id, [b'seen_count', b'time_updated'])
-           seen = int(seen)
-           time_updated = float(time_updated)
-           window = float(window)
-           counts[window] += seen
-           latencies.append((window, time_updated - window))
+            seen, time_updated = r.hmget(window_id, [b'seen_count', b'time_updated'])
+            if seen is None or time_updated is None:
+                continue
+            seen = int(seen)
+            time_updated = float(time_updated)
+            window = float(window)
+            counts[window] += seen
+            latencies.append((window, time_updated - window))
     counts = sorted(counts.items(), key=lambda key: key[0])
     latencies = sorted(latencies, key=lambda key: key[0])
     print("Average latency:", np.mean([latency[1] for latency in latencies]))
@@ -853,8 +864,9 @@ if __name__ == '__main__':
             # Subsequent generate tstamps = start_time + i* BATCH_SIZE_SEC
             end_time = start_time + exp_time
             next_round_time = start_time + BATCH_SIZE_SEC
-            time.sleep(start_time - time.time())
 
+            print("Creating batches...")
+            batch_creation_start = time.time()
             # call submit_tasks_fn (gen_dep, num_reducer_nodes, args.window_size, start_time,
             # for every round of batches
             # for every time stamp, call submit
@@ -867,6 +879,7 @@ if __name__ == '__main__':
                 batch_round_tstamp, batch_round = \
                     submit_tasks_fn(gen_dep, num_reducer_nodes, args.window_size, start_time+i*BATCH_SIZE_SEC)
                 all_batch_rounds.append((batch_round_tstamp, batch_round))
+            print("Finished creating batches, in", time.time() - batch_creation_start)
 
             # Go through all the generated batch rounds, submit generate batch to simulate
             # application activity for interval [ts, ts+BATCH_SIZE_SEC], sleep until
@@ -878,7 +891,10 @@ if __name__ == '__main__':
             assert(len(all_batch_rounds[0][1]) > 0)
             # we expect all_batch_rounds[0][1][0] to be a list of generate tasks
             assert(len(all_batch_rounds[0][1][0]) > 0)
+
+            time.sleep(start_time - time.time())
             ray.worker.global_worker.submit_batch(all_batch_rounds[0][1][0])
+
             for i in range(len(all_batch_rounds)):
                 # get the next batch
                 batch_round_tstamp, batch_round = all_batch_rounds[i]
