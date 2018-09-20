@@ -10,6 +10,7 @@ OUTPUT_FILENAME=${9:-""}
 
 USE_REDIS=1
 THROUGHPUT=150000
+NUM_PARSERS=1
 
 LINEAGE_POLICY=1
 MAX_LINEAGE_SIZE=1
@@ -21,6 +22,7 @@ if [ $USE_JSON -eq 1 ]
 then
     JSON_ARG="--use-json"
     #OUTPUT_FILENAME="$OUTPUT_FILENAME-json"
+    NUM_PARSERS=4
 fi
 
 # Pick a node that isn't the reducer for now.
@@ -80,4 +82,4 @@ then
 fi
 
 
-python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers 4 --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 2 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE --window-size $WINDOW_SIZE
+python ~/ray/benchmark/stream/ysb_stream_bench.py --redis-address $HEAD_IP --num-nodes $NUM_RAYLETS --num-parsers $NUM_PARSERS --target-throughput $THROUGHPUT --num-reducers $NUM_REDUCERS --exp-time $EXPERIMENT_TIME --num-reducers-per-node 2 $DUMP_ARG $REDIS_ADDRESS --output-filename $OUTPUT_FILENAME --actor-checkpointing $JSON_ARG --node-failure $DEAD_NODE --window-size $WINDOW_SIZE

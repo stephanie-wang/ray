@@ -20,6 +20,7 @@ if [ $USE_JSON -eq 1 ]
 then
     JSON_ARG="--use-json"
     OUTPUT_FILENAME="$OUTPUT_FILENAME-json"
+    NUM_PARSERS=4
 fi
 
 if [ $# -gt 7 ] || [ $# -eq 0 ]
