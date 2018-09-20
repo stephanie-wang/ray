@@ -614,8 +614,15 @@ class Reducer(object):
         except ValueError:
             min_window = min(window for _, windows, _ in partitions for window in windows[self.reduce_index])
 
-        keys_to_flush = []
+        # Keep track of the unique keys in this batch, so that we can decide
+        # which new results to dump to Redis.
+        updated = set()
+        # Keep track of whether we see an event from a new window. In this
+        # case, previous window should be flushed from our state.
         flush = False
+        # Keep track of keys from the previous window. If we see an event from
+        # a new window, these keys should be flushed.
+        keys_to_flush = []
         for campaign_ids, windows, counts in partitions:
             campaign_ids = campaign_ids[self.reduce_index]
             windows = windows[self.reduce_index]
@@ -627,32 +634,38 @@ class Reducer(object):
                 self.seen[key] += count
                 self.count += count
 
+                updated.add(key)
                 if window > min_window:
                     flush = True
+                else:
+                    keys_to_flush.append(key)
 
+
+        # For each key for which we've seen a new result, output the latency.
+        if self.use_redis:
+            pipe = self.redis.pipeline()
+            for campaign_id, window in updated:
+                # To reduce the number of writes to Redis, only output
+                # latencies for windows that have already ended.
+                if time.time() <= window:
+                    continue
+                keys_to_flush.append((campaign_id, window))
+                window_id = self.get_or_create_window(campaign_id, window)
+                pipe.hset(window_id, "seen_count", self.seen[(campaign_id, window)])
+                time_updated = time.time()
+                pipe.hset(window_id, "time_updated", time_updated)
+                print("LATENCY:", time_updated - window)
+
+            pipe.execute()
+        else:
+            for campaign_id, window in updated:
+                if time.time() <= window:
+                    continue
+                keys_to_flush.append((campaign_id, window))
+                time_updated = time.time()
+
+        # If an old window was expired, then flush its state.
         if flush:
-            keys_to_flush = []
-            if self.use_redis:
-                pipe = self.redis.pipeline()
-                for campaign_id, window in self.seen:
-                    if window > min_window:
-                        continue
-                    keys_to_flush.append((campaign_id, window))
-                    window_id = self.get_or_create_window(campaign_id, window)
-                    pipe.hset(window_id, "seen_count", self.seen[(campaign_id, window)])
-                    time_updated = time.time()
-                    pipe.hset(window_id, "time_updated", time_updated)
-                print("LATENCY:", time.time() - keys_to_flush[0][1])
-
-                pipe.execute()
-            else:
-                for campaign_id, window in self.seen:
-                    if window > min_window:
-                        continue
-                    keys_to_flush.append((campaign_id, window))
-                    time_updated = time.time()
-                    print("LATENCY:", window, time_updated - window)
-
             for key in keys_to_flush:
                 del self.seen[key]
 
