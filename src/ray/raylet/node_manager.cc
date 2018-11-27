@@ -541,6 +541,12 @@ void NodeManager::HandleActorStateTransition(const ActorID &actor_id,
                          << " already removed from the lineage cache. This is most "
                             "likely due to reconstruction.";
       }
+      // Maintain the invariant that if a task is in the
+      // MethodsWaitingForActorCreation queue, then it is subscribed to its
+      // respective actor creation task. Since the actor location is now known,
+      // we can remove the task from the queue and forget its dependency on the
+      // actor creation task.
+      task_dependency_manager_.UnsubscribeDependencies(method.GetTaskSpecification().TaskId());
       // The task's uncommitted lineage was already added to the local lineage
       // cache upon the initial submission, so it's okay to resubmit it with an
       // empty lineage this time.
@@ -1155,6 +1161,8 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
       // Keep the task queued until we discover the actor's location.
       // (See design_docs/task_states.rst for the state transition diagram.)
       local_queues_.QueueMethodsWaitingForActorCreation({task});
+      auto actor_creation_dummy_object = spec.ActorCreationDummyObjectId();
+      task_dependency_manager_.SubscribeDependencies(spec.TaskId(), {actor_creation_dummy_object});
       // Mark the task as pending. It will be canceled once we discover the
       // actor's location and either execute the task ourselves or forward it
       // to another node.
