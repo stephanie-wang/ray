@@ -9,7 +9,7 @@ import sys
 
 import ray
 
-ray.init()
+ray.init(redis_address="localhost:6379")
 
 @ray.remote
 class Child(object):
@@ -45,17 +45,24 @@ class Parent(object):
 
 num_parents = 10
 num_children = 10
-death_probability = 0.95
+death_probability = 0.99
 
 parents = [Parent.remote(num_children, death_probability) for _ in range(num_parents)]
 for i in range(100):
-    ray.get([parent.ping.remote(10) for parent in parents])
+    parent_out = [parent.ping.remote(10) for parent in parents]
+    for j, out in enumerate(parent_out):
+        try:
+            print("getting parent", j)
+            ray.get(out)
+        except:
+            parents[j] = Parent.remote(num_children, death_probability)
+            print("Parent", j, "restarted")
 
-    # Kill a parent actor with some probability.
-    exit_chance = np.random.rand()
-    if exit_chance > death_probability:
-        parent_index = np.random.randint(len(parents))
-        parents[parent_index].kill.remote()
-        parents[parent_index] = Parent.remote(num_children, death_probability)
+    ## Kill a parent actor with some probability.
+    #exit_chance = np.random.rand()
+    #if exit_chance > death_probability:
+    #    parent_index = np.random.randint(len(parents))
+    #    parents[parent_index].kill.remote()
+    #    parents[parent_index] = Parent.remote(num_children, death_probability)
 
     print("Finished trial", i)

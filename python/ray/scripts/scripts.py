@@ -11,7 +11,8 @@ import subprocess
 import ray.services as services
 from ray.autoscaler.commands import (attach_cluster, exec_cluster,
                                      create_or_update_cluster, rsync,
-                                     teardown_cluster, get_head_node_ip)
+                                     teardown_cluster, get_head_node_ip,
+                                     kill_node, get_worker_node_ips)
 import ray.ray_constants as ray_constants
 import ray.utils
 
@@ -496,6 +497,24 @@ def teardown(cluster_config_file, yes, workers_only, cluster_name):
 @cli.command()
 @click.argument("cluster_config_file", required=True, type=str)
 @click.option(
+    "--yes",
+    "-y",
+    is_flag=True,
+    default=False,
+    help="Don't ask for confirmation.")
+@click.option(
+    "--cluster-name",
+    "-n",
+    required=False,
+    type=str,
+    help="Override the configured cluster name.")
+def kill(cluster_config_file, yes, cluster_name):
+    kill_node(cluster_config_file, yes, cluster_name)
+
+
+@cli.command()
+@click.argument("cluster_config_file", required=True, type=str)
+@click.option(
     "--start",
     is_flag=True,
     default=False,
@@ -647,6 +666,18 @@ def get_head_ip(cluster_config_file, cluster_name):
 
 
 @cli.command()
+@click.argument("cluster_config_file", required=True, type=str)
+@click.option(
+    "--cluster-name",
+    "-n",
+    required=False,
+    type=str,
+    help="Override the configured cluster name.")
+def get_worker_ips(cluster_config_file, cluster_name):
+    click.echo(get_worker_node_ips(cluster_config_file, cluster_name))
+
+
+@cli.command()
 def stack():
     COMMAND = """
 pyspy=`which py-spy`
@@ -683,7 +714,9 @@ cli.add_command(rsync_up)
 cli.add_command(submit)
 cli.add_command(teardown)
 cli.add_command(teardown, name="down")
+cli.add_command(kill)
 cli.add_command(get_head_ip)
+cli.add_command(get_worker_ips)
 cli.add_command(stack)
 
 
