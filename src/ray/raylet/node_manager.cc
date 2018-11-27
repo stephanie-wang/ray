@@ -1178,6 +1178,9 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
 void NodeManager::HandleTaskBlocked(const std::shared_ptr<LocalClientConnection> &client,
                                     const std::vector<ObjectID> &required_object_ids,
                                     const TaskID &current_task_id) {
+  for (const auto &object_id : required_object_ids) {
+    RAY_LOG(INFO) << "Task " << current_task_id << " blocked on " << object_id;
+  }
   std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
   if (worker) {
     // The client is a worker. If the worker is not already blocked and the
@@ -1225,6 +1228,7 @@ void NodeManager::HandleTaskBlocked(const std::shared_ptr<LocalClientConnection>
 
 void NodeManager::HandleTaskUnblocked(
     const std::shared_ptr<LocalClientConnection> &client, const TaskID &current_task_id) {
+  RAY_LOG(INFO) << "Task " << current_task_id << " unblocked";
   std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
 
   // TODO(swang): Because the object dependencies are tracked in the task
@@ -1507,6 +1511,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
 }
 
 void NodeManager::HandleTaskReconstruction(const TaskID &task_id) {
+  RAY_LOG(INFO) << "Task " << task_id << " needs reconstruction?";
   // Retrieve the task spec in order to re-execute the task.
   RAY_CHECK_OK(gcs_client_->raylet_task_table().Lookup(
       JobID::nil(), task_id,
