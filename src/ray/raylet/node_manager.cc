@@ -328,7 +328,7 @@ void NodeManager::GetObjectManagerProfileInfo() {
 void NodeManager::ClientAdded(const ClientTableDataT &client_data) {
   const ClientID client_id = ClientID::from_binary(client_data.client_id);
 
-  RAY_LOG(DEBUG) << "[ClientAdded] received callback from client id " << client_id;
+  RAY_LOG(INFO) << "[ClientAdded] received callback from client id " << client_id << " IP " << client_data.node_manager_address;
   if (client_id == gcs_client_->client_table().GetLocalClientId()) {
     // We got a notification for ourselves, so we are connected to the GCS now.
     // Save this NodeManager's resource information in the cluster resource map.
@@ -381,7 +381,7 @@ void NodeManager::ClientRemoved(const ClientTableDataT &client_data) {
   // TODO(swang): If we receive a notification for our own death, clean up and
   // exit immediately.
   const ClientID client_id = ClientID::from_binary(client_data.client_id);
-  RAY_LOG(DEBUG) << "[ClientRemoved] received callback from client id " << client_id;
+  RAY_LOG(INFO) << "[ClientRemoved] received callback from client id " << client_id;
 
   RAY_CHECK(client_id != gcs_client_->client_table().GetLocalClientId())
       << "Exiting because this node manager has mistakenly been marked dead by the "
@@ -501,7 +501,7 @@ void NodeManager::HandleDisconnectedActor(const ActorID &actor_id, bool was_loca
 
 void NodeManager::HandleActorStateTransition(const ActorID &actor_id,
                                              const ActorTableDataT &data) {
-  RAY_LOG(DEBUG) << "Actor creation notification received: " << actor_id << " "
+  RAY_LOG(INFO) << "Actor creation notification received: " << actor_id << " "
                  << static_cast<int>(data.state);
 
   // Register the new actor.
@@ -1659,6 +1659,8 @@ void NodeManager::ForwardTaskOrResubmit(const Task &task,
       // once it is resubmitted.
       lineage_cache_.RemoveWaitingTask(task_id);
     } else {
+      RAY_LOG(INFO) << "Resubmitting non-actor task " << task_id
+                    << " because ForwardTask failed.";
       // The task is not for an actor and may therefore be placed on another
       // node immediately. Send it to the scheduling policy to be placed again.
       local_queues_.QueuePlaceableTasks({task});
@@ -1671,6 +1673,7 @@ void NodeManager::ForwardTask(const Task &task, const ClientID &node_id,
                               const std::function<void(const ray::Status &)> &on_error) {
   const auto &spec = task.GetTaskSpecification();
   auto task_id = spec.TaskId();
+  RAY_LOG(INFO) << "Forwarding task " << task_id << " from " << gcs_client_->client_table().GetLocalClientId() << " to " << node_id;
 
   // Get and serialize the task's unforwarded, uncommitted lineage.
   auto uncommitted_lineage = lineage_cache_.GetUncommittedLineage(task_id, node_id);

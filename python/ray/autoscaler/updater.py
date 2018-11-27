@@ -236,6 +236,7 @@ class NodeUpdater(object):
             ]
         call(
             ssh + ssh_opt + [
+                "-A",
                 "-o", "ConnectTimeout={}s".format(connect_timeout), "-o",
                 "StrictHostKeyChecking=no", "-i", self.ssh_private_key,
                 "{}@{}".format(self.ssh_user, self.ssh_ip), cmd
