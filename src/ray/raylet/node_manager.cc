@@ -1094,6 +1094,7 @@ void NodeManager::TreatTaskAsFailed(const Task &task) {
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage,
                              bool forwarded) {
   const TaskID &task_id = task.GetTaskSpecification().TaskId();
+  RAY_LOG(INFO) << "Task submitted " << task_id;
   if (local_queues_.HasTask(task_id)) {
     RAY_LOG(WARNING) << "Submitted task " << task_id
                      << " is already queued and will not be reconstructed. This is most "
@@ -1179,7 +1180,7 @@ void NodeManager::HandleTaskBlocked(const std::shared_ptr<LocalClientConnection>
                                     const std::vector<ObjectID> &required_object_ids,
                                     const TaskID &current_task_id) {
   for (const auto &object_id : required_object_ids) {
-    RAY_LOG(INFO) << "Task " << current_task_id << " blocked on " << object_id;
+    RAY_LOG(INFO) << "Task " << current_task_id << " blocked on " << object_id << " local? " << task_dependency_manager_.CheckObjectLocal(object_id);
   }
   std::shared_ptr<Worker> worker = worker_pool_.GetRegisteredWorker(client);
   if (worker) {
