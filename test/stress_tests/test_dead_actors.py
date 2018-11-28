@@ -78,7 +78,7 @@ for i in range(100):
     ready, _ = ray.wait(
         outs,
         num_returns=len(outs),
-        timeout=60 * 1000)
+        timeout=120 * 1000)
     assert len(ready) == len(outs)
 
     for j, out in enumerate(outs):

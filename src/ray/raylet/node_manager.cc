@@ -1572,6 +1572,14 @@ void NodeManager::ResubmitTask(const Task &task) {
     // The actor is dead. The actor task will get resubmitted, at which point
     // it will be treated as failed.
   } else {
+    if (task.GetTaskSpecification().IsActorCreationTask()) {
+      const ActorID actor_id = task.GetTaskSpecification().ActorCreationId();
+      auto it = actor_registry_.find(actor_id);
+      if (it != actor_registry_.end()) {
+        RAY_LOG(ERROR) << "Actor creation task resubmitted " << actor_id;
+        return;
+      }
+    }
     RAY_LOG(INFO) << "Reconstructing task " << task.GetTaskSpecification().TaskId()
                   << " on client " << gcs_client_->client_table().GetLocalClientId();
   }
