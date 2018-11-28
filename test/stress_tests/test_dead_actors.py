@@ -52,21 +52,45 @@ class Parent(object):
         # Clean up children.
         ray.get([child.__ray_terminate__.remote() for child in self.children])
 
+
+@ray.remote
+class Fork(object):
+    def __init__(self, actor):
+        self.actor = actor
+
+    def ping(self, num_pings):
+        ray.get(self.actor.ping.remote(num_pings))
+
 num_parents = 100
 num_children = 10
+num_forks = 4
 death_probability = 0.99
 
 parents = [Parent.remote(num_children, death_probability) for _ in range(num_parents)]
+all_forks = [[Fork.remote(parent) for parent in parents] for _ in range(num_forks)]
+
 for i in range(100):
     start_time = time.time()
-    parent_out = [parent.ping.remote(10) for parent in parents]
-    for j, out in enumerate(parent_out):
+    outs = [fork.ping.remote(10) for forks in all_forks for fork in forks]
+    # Wait a while for all the tasks to complete. This should trigger
+    # reconstruction for any actor creation tasks that were forwarded
+    # to nodes that then failed.
+    ready, _ = ray.wait(
+        outs,
+        num_returns=len(outs),
+        timeout=60 * 1000)
+    assert len(ready) == len(outs)
+
+    for j, out in enumerate(outs):
         try:
             print("getting parent", j)
             ray.get(out)
         except:
-            parents[j] = Parent.remote(num_children, death_probability)
-            print("Parent", j, "restarted")
+            parent = Parent.remote(num_children, death_probability)
+            parents[j % len(parents)] = parent
+            for forks in all_forks:
+                forks[j % len(parents)] = Fork.remote(parent)
+            print("Parent", j % len(parents), "restarted")
 
     ## Kill a parent actor with some probability.
     #exit_chance = np.random.rand()

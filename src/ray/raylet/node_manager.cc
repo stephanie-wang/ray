@@ -1101,7 +1101,7 @@ void NodeManager::TreatTaskAsFailed(const Task &task) {
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage,
                              bool forwarded) {
   const TaskID &task_id = task.GetTaskSpecification().TaskId();
-  RAY_LOG(INFO) << "Task submitted " << task_id;
+  RAY_LOG(INFO) << "Task submitted " << task_id << " for actor " << task.GetTaskSpecification().ActorId();
   if (local_queues_.HasTask(task_id)) {
     RAY_LOG(WARNING) << "Submitted task " << task_id
                      << " is already queued and will not be reconstructed. This is most "
