@@ -7,6 +7,7 @@ from __future__ import print_function
 import logging
 import numpy as np
 import sys
+import time
 
 import ray
 
@@ -51,12 +52,13 @@ class Parent(object):
         # Clean up children.
         ray.get([child.__ray_terminate__.remote() for child in self.children])
 
-num_parents = 10
+num_parents = 100
 num_children = 10
 death_probability = 0.99
 
 parents = [Parent.remote(num_children, death_probability) for _ in range(num_parents)]
 for i in range(100):
+    start_time = time.time()
     parent_out = [parent.ping.remote(10) for parent in parents]
     for j, out in enumerate(parent_out):
         try:
@@ -73,4 +75,4 @@ for i in range(100):
     #    parents[parent_index].kill.remote()
     #    parents[parent_index] = Parent.remote(num_children, death_probability)
 
-    logger.info("Finished trial", i)
+    logger.info("Finished trial {} in {}s".format(i, time.time() - start_time))
