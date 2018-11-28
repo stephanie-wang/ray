@@ -1452,7 +1452,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
     // Publish the actor creation event to all other nodes so that methods for
     // the actor will be forwarded directly to this node.
     RAY_CHECK(actor_registry_.find(actor_id) == actor_registry_.end())
-        << "Created an actor that already exists";
+        << "Created an actor that already exists " << actor_id;
     auto actor_data = std::make_shared<ActorTableDataT>();
     actor_data->actor_id = actor_id.binary();
     actor_data->actor_creation_dummy_object_id =
