@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 ray.init(redis_address="localhost:6379")
 
 # These numbers need to match the values in the autoscaler config file.
-num_remote_nodes = 100
+num_remote_nodes = 50
 head_node_cpus = 2
 num_remote_cpus = num_remote_nodes * head_node_cpus
 
