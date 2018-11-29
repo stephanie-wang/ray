@@ -125,7 +125,9 @@ class RemoteFunction(object):
                 num_return_vals=None,
                 num_cpus=None,
                 num_gpus=None,
-                resources=None):
+                resources=None,
+                group_id=None,
+                group_dependency=None):
         """An experimental alternate way to submit remote functions."""
         worker = ray.worker.get_global_worker()
         worker.check_connected()
@@ -150,7 +152,9 @@ class RemoteFunction(object):
             ray.ObjectID(self._function_id),
             args,
             num_return_vals=num_return_vals,
-            resources=resources)
+            resources=resources,
+            group_id=group_id,
+            group_dependency=group_dependency)
         if len(object_ids) == 1:
             return object_ids[0]
         elif len(object_ids) > 1:

@@ -97,7 +97,8 @@ class TaskSpecification {
   /// \param required_resources The task's resource demands.
   /// \param language The language of the worker that must execute the function.
   TaskSpecification(const UniqueID &driver_id, const TaskID &parent_task_id,
-                    int64_t parent_counter, const FunctionID &function_id,
+                    int64_t parent_counter, const GroupID &group_id,
+                    const GroupID &group_dependency, const FunctionID &function_id,
                     const std::vector<std::shared_ptr<TaskArgument>> &task_arguments,
                     int64_t num_returns,
                     const std::unordered_map<std::string, double> &required_resources,
@@ -129,6 +130,7 @@ class TaskSpecification {
   /// \param language The language of the worker that must execute the function.
   TaskSpecification(
       const UniqueID &driver_id, const TaskID &parent_task_id, int64_t parent_counter,
+      const GroupID &group_id, const GroupID &group_dependency,
       const ActorID &actor_creation_id, const ObjectID &actor_creation_dummy_object_id,
       const ActorID &actor_id, const ActorHandleID &actor_handle_id,
       int64_t actor_counter, const FunctionID &function_id,
@@ -196,6 +198,9 @@ class TaskSpecification {
   ActorHandleID ActorHandleId() const;
   int64_t ActorCounter() const;
   ObjectID ActorDummyObject() const;
+
+  GroupID GroupId() const;
+  GroupID GroupDependency() const;
 
  private:
   /// Assign the specification data from a pointer.

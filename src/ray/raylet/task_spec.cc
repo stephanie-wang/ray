@@ -56,17 +56,20 @@ TaskSpecification::TaskSpecification(const std::string &string) {
 
 TaskSpecification::TaskSpecification(
     const UniqueID &driver_id, const TaskID &parent_task_id, int64_t parent_counter,
+    const GroupID &group_id, const GroupID &group_dependency,
     const FunctionID &function_id,
     const std::vector<std::shared_ptr<TaskArgument>> &task_arguments, int64_t num_returns,
     const std::unordered_map<std::string, double> &required_resources,
     const Language &language)
-    : TaskSpecification(driver_id, parent_task_id, parent_counter, ActorID::nil(),
-                        ObjectID::nil(), ActorID::nil(), ActorHandleID::nil(), -1,
-                        function_id, task_arguments, num_returns, required_resources,
+    : TaskSpecification(driver_id, parent_task_id, parent_counter, group_id,
+                        group_dependency, ActorID::nil(), ObjectID::nil(), ActorID::nil(),
+                        ActorHandleID::nil(), -1, function_id, task_arguments,
+                        num_returns, required_resources,
                         std::unordered_map<std::string, double>(), language) {}
 
 TaskSpecification::TaskSpecification(
     const UniqueID &driver_id, const TaskID &parent_task_id, int64_t parent_counter,
+    const GroupID &group_id, const GroupID &group_dependency,
     const ActorID &actor_creation_id, const ObjectID &actor_creation_dummy_object_id,
     const ActorID &actor_id, const ActorHandleID &actor_handle_id, int64_t actor_counter,
     const FunctionID &function_id,
@@ -95,7 +98,8 @@ TaskSpecification::TaskSpecification(
   // Serialize the TaskSpecification.
   auto spec = CreateTaskInfo(
       fbb, to_flatbuf(fbb, driver_id), to_flatbuf(fbb, task_id),
-      to_flatbuf(fbb, parent_task_id), parent_counter, to_flatbuf(fbb, actor_creation_id),
+      to_flatbuf(fbb, parent_task_id), parent_counter, to_flatbuf(fbb, group_id),
+      to_flatbuf(fbb, group_dependency), to_flatbuf(fbb, actor_creation_id),
       to_flatbuf(fbb, actor_creation_dummy_object_id), to_flatbuf(fbb, actor_id),
       to_flatbuf(fbb, actor_handle_id), actor_counter, false,
       to_flatbuf(fbb, function_id), fbb.CreateVector(arguments),
@@ -133,6 +137,17 @@ int64_t TaskSpecification::ParentCounter() const {
   auto message = flatbuffers::GetRoot<TaskInfo>(spec_.data());
   return message->parent_counter();
 }
+
+GroupID TaskSpecification::GroupId() const {
+  auto message = flatbuffers::GetRoot<TaskInfo>(spec_.data());
+  return from_flatbuf(*message->group_id());
+}
+
+GroupID TaskSpecification::GroupDependency() const {
+  auto message = flatbuffers::GetRoot<TaskInfo>(spec_.data());
+  return from_flatbuf(*message->group_dependency());
+}
+
 FunctionID TaskSpecification::FunctionId() const {
   auto message = flatbuffers::GetRoot<TaskInfo>(spec_.data());
   return from_flatbuf(*message->function_id());

@@ -34,8 +34,7 @@ class RAY_EXPORT UniqueID {
   uint8_t id_[kUniqueIDSize];
 };
 
-static_assert(std::is_standard_layout<UniqueID>::value,
-              "UniqueID must be standard");
+static_assert(std::is_standard_layout<UniqueID>::value, "UniqueID must be standard");
 
 std::ostream &operator<<(std::ostream &os, const UniqueID &id);
 
@@ -50,6 +49,7 @@ typedef UniqueID WorkerID;
 typedef UniqueID DriverID;
 typedef UniqueID ConfigID;
 typedef UniqueID ClientID;
+typedef UniqueID GroupID;
 
 // TODO(swang): ObjectID and TaskID should derive from UniqueID. Then, we
 // can make these methods of the derived classes.

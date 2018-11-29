@@ -559,6 +559,8 @@ class Worker(object):
     def submit_task(self,
                     function_id,
                     args,
+                    group_id=None,
+                    group_dependency=None,
                     actor_id=None,
                     actor_handle_id=None,
                     actor_counter=0,
@@ -607,6 +609,11 @@ class Worker(object):
             The return object IDs for this task.
         """
         with profiling.profile("submit_task", worker=self):
+            if group_id is None:
+                group_id = ray.ObjectID(NIL_ID)
+            if group_dependency is None:
+                group_dependency = ray.ObjectID(NIL_ID)
+
             if actor_id is None:
                 assert actor_handle_id is None
                 actor_id = ray.ObjectID(NIL_ACTOR_ID)
@@ -662,9 +669,9 @@ class Worker(object):
                 assert not self.current_task_id.is_nil()
             # Submit the task to local scheduler.
             task = ray.raylet.Task(
-                driver_id, ray.ObjectID(
-                    function_id.id()), args_for_local_scheduler,
-                num_return_vals, self.current_task_id, task_index,
+                driver_id, ray.ObjectID(function_id.id()),
+                args_for_local_scheduler, num_return_vals,
+                self.current_task_id, task_index, group_id, group_dependency,
                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
                 actor_handle_id, actor_counter, execution_dependencies,
                 resources, placement_resources)
@@ -840,9 +847,10 @@ class Worker(object):
                                               return_object_ids, e, None)
             return
         except Exception as e:
-            self._handle_process_task_failure(
-                function_id, function_name, return_object_ids, e,
-                ray.utils.format_error_message(traceback.format_exc()))
+            self._handle_process_task_failure(function_id, function_name,
+                                              return_object_ids, e,
+                                              ray.utils.format_error_message(
+                                                  traceback.format_exc()))
             return
 
         # Execute the task.
@@ -876,9 +884,10 @@ class Worker(object):
                     outputs = (outputs, )
                 self._store_outputs_in_object_store(return_object_ids, outputs)
         except Exception as e:
-            self._handle_process_task_failure(
-                function_id, function_name, return_object_ids, e,
-                ray.utils.format_error_message(traceback.format_exc()))
+            self._handle_process_task_failure(function_id, function_name,
+                                              return_object_ids, e,
+                                              ray.utils.format_error_message(
+                                                  traceback.format_exc()))
 
     def _handle_process_task_failure(self, function_id, function_name,
                                      return_object_ids, error, backtrace):
@@ -1117,8 +1126,8 @@ def error_applies_to_driver(error_key, worker=global_worker):
     """Return True if the error is for this driver and false otherwise."""
     # TODO(rkn): Should probably check that this is only called on a driver.
     # Check that the error key is formatted as in push_error_to_driver.
-    assert len(error_key) == (len(ERROR_KEY_PREFIX) + ray_constants.ID_SIZE + 1
-                              + ray_constants.ID_SIZE), error_key
+    assert len(error_key) == (len(ERROR_KEY_PREFIX) + ray_constants.ID_SIZE +
+                              1 + ray_constants.ID_SIZE), error_key
     # If the driver ID in the error message is a sequence of all zeros, then
     # the message is intended for all drivers.
     driver_id = error_key[len(ERROR_KEY_PREFIX):(
@@ -2076,15 +2085,12 @@ def connect(info,
         # rerun the driver.
         nil_actor_counter = 0
 
-        driver_task = ray.raylet.Task(worker.task_driver_id,
-                                      ray.ObjectID(NIL_FUNCTION_ID), [], 0,
-                                      worker.current_task_id,
-                                      worker.task_index,
-                                      ray.ObjectID(NIL_ACTOR_ID),
-                                      ray.ObjectID(NIL_ACTOR_ID),
-                                      ray.ObjectID(NIL_ACTOR_ID),
-                                      ray.ObjectID(NIL_ACTOR_ID),
-                                      nil_actor_counter, [], {"CPU": 0}, {})
+        driver_task = ray.raylet.Task(
+            worker.task_driver_id, ray.ObjectID(NIL_FUNCTION_ID), [], 0,
+            worker.current_task_id, worker.task_index, ray.ObjectID(NIL_ID),
+            ray.ObjectID(NIL_ID), ray.ObjectID(NIL_ACTOR_ID),
+            ray.ObjectID(NIL_ACTOR_ID), ray.ObjectID(NIL_ACTOR_ID),
+            ray.ObjectID(NIL_ACTOR_ID), nil_actor_counter, [], {"CPU": 0}, {})
 
         # Add the driver task to the task table.
         global_state._execute_command(driver_task.task_id(), "RAY.TABLE_ADD",
