@@ -59,6 +59,27 @@ static PyObject *PyLocalSchedulerClient_submit(PyObject *self, PyObject *args) {
   Py_RETURN_NONE;
 }
 
+static PyObject *PyLocalSchedulerClient_free_groups(PyObject *self, PyObject *args) {
+  PyObject *py_group_ids;
+  if (!PyArg_ParseTuple(args, "O", &py_group_ids)) {
+    return NULL;
+  }
+  std::vector<GroupID> group_ids;
+  Py_ssize_t n = PyList_Size(py_group_ids);
+  for (int64_t i = 0; i < n; ++i) {
+    GroupID group_id;
+    PyObject *py_group_id = PyList_GetItem(py_group_ids, i);
+    if (!PyObjectToUniqueID(py_group_id, &group_id)) {
+      return NULL;
+    }
+    group_ids.push_back(group_id);
+  }
+  local_scheduler_free_groups(
+      reinterpret_cast<PyLocalSchedulerClient *>(self)->local_scheduler_connection,
+      group_ids);
+  Py_RETURN_NONE;
+}
+
 // clang-format off
 static PyObject *PyLocalSchedulerClient_get_task(PyObject *self) {
   ray::raylet::TaskSpecification *task_spec;
@@ -371,6 +392,8 @@ static PyMethodDef PyLocalSchedulerClient_methods[] = {
      "Submit a task to the local scheduler."},
     {"get_task", (PyCFunction)PyLocalSchedulerClient_get_task, METH_NOARGS,
      "Get a task from the local scheduler."},
+    {"free_groups", (PyCFunction)PyLocalSchedulerClient_free_groups,
+     METH_VARARGS, "Ask the local scheduler to free some scheduling information."},
     {"fetch_or_reconstruct", (PyCFunction)PyLocalSchedulerClient_fetch_or_reconstruct,
      METH_VARARGS, "Ask the local scheduler to reconstruct an object."},
     {"notify_unblocked", (PyCFunction)PyLocalSchedulerClient_notify_unblocked,

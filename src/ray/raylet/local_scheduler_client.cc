@@ -243,6 +243,16 @@ void local_scheduler_submit_raylet(LocalSchedulerConnection *conn,
                 fbb.GetBufferPointer(), &conn->write_mutex);
 }
 
+void local_scheduler_free_groups(LocalSchedulerConnection *conn,
+                                 const std::vector<GroupID> &groups) {
+  flatbuffers::FlatBufferBuilder fbb;
+  auto groups_message = to_flatbuf(fbb, groups);
+  auto message = ray::protocol::CreateFreeGroupsRequest(fbb, groups_message);
+  fbb.Finish(message);
+  write_message(conn->conn, static_cast<int64_t>(MessageType::FreeGroups), fbb.GetSize(),
+                fbb.GetBufferPointer(), &conn->write_mutex);
+}
+
 ray::raylet::TaskSpecification *local_scheduler_get_task_raylet(
     LocalSchedulerConnection *conn) {
   int64_t type;

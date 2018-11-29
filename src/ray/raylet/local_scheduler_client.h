@@ -10,6 +10,7 @@ using ray::JobID;
 using ray::TaskID;
 using ray::ActorID;
 using ray::UniqueID;
+using ray::GroupID;
 
 struct LocalSchedulerConnection {
   /** File descriptor of the Unix domain socket that connects to local
@@ -62,6 +63,11 @@ void LocalSchedulerConnection_free(LocalSchedulerConnection *conn);
 void local_scheduler_submit_raylet(LocalSchedulerConnection *conn,
                                    const std::vector<ObjectID> &execution_dependencies,
                                    const ray::raylet::TaskSpecification &task_spec);
+
+/// Free the specified scheduling groups. Any scheduling history for tasks in
+/// these groups will be erased.
+void local_scheduler_free_groups(LocalSchedulerConnection *conn,
+                                 const std::vector<GroupID> &groups);
 
 /**
  * Notify the local scheduler that this client is disconnecting gracefully. This

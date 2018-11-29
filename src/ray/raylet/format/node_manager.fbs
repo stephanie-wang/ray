@@ -71,6 +71,7 @@ enum MessageType:int {
   PushProfileEventsRequest,
   // Free the objects in objects store.
   FreeObjectsInObjectStoreRequest,
+  FreeGroups,
 }
 
 table TaskExecutionSpecification {
@@ -203,4 +204,9 @@ table FreeObjectsRequest {
   local_only: bool;
   // List of object ids we'll delete from object store.
   object_ids: [string];
+}
+
+table FreeGroupsRequest {
+  // The groups to free.
+  group_ids: [string];
 }

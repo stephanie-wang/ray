@@ -6,7 +6,7 @@ import ray.raylet
 import ray.worker
 from ray import profiling
 
-__all__ = ["free"]
+__all__ = ["free", "free_groups"]
 
 
 def free(object_ids, local_only=False, worker=None):
@@ -43,3 +43,9 @@ def free(object_ids, local_only=False, worker=None):
             return
 
         worker.local_scheduler_client.free(object_ids, local_only)
+
+
+def free_groups(group_ids, worker=None):
+    if worker is None:
+        worker = ray.worker.get_global_worker()
+    worker.local_scheduler_client.free_groups(group_ids)
