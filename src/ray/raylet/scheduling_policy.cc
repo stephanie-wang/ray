@@ -14,13 +14,34 @@ SchedulingPolicy::SchedulingPolicy(const SchedulingQueue &scheduling_queue)
     : scheduling_queue_(scheduling_queue),
       gen_(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {}
 
-ClientID SchedulingPolicy::GetPlacementByGroup(GroupID group_id,
-                                               GroupID group_dependency) const {
+ClientID SchedulingPolicy::GetPlacementByGroup(
+    GroupID group_id,
+    GroupID group_dependency,
+    const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
+  // Try to pack the group onto the same nodes that the dependency is on,
+  // resources allowing.
+  const auto it = group_schedule_.find(group_dependency);
+  if (it != group_schedule_.end()) {
+    // Iterate through the nodes where the group dependency is scheduled.
+    for (const auto &schedule : it->second) {
+      const ClientID &node_id = schedule.first;
+      // Get the number of CPUs available on this node.
+      double num_cpus = 0;
+      const auto node_resources = cluster_resources.find(node_id);
+      if (node_resources != cluster_resources.end()) {
+        num_cpus = node_resources->second.GetTotalResources().GetNumCpus();
+      }
+      if (schedule.second < num_cpus) {
+        return node_id;
+      }
+    }
+  }
+
   // TODO: implement.
   return ClientID::nil();
 }
 
-ClientID SchedulingPolicy::GetPlacementByLoad() const {
+ClientID SchedulingPolicy::GetPlacementByLoad(const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
   // TODO: implement.
   return ClientID::nil();
 }
@@ -42,10 +63,10 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
     if (spec.GroupDependency().is_nil()) {
     } else {
       RAY_CHECK(!spec.GroupId().is_nil());
-      client_id = GetPlacementByGroup(spec.GroupId(), spec.GroupDependency());
+      client_id = GetPlacementByGroup(spec.GroupId(), spec.GroupDependency(), cluster_resources);
     }
     if (client_id.is_nil()) {
-      client_id = GetPlacementByLoad();
+      client_id = GetPlacementByLoad(cluster_resources);
     }
 
     // Update dst_client_id's load to keep track of remote task load until
