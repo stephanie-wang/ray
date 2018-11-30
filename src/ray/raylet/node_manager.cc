@@ -601,7 +601,10 @@ void NodeManager::DispatchTasks(
         break;
       }
       if (AssignTask(task)) {
+        RAY_LOG(INFO) << "Assigned task " << task_id;
         removed_task_ids.insert(task_id);
+      } else {
+        RAY_LOG(INFO) << "Failed to assign task " << task_id;
       }
     }
   }
