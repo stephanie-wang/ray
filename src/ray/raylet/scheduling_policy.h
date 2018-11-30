@@ -1,6 +1,7 @@
 #ifndef RAY_RAYLET_SCHEDULING_POLICY_H
 #define RAY_RAYLET_SCHEDULING_POLICY_H
 
+#include <map>
 #include <random>
 #include <unordered_map>
 
@@ -21,6 +22,13 @@ class SchedulingPolicy {
   /// tasks.
   /// \return Void.
   SchedulingPolicy(const SchedulingQueue &scheduling_queue);
+
+  std::unordered_map<TaskID, ClientID> ScheduleByGroup(
+      std::unordered_map<ClientID, SchedulingResources> &cluster_resources,
+      const ClientID &local_client_id);
+
+  ClientID GetPlacementByGroup(GroupID group_id, GroupID group_dependency) const;
+  ClientID GetPlacementByLoad() const;
 
   /// \brief Perform a scheduling operation, given a set of cluster resources and
   /// producing a mapping of tasks to raylets.
@@ -53,6 +61,12 @@ class SchedulingPolicy {
   const SchedulingQueue &scheduling_queue_;
   /// Internally maintained random number generator.
   std::mt19937_64 gen_;
+  /// A map from group to the placement decisions made for that group so far.
+  std::unordered_map<GroupID, std::map<ClientID, int64_t>> group_schedule_;
+  /// A map from group to tasks in the group.
+  std::unordered_map<GroupID, std::vector<TaskID>> groups_;
+  /// A map from task to the placement decision made for that task.
+  std::unordered_map<TaskID, ClientID> task_schedule_;
 };
 
 }  // namespace raylet

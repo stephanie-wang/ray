@@ -67,17 +67,11 @@ bool UniqueID::is_nil() const {
   return true;
 }
 
-const uint8_t *UniqueID::data() const {
-  return id_;
-}
+const uint8_t *UniqueID::data() const { return id_; }
 
-uint8_t *UniqueID::mutable_data() {
-  return id_;
-}
+uint8_t *UniqueID::mutable_data() { return id_; }
 
-size_t UniqueID::size() const {
-  return kUniqueIDSize;
-}
+size_t UniqueID::size() const { return kUniqueIDSize; }
 
 std::string UniqueID::binary() const {
   return std::string(reinterpret_cast<const char *>(id_), kUniqueIDSize);
@@ -105,6 +99,15 @@ bool UniqueID::operator==(const UniqueID &rhs) const {
 }
 
 bool UniqueID::operator!=(const UniqueID &rhs) const { return !(*this == rhs); }
+
+bool UniqueID::operator<(const UniqueID &rhs) const {
+  for (size_t i = 0; i < kUniqueIDSize; i++) {
+    if (data()[i] < rhs.data()[i]) {
+      return true;
+    }
+  }
+  return false;
+}
 
 // This code is from https://sites.google.com/site/murmurhash/
 // and is public domain.

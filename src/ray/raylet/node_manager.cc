@@ -435,23 +435,23 @@ void NodeManager::HeartbeatAdded(const ClientID &client_id,
   // Extract the load information and save it locally.
   remote_resources.SetLoadResources(std::move(remote_load));
   // Extract decision for this local scheduler.
-  auto decision = scheduling_policy_.SpillOver(remote_resources);
-  std::unordered_set<TaskID> local_task_ids;
-  for (const auto &task_id : decision) {
-    // (See design_docs/task_states.rst for the state transition diagram.)
-    TaskState state;
-    const auto task = local_queues_.RemoveTask(task_id, &state);
-    // Since we are spilling back from the ready and waiting queues, we need
-    // to unsubscribe the dependencies.
-    if (state != TaskState::INFEASIBLE) {
-      // Don't unsubscribe for infeasible tasks because we never subscribed in
-      // the first place.
-      RAY_CHECK(task_dependency_manager_.UnsubscribeDependencies(task_id));
-    }
-    // Attempt to forward the task. If this fails to forward the task,
-    // the task will be resubmit locally.
-    ForwardTaskOrResubmit(task, client_id);
-  }
+  // auto decision = scheduling_policy_.SpillOver(remote_resources);
+  // std::unordered_set<TaskID> local_task_ids;
+  // for (const auto &task_id : decision) {
+  //  // (See design_docs/task_states.rst for the state transition diagram.)
+  //  TaskState state;
+  //  const auto task = local_queues_.RemoveTask(task_id, &state);
+  //  // Since we are spilling back from the ready and waiting queues, we need
+  //  // to unsubscribe the dependencies.
+  //  if (state != TaskState::INFEASIBLE) {
+  //    // Don't unsubscribe for infeasible tasks because we never subscribed in
+  //    // the first place.
+  //    RAY_CHECK(task_dependency_manager_.UnsubscribeDependencies(task_id));
+  //  }
+  //  // Attempt to forward the task. If this fails to forward the task,
+  //  // the task will be resubmit locally.
+  //  ForwardTaskOrResubmit(task, client_id);
+  //}
 }
 
 void NodeManager::HeartbeatBatchAdded(const HeartbeatBatchTableDataT &heartbeat_batch) {

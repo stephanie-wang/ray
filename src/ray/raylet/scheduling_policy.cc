@@ -14,6 +14,56 @@ SchedulingPolicy::SchedulingPolicy(const SchedulingQueue &scheduling_queue)
     : scheduling_queue_(scheduling_queue),
       gen_(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {}
 
+ClientID SchedulingPolicy::GetPlacementByGroup(GroupID group_id,
+                                               GroupID group_dependency) const {
+  // TODO: implement.
+  return ClientID::nil();
+}
+
+ClientID SchedulingPolicy::GetPlacementByLoad() const {
+  // TODO: implement.
+  return ClientID::nil();
+}
+
+std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
+    std::unordered_map<ClientID, SchedulingResources> &cluster_resources,
+    const ClientID &local_client_id) {
+  // The policy decision to be returned.
+  std::unordered_map<TaskID, ClientID> decision;
+
+  // Iterate over running tasks, get their resource demand and try to schedule.
+  for (const auto &t : scheduling_queue_.GetPlaceableTasks()) {
+    // Get task's resource demand
+    const auto &spec = t.GetTaskSpecification();
+    const auto &resource_demand = spec.GetRequiredPlacementResources();
+    const TaskID &task_id = spec.TaskId();
+
+    ClientID client_id;
+    if (spec.GroupDependency().is_nil()) {
+    } else {
+      RAY_CHECK(!spec.GroupId().is_nil());
+      client_id = GetPlacementByGroup(spec.GroupId(), spec.GroupDependency());
+    }
+    if (client_id.is_nil()) {
+      client_id = GetPlacementByLoad();
+    }
+
+    // Update dst_client_id's load to keep track of remote task load until
+    // the next heartbeat.
+    ResourceSet new_load(cluster_resources[client_id].GetLoadResources());
+    new_load.AddResources(resource_demand);
+    cluster_resources[client_id].SetLoadResources(std::move(new_load));
+
+    task_schedule_[task_id] = client_id;
+    if (!spec.GroupId().is_nil()) {
+      group_schedule_[spec.GroupId()][client_id] += 1;
+      groups_[spec.GroupId()].push_back(task_id);
+    }
+    decision[task_id] = client_id;
+  }
+  return decision;
+}
+
 std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
     std::unordered_map<ClientID, SchedulingResources> &cluster_resources,
     const ClientID &local_client_id) {
