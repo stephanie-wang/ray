@@ -27,9 +27,11 @@ class SchedulingPolicy {
       std::unordered_map<ClientID, SchedulingResources> &cluster_resources,
       const ClientID &local_client_id);
 
-  ClientID GetPlacementByGroup(GroupID group_id, GroupID group_dependency,
-    const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const;
-  ClientID GetPlacementByLoad(const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const;
+  ClientID GetPlacementByGroup(
+      const GroupID &group_id,
+      const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const;
+  ClientID GetPlacementByAvailability(
+      const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const;
 
   /// \brief Perform a scheduling operation, given a set of cluster resources and
   /// producing a mapping of tasks to raylets.

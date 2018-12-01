@@ -15,15 +15,11 @@ SchedulingPolicy::SchedulingPolicy(const SchedulingQueue &scheduling_queue)
       gen_(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {}
 
 ClientID SchedulingPolicy::GetPlacementByGroup(
-    GroupID group_id,
-    GroupID group_dependency,
+    const GroupID &group_id,
     const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
-  // Try to pack the group onto the same nodes that the dependency is on,
-  // resources allowing.
-  const auto it = group_schedule_.find(group_dependency);
-  if (it != group_schedule_.end()) {
-    // Iterate through the nodes where the group dependency is scheduled.
-    for (const auto &schedule : it->second) {
+  const auto group_schedule = group_schedule_.find(group_id);
+  if (group_schedule != group_schedule_.end()) {
+    for (const auto &schedule : group_schedule->second) {
       const ClientID &node_id = schedule.first;
       // Get the number of CPUs available on this node.
       double num_cpus = 0;
@@ -37,13 +33,28 @@ ClientID SchedulingPolicy::GetPlacementByGroup(
     }
   }
 
-  // TODO: implement.
+  // There is no more room left, so the task should be placed according to
+  // current global load.
   return ClientID::nil();
 }
 
-ClientID SchedulingPolicy::GetPlacementByLoad(const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
-  // TODO: implement.
-  return ClientID::nil();
+ClientID SchedulingPolicy::GetPlacementByAvailability(
+    const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
+  // Get the client with the maximum availability in terms of CPU resources.
+  ClientID client_id;
+  int64_t max_availability = 0;
+  for (const auto &resources : cluster_resources) {
+    const auto &node_resources = resources.second;
+    // The node's availability is equal to its available resources - the
+    // current load in its queue.
+    int64_t availability = node_resources.GetAvailableResources().GetNumCpus() -
+                           node_resources.GetLoadResources().GetNumCpus();
+    if (availability > max_availability || client_id.is_nil()) {
+      client_id = resources.first;
+      max_availability = availability;
+    }
+  }
+  return client_id;
 }
 
 std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
@@ -61,12 +72,34 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
 
     ClientID client_id;
     if (spec.GroupDependency().is_nil()) {
+      // Pick the task's placement according to its individual data
+      // dependencies. NOTE: This only considers the first dependency,
+      // according to the order in the task spec.
+      const auto &dependencies = t.GetDependencies();
+      if (!dependencies.empty()) {
+        // Colocate the task with the first of its data dependencies.
+        const auto &dependency = dependencies.front();
+        const auto it = task_schedule_.find(dependency);
+        if (it != task_schedule_.end()) {
+          client_id = it->second;
+        }
+      }
     } else {
       RAY_CHECK(!spec.GroupId().is_nil());
-      client_id = GetPlacementByGroup(spec.GroupId(), spec.GroupDependency(), cluster_resources);
+      // Try to pack the group onto the same nodes that the dependency is on,
+      // resources allowing.
+      client_id = GetPlacementByGroup(spec.GroupId(), cluster_resources);
+      if (client_id.is_nil()) {
+        // If there is no more room left on the nodes where the dependency
+        // was, then start trying to pack with the rest of the tasks in the
+        // group that have already been placed.
+        client_id = GetPlacementByGroup(spec.GroupDependency(), cluster_resources);
+      }
     }
+    // Placement by data dependency is no longer efficient, so just pick the
+    // node with the greatest availability.
     if (client_id.is_nil()) {
-      client_id = GetPlacementByLoad(cluster_resources);
+      client_id = GetPlacementByAvailability(cluster_resources);
     }
 
     // Update dst_client_id's load to keep track of remote task load until
@@ -75,6 +108,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
     new_load.AddResources(resource_demand);
     cluster_resources[client_id].SetLoadResources(std::move(new_load));
 
+    // Remember the scheduling decision.
     task_schedule_[task_id] = client_id;
     if (!spec.GroupId().is_nil()) {
       group_schedule_[spec.GroupId()][client_id] += 1;
