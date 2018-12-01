@@ -649,7 +649,11 @@ void NodeManager::ProcessClientMessage(
     ProcessSubmitTaskMessage(message_data);
   } break;
   case protocol::MessageType::FreeGroups: {
-    RAY_LOG(ERROR) << "FreeGroups not yet implemented";
+    const auto message = flatbuffers::GetRoot<protocol::FreeGroupsRequest>(message_data);
+    for (size_t i = 0; i < message->group_ids()->size(); ++i) {
+      const GroupID group_id = from_flatbuf(*message->group_ids()->Get(i));
+      scheduling_policy_.FreeGroup(group_id);
+    }
   } break;
   case protocol::MessageType::FetchOrReconstruct: {
     ProcessFetchOrReconstructMessage(client, message_data);
@@ -974,7 +978,8 @@ void NodeManager::ScheduleTasks(
     resource_map[local_client_id].SetLoadResources(local_queues_.GetResourceLoad());
   }
   // Invoke the scheduling policy.
-  auto policy_decision = scheduling_policy_.Schedule(resource_map, local_client_id);
+  auto policy_decision =
+      scheduling_policy_.ScheduleByGroup(resource_map, local_client_id);
 
 #ifndef NDEBUG
   RAY_LOG(DEBUG) << "[NM ScheduleTasks] policy decision:";

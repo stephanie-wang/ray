@@ -119,6 +119,14 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
   return decision;
 }
 
+void SchedulingPolicy::FreeGroup(const GroupID &group_id) {
+  for (const auto &task_id : groups_[group_id]) {
+    RAY_CHECK(task_schedule_.erase(task_id));
+  }
+  RAY_CHECK(groups_.erase(group_id));
+  RAY_CHECK(group_schedule_.erase(group_id));
+}
+
 std::unordered_map<TaskID, ClientID> SchedulingPolicy::Schedule(
     std::unordered_map<ClientID, SchedulingResources> &cluster_resources,
     const ClientID &local_client_id) {
