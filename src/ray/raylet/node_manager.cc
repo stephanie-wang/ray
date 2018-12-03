@@ -190,6 +190,9 @@ ray::Status NodeManager::RegisterGcs() {
 }
 
 void NodeManager::KillWorker(std::shared_ptr<Worker> worker) {
+  // Mark the worker as dead so further messages from it are ignored
+  // (except DisconnectClient).
+  worker->MarkDead();
   // If we're just cleaning up a single worker, allow it some time to clean
   // up its state before force killing. The client socket will be closed
   // and the worker struct will be freed after the timeout.
@@ -219,9 +222,6 @@ void NodeManager::HandleDriverTableUpdate(
       // Kill all the workers. The actual cleanup for these workers is done
       // later when we receive the DisconnectClient message from them.
       for (const auto &worker : workers) {
-        // Mark the worker as dead so further messages from it are ignored
-        // (except DisconnectClient).
-        worker->MarkDead();
         // Then kill the worker process.
         KillWorker(worker);
       }
@@ -708,7 +708,7 @@ void NodeManager::ProcessGetTaskMessage(
   RAY_CHECK(worker);
   // If the worker was assigned a task, mark it as finished.
   if (!worker->GetAssignedTaskId().is_nil()) {
-    FinishAssignedTask(*worker);
+    FinishAssignedTask(worker);
   }
   // Return the worker to the idle pool.
   worker_pool_.PushWorker(std::move(worker));
@@ -1432,8 +1432,8 @@ bool NodeManager::AssignTask(const Task &task) {
   return true;
 }
 
-void NodeManager::FinishAssignedTask(Worker &worker) {
-  TaskID task_id = worker.GetAssignedTaskId();
+void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> &worker) {
+  TaskID task_id = worker->GetAssignedTaskId();
   RAY_LOG(DEBUG) << "Finished task " << task_id;
 
   // (See design_docs/task_states.rst for the state transition diagram.)
@@ -1442,7 +1442,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   if (task.GetTaskSpecification().IsActorCreationTask()) {
     // If this was an actor creation task, then convert the worker to an actor.
     auto actor_id = task.GetTaskSpecification().ActorCreationId();
-    worker.AssignActorId(actor_id);
+    worker->AssignActorId(actor_id);
     const auto driver_id = task.GetTaskSpecification().DriverId();
 
     // Publish the actor creation event to all other nodes so that methods for
@@ -1459,26 +1459,45 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
 
     RAY_LOG(DEBUG) << "Publishing actor creation: " << actor_id
                    << " driver_id: " << driver_id;
-    HandleActorStateTransition(actor_id, *actor_data);
     // The actor should not have been created before, so writing to the first
     // index in the log should succeed.
-    auto failure_callback = [](gcs::AsyncGcsClient *client, const ActorID &id,
+    auto success_callback = [this](gcs::AsyncGcsClient *client, const ActorID &actor_id,
                                const ActorTableDataT &data) {
+      HandleActorStateTransition(actor_id, data);
+      auto dummy_object = ObjectID::from_binary(data.actor_creation_dummy_object_id);
+      // Extend the actor's frontier to include the executed task.
+      auto actor_entry = actor_registry_.find(actor_id);
+      RAY_CHECK(actor_entry != actor_registry_.end());
+      actor_entry->second.ExtendFrontier(ActorHandleID::nil(), dummy_object);
+      // Mark the dummy object as locally available to indicate that the actor's
+      // state has changed and the next method can run.
+      // NOTE(swang): The dummy objects must be marked as local whenever
+      // ExtendFrontier is called, and vice versa, so that we can clean up the
+      // dummy objects properly in case the actor fails and needs to be
+      // reconstructed.
+      HandleObjectLocal(dummy_object);
+    };
+    auto failure_callback = [this, worker](gcs::AsyncGcsClient *client, const ActorID &actor_id,
+                               const ActorTableDataT &data) {
+      // Handle actor state transition.
+      // Put the frontier.
+      //
       // TODO(swang): Instead of making this a fatal check, we could just kill
       // the duplicate actor process. If we do this, we must make sure to
       // either resubmit the tasks that went to the duplicate actor, or wait
       // for success before handling the actor state transition to ALIVE.
-      RAY_LOG(FATAL) << "Failed to update state to ALIVE for actor " << id;
+      RAY_LOG(WARNING) << "Duplicate actor creation for actor " << actor_id << ", killing this actor";
+      KillWorker(worker);
     };
     RAY_CHECK_OK(gcs_client_->actor_table().AppendAt(
-        JobID::nil(), actor_id, actor_data, nullptr, failure_callback, /*log_index=*/0));
+        JobID::nil(), actor_id, actor_data, success_callback, failure_callback, /*log_index=*/0));
 
     // Resources required by an actor creation task are acquired for the
     // lifetime of the actor, so we do not release any resources here.
   } else {
     // Release task's resources.
-    local_available_resources_.Release(worker.GetTaskResourceIds());
-    worker.ResetTaskResourceIds();
+    local_available_resources_.Release(worker->GetTaskResourceIds());
+    worker->ResetTaskResourceIds();
 
     RAY_CHECK(
         cluster_resource_map_[gcs_client_->client_table().GetLocalClientId()].Release(
@@ -1490,7 +1509,7 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   // will be invisible to both the local object manager and the other nodes.
   // NOTE(swang): These objects are never cleaned up. We should consider
   // removing the objects, e.g., when an actor is terminated.
-  if (task.GetTaskSpecification().IsActorCreationTask() ||
+  if (//task.GetTaskSpecification().IsActorCreationTask() ||
       task.GetTaskSpecification().IsActorTask()) {
     ActorID actor_id;
     ActorHandleID actor_handle_id;
@@ -1519,11 +1538,11 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   task_dependency_manager_.TaskCanceled(task_id);
 
   // Unset the worker's assigned task.
-  worker.AssignTaskId(TaskID::nil());
+  worker->AssignTaskId(TaskID::nil());
   // Unset the worker's assigned driver Id if this is not an actor.
   if (!task.GetTaskSpecification().IsActorCreationTask() &&
       !task.GetTaskSpecification().IsActorTask()) {
-    worker.AssignDriverId(DriverID::nil());
+    worker->AssignDriverId(DriverID::nil());
   }
 }
 

@@ -174,7 +174,7 @@ class NodeManager {
   ///
   /// \param The worker that fiished the task.
   /// \return Void.
-  void FinishAssignedTask(Worker &worker);
+  void FinishAssignedTask(std::shared_ptr<Worker> &worker);
   /// Make a placement decision for placeable tasks given the resource_map
   /// provided. This will perform task state transitions and task forwarding.
   ///
