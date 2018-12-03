@@ -41,7 +41,7 @@ ClientID SchedulingPolicy::GetPlacementByGroup(
 ClientID SchedulingPolicy::GetPlacementByAvailability(
     const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
   // Get the client with the maximum availability in terms of CPU resources.
-  ClientID client_id;
+  ClientID client_id = ClientID::nil();
   int64_t max_availability = 0;
   for (const auto &resources : cluster_resources) {
     const auto &node_resources = resources.second;
@@ -70,7 +70,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
     const auto &resource_demand = spec.GetRequiredPlacementResources();
     const TaskID &task_id = spec.TaskId();
 
-    ClientID client_id;
+    ClientID client_id = ClientID::nil();
     if (spec.GroupDependency().is_nil()) {
       // Pick the task's placement according to its individual data
       // dependencies. NOTE: This only considers the first dependency,

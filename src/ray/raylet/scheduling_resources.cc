@@ -133,8 +133,11 @@ bool ResourceSet::GetResource(const std::string &resource_name, double *value) c
 
 double ResourceSet::GetNumCpus() const {
   double num_cpus;
-  RAY_CHECK(GetResource(kCPU_ResourceLabel, &num_cpus));
-  return num_cpus;
+  if (GetResource(kCPU_ResourceLabel, &num_cpus)) {
+    return num_cpus;
+  } else {
+    return 0;
+  }
 }
 
 const std::string ResourceSet::ToString() const {
