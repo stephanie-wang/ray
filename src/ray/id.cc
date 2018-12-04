@@ -104,6 +104,8 @@ bool UniqueID::operator<(const UniqueID &rhs) const {
   for (size_t i = 0; i < kUniqueIDSize; i++) {
     if (data()[i] < rhs.data()[i]) {
       return true;
+    } else if (data()[i] > rhs.data()[i]) {
+      return false;
     }
   }
   return false;

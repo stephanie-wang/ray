@@ -16,8 +16,33 @@ SchedulingPolicy::SchedulingPolicy(const SchedulingQueue &scheduling_queue)
 
 ClientID SchedulingPolicy::GetPlacementByGroup(
     const GroupID &group_id,
+    const GroupID &group_dependency,
     const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const {
+  const auto group_dependency_schedule = group_schedule_.find(group_dependency);
   const auto group_schedule = group_schedule_.find(group_id);
+
+  if (group_dependency_schedule != group_schedule_.end()) {
+    for (const auto &schedule : group_dependency_schedule->second) {
+      const ClientID &node_id = schedule.first;
+      // Get the number of CPUs available on this node.
+      double num_cpus = 0;
+      const auto node_resources = cluster_resources.find(node_id);
+      if (node_resources != cluster_resources.end()) {
+        num_cpus = node_resources->second.GetTotalResources().GetNumCpus();
+      }
+      int64_t num_tasks = 0;
+      if (group_schedule != group_schedule_.end()) {
+        auto it = group_schedule->second.find(node_id);
+        if (it != group_schedule->second.end()) {
+          num_tasks = it->second;
+        }
+      }
+      if (num_tasks < num_cpus) {
+        return node_id;
+      }
+    }
+  }
+
   if (group_schedule != group_schedule_.end()) {
     for (const auto &schedule : group_schedule->second) {
       const ClientID &node_id = schedule.first;
@@ -79,7 +104,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
       if (!dependencies.empty()) {
         // Colocate the task with the first of its data dependencies.
         const auto &dependency = dependencies.front();
-        const auto it = task_schedule_.find(dependency);
+        const auto it = task_schedule_.find(ComputeTaskId(dependency));
         if (it != task_schedule_.end()) {
           client_id = it->second;
         }
@@ -88,13 +113,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
       RAY_CHECK(!spec.GroupId().is_nil());
       // Try to pack the group onto the same nodes that the dependency is on,
       // resources allowing.
-      client_id = GetPlacementByGroup(spec.GroupId(), cluster_resources);
-      if (client_id.is_nil()) {
-        // If there is no more room left on the nodes where the dependency
-        // was, then start trying to pack with the rest of the tasks in the
-        // group that have already been placed.
-        client_id = GetPlacementByGroup(spec.GroupDependency(), cluster_resources);
-      }
+      client_id = GetPlacementByGroup(spec.GroupId(), spec.GroupDependency(), cluster_resources);
     }
     // Placement by data dependency is no longer efficient, so just pick the
     // node with the greatest availability.
@@ -111,7 +130,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
     // Remember the scheduling decision.
     task_schedule_[task_id] = client_id;
     if (!spec.GroupId().is_nil()) {
-      group_schedule_[spec.GroupId()][client_id] += 1;
+      group_schedule_[spec.GroupId()][client_id]++;
       groups_[spec.GroupId()].push_back(task_id);
     }
     decision[task_id] = client_id;
@@ -120,6 +139,7 @@ std::unordered_map<TaskID, ClientID> SchedulingPolicy::ScheduleByGroup(
 }
 
 void SchedulingPolicy::FreeGroup(const GroupID &group_id) {
+  RAY_LOG(INFO) << "Freeing group " << group_id;
   for (const auto &task_id : groups_[group_id]) {
     RAY_CHECK(task_schedule_.erase(task_id));
   }

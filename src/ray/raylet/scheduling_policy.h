@@ -29,6 +29,7 @@ class SchedulingPolicy {
 
   ClientID GetPlacementByGroup(
       const GroupID &group_id,
+      const GroupID &group_dependency,
       const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const;
   ClientID GetPlacementByAvailability(
       const std::unordered_map<ClientID, SchedulingResources> &cluster_resources) const;
