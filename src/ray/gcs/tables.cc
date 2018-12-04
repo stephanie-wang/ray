@@ -288,6 +288,7 @@ Status ProfileTable::AddProfileEventBatch(const ProfileTableData &profile_events
   // There is some room for optimization here because the Append function will just
   // call "Pack" and undo the "UnPack".
   profile_events.UnPackTo(data.get());
+  data->raylet_id = client_->client_table().GetLocalClientId().binary();
 
   return Append(JobID::nil(), from_flatbuf(*profile_events.component_id()), data,
                 [](ray::gcs::AsyncGcsClient *client, const JobID &id,

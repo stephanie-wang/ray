@@ -232,6 +232,7 @@ table ProfileTableData {
   // performance reasons because a single task may generate many events, and
   // we don't want each event to require a GCS command.
   profile_events: [ProfileEvent];
+  raylet_id: string;
 }
 
 table RayResource {

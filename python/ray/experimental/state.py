@@ -426,6 +426,7 @@ class GlobalState(object):
             component_type = decode(profile_table_message.ComponentType())
             component_id = binary_to_hex(profile_table_message.ComponentId())
             node_ip_address = decode(profile_table_message.NodeIpAddress())
+            raylet_id = binary_to_hex(profile_table_message.RayletId())
 
             for j in range(profile_table_message.ProfileEventsLength()):
                 profile_event_message = profile_table_message.ProfileEvents(j)
@@ -434,6 +435,7 @@ class GlobalState(object):
                     "event_type": decode(profile_event_message.EventType()),
                     "component_id": component_id,
                     "node_ip_address": node_ip_address,
+                    "raylet_id": raylet_id,
                     "component_type": component_type,
                     "start_time": profile_event_message.StartTime(),
                     "end_time": profile_event_message.EndTime(),
@@ -558,7 +560,7 @@ class GlobalState(object):
                     "name": event["event_type"],
                     # The identifier for the group of rows that the event
                     # appears in.
-                    "pid": event["node_ip_address"],
+                    "pid": event["raylet_id"],
                     # The identifier for the row that the event appears in.
                     "tid": event["component_type"] + ":" +
                     event["component_id"],
