@@ -978,8 +978,19 @@ void NodeManager::ScheduleTasks(
     resource_map[local_client_id].SetLoadResources(local_queues_.GetResourceLoad());
   }
   // Invoke the scheduling policy.
-  auto policy_decision =
-      scheduling_policy_.ScheduleByGroup(resource_map, local_client_id);
+  bool schedule_using_groups = false;
+  if (!local_queues_.GetPlaceableTasks().empty()) {
+    auto first_task = local_queues_.GetPlaceableTasks().front();
+    if (!first_task.GetTaskSpecification().GroupId().is_nil()) {
+      schedule_using_groups = true;
+    }
+  }
+  std::unordered_map<TaskID, ClientID> policy_decision;
+  if (schedule_using_groups) {
+    policy_decision = scheduling_policy_.ScheduleByGroup(resource_map, local_client_id);
+  } else {
+    policy_decision = scheduling_policy_.Schedule(resource_map, local_client_id);
+  }
 
 #ifndef NDEBUG
   RAY_LOG(DEBUG) << "[NM ScheduleTasks] policy decision:";
