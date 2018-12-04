@@ -233,7 +233,9 @@ class ActorMethod(object):
         return self._remote(
             args=args, kwargs=kwargs, num_return_vals=num_return_vals)
 
-    def _remote(self, args, kwargs, num_return_vals=None):
+    def _remote(self, args, kwargs, num_return_vals=None,
+                group_id=None,
+                group_dependency=None):
         if num_return_vals is None:
             num_return_vals = self._num_return_vals
 
@@ -242,7 +244,9 @@ class ActorMethod(object):
             args=args,
             kwargs=kwargs,
             num_return_vals=num_return_vals,
-            dependency=self._actor._ray_actor_cursor)
+            dependency=self._actor._ray_actor_cursor,
+            group_id=group_id,
+            group_dependency=group_dependency)
 
 
 class ActorClass(object):
@@ -350,7 +354,9 @@ class ActorClass(object):
                 kwargs,
                 num_cpus=None,
                 num_gpus=None,
-                resources=None):
+                resources=None,
+                group_id=None,
+                group_dependency=None):
         """Create an actor.
 
         This method allows more flexibility than the remote method because
@@ -415,7 +421,9 @@ class ActorClass(object):
                 actor_creation_id=actor_id,
                 num_return_vals=1,
                 resources=resources,
-                placement_resources=actor_placement_resources)
+                placement_resources=actor_placement_resources,
+                group_id=group_id,
+                group_dependency=group_dependency)
 
         # We initialize the actor counter at 1 to account for the actor
         # creation task.
@@ -533,7 +541,9 @@ class ActorHandle(object):
                            args=None,
                            kwargs=None,
                            num_return_vals=None,
-                           dependency=None):
+                           dependency=None,
+                           group_id=None,
+                           group_dependency=None):
         """Method execution stub for an actor handle.
 
         This is the function that executes when
@@ -615,7 +625,9 @@ class ActorHandle(object):
             num_return_vals=num_return_vals + 1,
             resources={"CPU": self._ray_actor_method_cpus},
             placement_resources={},
-            driver_id=self._ray_actor_driver_id)
+            driver_id=self._ray_actor_driver_id,
+            group_id=group_id,
+            group_dependency=group_dependency)
         # Update the actor counter and cursor to reflect the most recent
         # invocation.
         self._ray_actor_counter += 1
