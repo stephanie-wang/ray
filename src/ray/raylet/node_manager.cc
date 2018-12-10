@@ -1440,57 +1440,65 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> &worker) {
   const auto task = local_queues_.RemoveTask(task_id);
 
   if (task.GetTaskSpecification().IsActorCreationTask()) {
-    // If this was an actor creation task, then convert the worker to an actor.
     auto actor_id = task.GetTaskSpecification().ActorCreationId();
-    worker->AssignActorId(actor_id);
-    const auto driver_id = task.GetTaskSpecification().DriverId();
-
     // Publish the actor creation event to all other nodes so that methods for
     // the actor will be forwarded directly to this node.
-    RAY_CHECK(actor_registry_.find(actor_id) == actor_registry_.end())
-        << "Created an actor that already exists";
-    auto actor_data = std::make_shared<ActorTableDataT>();
-    actor_data->actor_id = actor_id.binary();
-    actor_data->actor_creation_dummy_object_id =
-        task.GetTaskSpecification().ActorDummyObject().binary();
-    actor_data->driver_id = driver_id.binary();
-    actor_data->node_manager_id = gcs_client_->client_table().GetLocalClientId().binary();
-    actor_data->state = ActorState::ALIVE;
-
-    RAY_LOG(DEBUG) << "Publishing actor creation: " << actor_id
-                   << " driver_id: " << driver_id;
-    // The actor should not have been created before, so writing to the first
-    // index in the log should succeed.
-    auto success_callback = [this](gcs::AsyncGcsClient *client, const ActorID &actor_id,
-                               const ActorTableDataT &data) {
-      HandleActorStateTransition(actor_id, data);
-      auto dummy_object = ObjectID::from_binary(data.actor_creation_dummy_object_id);
-      // Extend the actor's frontier to include the executed task.
-      auto actor_entry = actor_registry_.find(actor_id);
-      RAY_CHECK(actor_entry != actor_registry_.end());
-      actor_entry->second.ExtendFrontier(ActorHandleID::nil(), dummy_object);
-      // Mark the dummy object as locally available to indicate that the actor's
-      // state has changed and the next method can run.
-      // NOTE(swang): The dummy objects must be marked as local whenever
-      // ExtendFrontier is called, and vice versa, so that we can clean up the
-      // dummy objects properly in case the actor fails and needs to be
-      // reconstructed.
-      HandleObjectLocal(dummy_object);
-    };
-    auto failure_callback = [this, worker](gcs::AsyncGcsClient *client, const ActorID &actor_id,
-                               const ActorTableDataT &data) {
-      // Handle actor state transition.
-      // Put the frontier.
-      //
-      // TODO(swang): Instead of making this a fatal check, we could just kill
-      // the duplicate actor process. If we do this, we must make sure to
-      // either resubmit the tasks that went to the duplicate actor, or wait
-      // for success before handling the actor state transition to ALIVE.
-      RAY_LOG(WARNING) << "Duplicate actor creation for actor " << actor_id << ", killing this actor";
+    if (actor_registry_.find(actor_id) != actor_registry_.end()) {
+      RAY_LOG(WARNING) << "Duplicate actor creation for actor " << actor_id
+                       << ", killing this actor";
       KillWorker(worker);
-    };
-    RAY_CHECK_OK(gcs_client_->actor_table().AppendAt(
-        JobID::nil(), actor_id, actor_data, success_callback, failure_callback, /*log_index=*/0));
+    } else {
+      // If this was an actor creation task, then convert the worker to an actor.
+      worker->AssignActorId(actor_id);
+      const auto driver_id = task.GetTaskSpecification().DriverId();
+
+      auto actor_data = std::make_shared<ActorTableDataT>();
+      actor_data->actor_id = actor_id.binary();
+      actor_data->actor_creation_dummy_object_id =
+          task.GetTaskSpecification().ActorDummyObject().binary();
+      actor_data->driver_id = driver_id.binary();
+      actor_data->node_manager_id =
+          gcs_client_->client_table().GetLocalClientId().binary();
+      actor_data->state = ActorState::ALIVE;
+
+      RAY_LOG(DEBUG) << "Publishing actor creation: " << actor_id
+                     << " driver_id: " << driver_id;
+      // The actor should not have been created before, so writing to the first
+      // index in the log should succeed.
+      auto success_callback = [this](gcs::AsyncGcsClient *client, const ActorID &actor_id,
+                                     const ActorTableDataT &data) {
+        HandleActorStateTransition(actor_id, data);
+        auto dummy_object = ObjectID::from_binary(data.actor_creation_dummy_object_id);
+        // Extend the actor's frontier to include the executed task.
+        auto actor_entry = actor_registry_.find(actor_id);
+        RAY_CHECK(actor_entry != actor_registry_.end());
+        actor_entry->second.ExtendFrontier(ActorHandleID::nil(), dummy_object);
+        // Mark the dummy object as locally available to indicate that the actor's
+        // state has changed and the next method can run.
+        // NOTE(swang): The dummy objects must be marked as local whenever
+        // ExtendFrontier is called, and vice versa, so that we can clean up the
+        // dummy objects properly in case the actor fails and needs to be
+        // reconstructed.
+        HandleObjectLocal(dummy_object);
+      };
+      auto failure_callback = [this, worker](gcs::AsyncGcsClient *client,
+                                             const ActorID &actor_id,
+                                             const ActorTableDataT &data) {
+        // Handle actor state transition.
+        // Put the frontier.
+        //
+        // TODO(swang): Instead of making this a fatal check, we could just kill
+        // the duplicate actor process. If we do this, we must make sure to
+        // either resubmit the tasks that went to the duplicate actor, or wait
+        // for success before handling the actor state transition to ALIVE.
+        RAY_LOG(WARNING) << "Duplicate actor creation for actor " << actor_id
+                         << ", killing this actor";
+        KillWorker(worker);
+      };
+      RAY_CHECK_OK(gcs_client_->actor_table().AppendAt(JobID::nil(), actor_id, actor_data,
+                                                       success_callback, failure_callback,
+                                                       /*log_index=*/0));
+    }
 
     // Resources required by an actor creation task are acquired for the
     // lifetime of the actor, so we do not release any resources here.
@@ -1509,17 +1517,9 @@ void NodeManager::FinishAssignedTask(std::shared_ptr<Worker> &worker) {
   // will be invisible to both the local object manager and the other nodes.
   // NOTE(swang): These objects are never cleaned up. We should consider
   // removing the objects, e.g., when an actor is terminated.
-  if (//task.GetTaskSpecification().IsActorCreationTask() ||
-      task.GetTaskSpecification().IsActorTask()) {
-    ActorID actor_id;
-    ActorHandleID actor_handle_id;
-    if (task.GetTaskSpecification().IsActorCreationTask()) {
-      actor_id = task.GetTaskSpecification().ActorCreationId();
-      actor_handle_id = ActorHandleID::nil();
-    } else {
-      actor_id = task.GetTaskSpecification().ActorId();
-      actor_handle_id = task.GetTaskSpecification().ActorHandleId();
-    }
+  if (task.GetTaskSpecification().IsActorTask()) {
+    const ActorID actor_id = task.GetTaskSpecification().ActorId();
+    const ActorHandleID actor_handle_id = task.GetTaskSpecification().ActorHandleId();
     auto actor_entry = actor_registry_.find(actor_id);
     RAY_CHECK(actor_entry != actor_registry_.end());
     auto dummy_object = task.GetTaskSpecification().ActorDummyObject();
