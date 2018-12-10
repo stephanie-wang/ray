@@ -14,6 +14,7 @@ import time
 import ray
 import ray.ray_constants as ray_constants
 import ray.test.test_utils
+from ray.test.cluster_utils import Cluster
 
 
 @pytest.fixture
@@ -30,6 +31,48 @@ def shutdown_only():
     yield None
     # The code after the yield will run as teardown code.
     ray.shutdown()
+
+
+@pytest.fixture
+def ray_start_cluster():
+    node_args = {
+        "resources": dict(CPU=4),
+        "_internal_config": json.dumps({
+            "initial_reconstruction_timeout_milliseconds": 100,
+            "num_heartbeats_timeout": 10
+        })
+    }
+    # Start with 10 worker nodes.
+    g = Cluster(initialize_head=True, connect=True, head_node_args=node_args)
+    workers = []
+    for _ in range(10):
+        workers.append(g.add_node(**node_args))
+    g.wait_for_nodes()
+    yield g
+    ray.shutdown()
+    g.shutdown()
+
+
+def test_duplicate_actor_creation(ray_start_cluster):
+    @ray.remote
+    class Actor(object):
+        def __init__(self):
+            pass
+
+        def foo(self):
+            return "OK"
+
+    @ray.remote
+    def foo(actor):
+        ray.get(actor.foo.remote())
+
+    @ray.remote
+    def create_actor_with_many_handles():
+        a = Actor.remote()
+        ray.get([foo.remote(a) for _ in range(10)])
+
+    for _ in range(100):
+        ray.get([create_actor_with_many_handles.remote() for _ in range(10)])
 
 
 def test_actor_init_error_propagated(ray_start_regular):
