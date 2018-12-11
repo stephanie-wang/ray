@@ -74,6 +74,7 @@ table TaskInfo {
   function_id: string;
   // Task arguments.
   args: [Arg];
+  actor_handle_args: [string];
   // Object IDs of return values.
   returns: [string];
   // The required_resources vector indicates the quantities of the different

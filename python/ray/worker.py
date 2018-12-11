@@ -623,6 +623,7 @@ class Worker(object):
             # Put large or complex arguments that are passed by value in the
             # object store first.
             args_for_local_scheduler = []
+            actor_handle_args = []
             for arg in args:
                 if isinstance(arg, ray.ObjectID):
                     args_for_local_scheduler.append(arg)
@@ -630,6 +631,8 @@ class Worker(object):
                     args_for_local_scheduler.append(arg)
                 else:
                     args_for_local_scheduler.append(put(arg))
+                    if isinstance(arg, ray.actor.ActorHandle):
+                        actor_handle_args.append(arg._ray_actor_cursor)
 
             # By default, there are no execution dependencies.
             if execution_dependencies is None:
@@ -664,6 +667,7 @@ class Worker(object):
             task = ray.raylet.Task(
                 driver_id, ray.ObjectID(
                     function_id.id()), args_for_local_scheduler,
+                actor_handle_args,
                 num_return_vals, self.current_task_id, task_index,
                 actor_creation_id, actor_creation_dummy_object_id, actor_id,
                 actor_handle_id, actor_counter, execution_dependencies,
@@ -2077,7 +2081,7 @@ def connect(info,
         nil_actor_counter = 0
 
         driver_task = ray.raylet.Task(worker.task_driver_id,
-                                      ray.ObjectID(NIL_FUNCTION_ID), [], 0,
+                                      ray.ObjectID(NIL_FUNCTION_ID), [], [], 0,
                                       worker.current_task_id,
                                       worker.task_index,
                                       ray.ObjectID(NIL_ACTOR_ID),

@@ -184,6 +184,9 @@ void SchedulingQueue::FilterState(std::unordered_set<TaskID> &task_ids,
   case TaskState::RUNNING:
     FilterStateFromQueue(running_tasks_, task_ids, filter_state);
     break;
+  case TaskState::WAITING_FOR_ACTOR:
+    FilterStateFromQueue(methods_waiting_for_actor_creation_, task_ids, filter_state);
+    break;
   case TaskState::BLOCKED: {
     const auto blocked_ids = GetBlockedTaskIds();
     for (auto it = task_ids.begin(); it != task_ids.end();) {

@@ -57,20 +57,23 @@ TaskSpecification::TaskSpecification(const std::string &string) {
 TaskSpecification::TaskSpecification(
     const UniqueID &driver_id, const TaskID &parent_task_id, int64_t parent_counter,
     const FunctionID &function_id,
-    const std::vector<std::shared_ptr<TaskArgument>> &task_arguments, int64_t num_returns,
+    const std::vector<std::shared_ptr<TaskArgument>> &task_arguments,
+    const std::vector<ObjectID> &actor_handle_arguments, int64_t num_returns,
     const std::unordered_map<std::string, double> &required_resources,
     const Language &language)
     : TaskSpecification(driver_id, parent_task_id, parent_counter, ActorID::nil(),
                         ObjectID::nil(), ActorID::nil(), ActorHandleID::nil(), -1,
-                        function_id, task_arguments, num_returns, required_resources,
-                        std::unordered_map<std::string, double>(), language) {}
+                        function_id, task_arguments, actor_handle_arguments, num_returns,
+                        required_resources, std::unordered_map<std::string, double>(),
+                        language) {}
 
 TaskSpecification::TaskSpecification(
     const UniqueID &driver_id, const TaskID &parent_task_id, int64_t parent_counter,
     const ActorID &actor_creation_id, const ObjectID &actor_creation_dummy_object_id,
     const ActorID &actor_id, const ActorHandleID &actor_handle_id, int64_t actor_counter,
     const FunctionID &function_id,
-    const std::vector<std::shared_ptr<TaskArgument>> &task_arguments, int64_t num_returns,
+    const std::vector<std::shared_ptr<TaskArgument>> &task_arguments,
+    const std::vector<ObjectID> &actor_handle_arguments, int64_t num_returns,
     const std::unordered_map<std::string, double> &required_resources,
     const std::unordered_map<std::string, double> &required_placement_resources,
     const Language &language)
@@ -99,7 +102,8 @@ TaskSpecification::TaskSpecification(
       to_flatbuf(fbb, actor_creation_dummy_object_id), to_flatbuf(fbb, actor_id),
       to_flatbuf(fbb, actor_handle_id), actor_counter, false,
       to_flatbuf(fbb, function_id), fbb.CreateVector(arguments),
-      fbb.CreateVector(returns), map_to_flatbuf(fbb, required_resources),
+      to_flatbuf(fbb, actor_handle_arguments), fbb.CreateVector(returns),
+      map_to_flatbuf(fbb, required_resources),
       map_to_flatbuf(fbb, required_placement_resources), language);
   fbb.Finish(spec);
   AssignSpecification(fbb.GetBufferPointer(), fbb.GetSize());
@@ -166,6 +170,11 @@ int TaskSpecification::ArgIdCount(int64_t arg_index) const {
 ObjectID TaskSpecification::ArgId(int64_t arg_index, int64_t id_index) const {
   auto message = flatbuffers::GetRoot<TaskInfo>(spec_.data());
   return from_flatbuf(*message->args()->Get(arg_index)->object_ids()->Get(id_index));
+}
+
+const std::vector<ObjectID> TaskSpecification::ActorHandleArgs() const {
+  auto message = flatbuffers::GetRoot<TaskInfo>(spec_.data());
+  return from_flatbuf(*message->actor_handle_args());
 }
 
 const uint8_t *TaskSpecification::ArgVal(int64_t arg_index) const {

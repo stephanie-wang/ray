@@ -367,6 +367,7 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
   FunctionID function_id;
   // Arguments of the task (can be PyObjectIDs or Python values).
   PyObject *arguments;
+  PyObject *actor_handle_arguments;
   // Number of return values of this task.
   int num_returns;
   // The ID of the task that called this task.
@@ -384,10 +385,11 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
   PyObject *resource_map = nullptr;
   // Dictionary of required placement resources for this task.
   PyObject *placement_resource_map = nullptr;
-  if (!PyArg_ParseTuple(args, "O&O&OiO&i|O&O&O&O&iOOO", &PyObjectToUniqueID, &driver_id,
-                        &PyObjectToUniqueID, &function_id, &arguments, &num_returns,
-                        &PyObjectToUniqueID, &parent_task_id, &parent_counter,
-                        &PyObjectToUniqueID, &actor_creation_id, &PyObjectToUniqueID,
+  if (!PyArg_ParseTuple(args, "O&O&OOiO&i|O&O&O&O&iOOO", &PyObjectToUniqueID, &driver_id,
+                        &PyObjectToUniqueID, &function_id, &arguments,
+                        &actor_handle_arguments, &num_returns, &PyObjectToUniqueID,
+                        &parent_task_id, &parent_counter, &PyObjectToUniqueID,
+                        &actor_creation_id, &PyObjectToUniqueID,
                         &actor_creation_dummy_object_id, &PyObjectToUniqueID, &actor_id,
                         &PyObjectToUniqueID, &actor_handle_id, &actor_counter,
                         &execution_arguments, &resource_map, &placement_resource_map)) {
@@ -437,10 +439,20 @@ static int PyTask_init(PyTask *self, PyObject *args, PyObject *kwds) {
     }
   }
 
+  std::vector<ObjectID> actor_handle_args;
+  for (Py_ssize_t i = 0; i < PyList_Size(actor_handle_arguments); ++i) {
+    PyObject *arg = PyList_GetItem(actor_handle_arguments, i);
+    if (!PyObject_IsInstance(arg, (PyObject *)&PyObjectIDType)) {
+      PyErr_SetString(PyExc_TypeError, "Actor handle arguments must be an ObjectID.");
+      return -1;
+    }
+    actor_handle_args.push_back(((PyObjectID *)arg)->object_id);
+  }
+
   self->task_spec = new ray::raylet::TaskSpecification(
       driver_id, parent_task_id, parent_counter, actor_creation_id,
       actor_creation_dummy_object_id, actor_id, actor_handle_id, actor_counter,
-      function_id, task_args, num_returns, required_resources,
+      function_id, task_args, actor_handle_args, num_returns, required_resources,
       required_placement_resources, Language::PYTHON);
 
   /* Set the task's execution dependencies. */

@@ -99,6 +99,7 @@ class TaskSpecification {
   TaskSpecification(const UniqueID &driver_id, const TaskID &parent_task_id,
                     int64_t parent_counter, const FunctionID &function_id,
                     const std::vector<std::shared_ptr<TaskArgument>> &task_arguments,
+                    const std::vector<ObjectID> &actor_handle_arguments,
                     int64_t num_returns,
                     const std::unordered_map<std::string, double> &required_resources,
                     const Language &language);
@@ -133,7 +134,7 @@ class TaskSpecification {
       const ActorID &actor_id, const ActorHandleID &actor_handle_id,
       int64_t actor_counter, const FunctionID &function_id,
       const std::vector<std::shared_ptr<TaskArgument>> &task_arguments,
-      int64_t num_returns,
+      const std::vector<ObjectID> &actor_handle_arguments, int64_t num_returns,
       const std::unordered_map<std::string, double> &required_resources,
       const std::unordered_map<std::string, double> &required_placement_resources,
       const Language &language);
@@ -164,6 +165,7 @@ class TaskSpecification {
   bool ArgByRef(int64_t arg_index) const;
   int ArgIdCount(int64_t arg_index) const;
   ObjectID ArgId(int64_t arg_index, int64_t id_index) const;
+  const std::vector<ObjectID> ActorHandleArgs() const;
   ObjectID ReturnId(int64_t return_index) const;
   const uint8_t *ArgVal(int64_t arg_index) const;
   size_t ArgValLength(int64_t arg_index) const;

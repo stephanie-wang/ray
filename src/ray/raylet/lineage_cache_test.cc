@@ -113,7 +113,7 @@ static inline Task ExampleTask(const std::vector<ObjectID> &arguments,
     task_arguments.emplace_back(std::make_shared<TaskArgumentByReference>(references));
   }
   auto spec = TaskSpecification(UniqueID::nil(), UniqueID::from_random(), 0,
-                                UniqueID::from_random(), task_arguments, num_returns,
+                                UniqueID::from_random(), task_arguments, {}, num_returns,
                                 required_resources, Language::PYTHON);
   auto execution_spec = TaskExecutionSpecification(std::vector<ObjectID>());
   execution_spec.IncrementNumForwards();

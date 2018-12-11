@@ -1328,6 +1328,7 @@ bool NodeManager::AssignTask(const Task &task) {
   // If this is an actor task, check that the new task has the correct counter.
   if (spec.IsActorTask()) {
     if (CheckDuplicateActorTask(actor_registry_, spec)) {
+      RAY_CHECK(task_dependency_manager_.UnsubscribeDependencies(spec.TaskId()));
       // This actor has been already assigned, so ignore it.
       return true;
     }
@@ -1749,10 +1750,11 @@ void NodeManager::ForwardTask(const Task &task, const ClientID &node_id,
             RAY_LOG(WARNING) << "Task " << task_id << " already removed from the lineage "
                                                       "cache. This is most likely due to "
                                                       "reconstruction.";
+          } else {
+            // Mark as forwarded so that the task and its lineage is not re-forwarded
+            // in the future to the receiving node.
+            lineage_cache_.MarkTaskAsForwarded(task_id, node_id);
           }
-          // Mark as forwarded so that the task and its lineage is not re-forwarded
-          // in the future to the receiving node.
-          lineage_cache_.MarkTaskAsForwarded(task_id, node_id);
 
           // Notify the task dependency manager that we are no longer responsible
           // for executing this task.
