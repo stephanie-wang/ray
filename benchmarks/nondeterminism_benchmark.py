@@ -121,6 +121,7 @@ class NondeterministicOperator(ray.actor.Checkpointable):
 
         if self.flush_checkpoint_buffer:
             self.push_checkpoint_buffer(submit_log)
+            self.flush_checkpoint_buffer = False
 
         if submit_log is not None:
             self.replay_push(upstream_id, records, checkpoint_epoch, submit_log)
@@ -230,7 +231,6 @@ class NondeterministicOperator(ray.actor.Checkpointable):
 
     def push_checkpoint_buffer(self, submit_log=None):
         debug("Pushing checkpoint buffer", self.checkpoint_epoch)
-        self.flush_checkpoint_buffer = False
 
         # Make a copy of the checkpoint buffer and try to process them again.
         checkpoint_buffer = self.checkpoint_buffer[:]
