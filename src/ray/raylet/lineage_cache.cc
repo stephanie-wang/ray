@@ -146,11 +146,10 @@ bool Lineage::SetEntry(const Task &task, GcsStatus status, const std::unordered_
       // Reset the task's status. Only return true if the old status was
       // different from the new status.
       if (it->second.SetStatus(status)) {
-        set = true;
       } else if (it->second.GetStatus() != status) {
         it->second.ResetStatus(status);
-        set = true;
       }
+      set = true;
     } else if (it->second.SetStatus(status)) {
       set = true;
     }
@@ -265,9 +264,9 @@ void LineageCache::AddUncommittedLineage(const TaskID &task_id,
   if (!entry) {
     return;
   }
-  if (evicted_pool_.count(task_id) > 0) {
-    return;
-  }
+  //if (evicted_pool_.count(task_id) > 0) {
+  //  return;
+  //}
   RAY_CHECK(entry->GetStatus() == GcsStatus::UNCOMMITTED_REMOTE);
 
   // Insert a copy of the entry into our cache.
@@ -317,7 +316,7 @@ bool LineageCache::AddWaitingTask(const Task &task, const Lineage &uncommitted_l
   // committed yet and will be committed by a different node, so we will not
   // evict them until a notification for their commit is received.
   for (const auto &task_id : subscribe_tasks) {
-    RAY_CHECK(SubscribeTask(task_id));
+    SubscribeTask(task_id);
   }
 
   return added;
@@ -545,8 +544,8 @@ void LineageCache::EvictTask(const TaskID &task_id) {
   // Evict the task.
   RAY_LOG(DEBUG) << "Evicting task " << task_id << " on " << client_id_;
   lineage_.PopEntry(task_id);
-  evicted_pool_.insert(task_id);
-  evicted_queue_.push_back(task_id);
+  //evicted_pool_.insert(task_id);
+  //evicted_queue_.push_back(task_id);
   //committed_tasks_.erase(commit_it);
   // Try to evict the children of the evict task. These are the tasks that have
   // a dependency on the evicted task.
@@ -592,10 +591,10 @@ void LineageCache::HandleEntryCommitted(const TaskID &task_id, int version) {
   // more notifications.
   UnsubscribeTask(task_id);
 
-  while (evicted_queue_.size() > max_lineage_size_) {
-    evicted_pool_.erase(evicted_queue_.front());
-    evicted_queue_.pop_front();
-  }
+  //while (evicted_queue_.size() > max_lineage_size_) {
+  //  evicted_pool_.erase(evicted_queue_.front());
+  //  evicted_queue_.pop_front();
+  //}
 }
 
 const Task &LineageCache::GetTaskOrDie(const TaskID &task_id) const {
