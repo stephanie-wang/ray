@@ -9,6 +9,8 @@ from ray.includes.unique_ids cimport (
     CDriverID,
     CObjectID,
     CTaskID,
+    CActorID,
+    CActorHandleID,
 )
 
 
@@ -89,6 +91,11 @@ cdef extern from "ray/id.h" namespace "ray" nogil:
     const CTaskID GenerateTaskId(const CDriverID &driver_id,
                                  const CTaskID &parent_task_id,
                                  int parent_task_counter)
+    const CTaskID GenerateActorTaskId(const CDriverID &driver_id,
+                                      const CActorID &actor_id,
+                                      const CActorHandleID &actor_handle_id,
+                                      int actor_task_counter);
+
     int64_t ComputeObjectIndex(const CObjectID &object_id)
 
 

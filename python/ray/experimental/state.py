@@ -339,7 +339,8 @@ class GlobalState(object):
                     for i in range(execution_spec.DependenciesLength())
                 ],
                 "LastTimestamp": execution_spec.LastTimestamp(),
-                "NumForwards": execution_spec.NumForwards()
+                "NumForwards": execution_spec.NumForwards(),
+                "NumExecutions": execution_spec.NumExecutions(),
             },
             "TaskSpec": task_spec_info
         }
@@ -356,7 +357,8 @@ class GlobalState(object):
         """
         self._check_connected()
         if task_id is not None:
-            task_id = ray.TaskID(hex_to_binary(task_id))
+            if not isinstance(task_id, ray.TaskID):
+                task_id = ray.TaskID(hex_to_binary(task_id))
             return self._task_table(task_id)
         else:
             task_table_keys = self._keys(

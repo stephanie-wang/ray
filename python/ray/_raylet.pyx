@@ -99,6 +99,16 @@ cdef c_vector[CActorID] ActorIDsToVector(actor_ids):
         result.push_back(actor_id.data)
     return result
 
+def generate_actor_task_id(DriverID driver_id, ActorID actor_id,
+                           ActorHandleID actor_handle_id,
+                           int actor_task_counter):
+    return TaskID(
+            GenerateActorTaskId(
+                driver_id.data,
+                actor_id.data,
+                actor_handle_id.data,
+                actor_task_counter).binary())
+
 
 def compute_put_id(TaskID task_id, int64_t put_index):
     if put_index < 1 or put_index > kMaxTaskPuts:
