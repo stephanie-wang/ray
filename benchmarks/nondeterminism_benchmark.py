@@ -130,6 +130,7 @@ class NondeterministicOperator(ray.actor.Checkpointable):
 
     def replay_push(self, upstream_id, records, checkpoint_epoch, submit_log):
         process_records = self.checkpoint(upstream_id, checkpoint_epoch)
+        debug("REPLAY: process records?", process_records)
 
         if process_records:
             if len(records) == 0:
@@ -142,7 +143,37 @@ class NondeterministicOperator(ray.actor.Checkpointable):
                 # records.
                 ray.get(self.flush())
             else:
+                while submit_log and records:
+                    next_task_id = ray._raylet.generate_actor_task_id(
+                            ray.worker.global_worker.task_driver_id,
+                            self.handle._ray_actor_id,
+                            self.handle._ray_actor_handle_id,
+                            self.handle._ray_actor_counter)
+                    task = ray.global_state.task_table(task_id=next_task_id)
+                    if not task or task["ExecutionSpec"]["NumExecutions"] < 1:
+                        debug("REPLAY: never executed task", next_task_id)
+                        break
+                    #else:
+                    #    assert task["ExecutionSpec"]["NumExecutions"] >= 1, task
+
+                    num_skip_records = submit_log[0] - self.num_records_seen
+                    debug("REPLAY: submit:", submit_log[0], " skipping:", num_skip_records, "seen:", self.num_records_seen, "num records:", len(records))
+                    assert num_skip_records > 0, (num_skip_records, submit_log, self.num_records_seen)
+
+                    flush = num_skip_records <= len(records)
+                    num_records = len(records)
+                    #for record in records[:num_skip_records]:
+                    #    debug("SKIP RECORD:", upstream_id, record)
+                    records = records[num_skip_records:]
+                    num_skipped = num_records - len(records)
+                    self.num_records_seen += num_skipped
+
+                    if flush:
+                        future = self.flush()
+                        debug("REPLAY: skipping submit after", self.num_records_seen, future)
+                        submit_log.pop(0)
                 for record in records:
+                    debug("REPLAY RECORD:", upstream_id, record)
                     # Process the record.
                     self.flush_buffer.append(record)
                     self.num_records_seen += 1
@@ -157,6 +188,7 @@ class NondeterministicOperator(ray.actor.Checkpointable):
 
     def log_push(self, upstream_id, records, checkpoint_epoch):
         process_records = self.checkpoint(upstream_id, checkpoint_epoch)
+        debug("PUSH: process records?", process_records)
 
         if process_records:
             if len(records) == 0:
@@ -170,6 +202,7 @@ class NondeterministicOperator(ray.actor.Checkpointable):
                 ray.get(self.flush())
             else:
                 for record in records:
+                    debug("RECORD:", upstream_id, record)
                     # Process the record.
                     self.flush_buffer.append(record)
                     self.num_records_seen += 1
