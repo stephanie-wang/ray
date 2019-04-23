@@ -28,6 +28,7 @@ from ray.includes.libraylet cimport (
     GCSProfileTableDataT,
     ResourceMappingType,
     WaitResultPair,
+    CWordCountReducer
 )
 from ray.includes.unique_ids cimport (
     CActorCheckpointID,
@@ -469,3 +470,12 @@ cdef class RayletClient:
     @property
     def is_worker(self):
         return self.client.get().IsWorker()
+
+cdef class ReducerState(object):
+    cdef CWordCountReducer state
+
+    def __init__(self):
+        pass
+
+    cpdef count(self, c_string words):
+        self.state.count(words)

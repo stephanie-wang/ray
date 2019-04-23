@@ -57,6 +57,7 @@ cc_library(
         "@boost//:asio",
         "@com_google_googletest//:gtest",
         "@plasma//:plasma_client",
+        "@com_google_absl//absl/container:flat_hash_map",
     ],
 )
 
@@ -467,7 +468,7 @@ flatbuffer_py_library(
         "ray/protocol/FetchOrReconstruct.py",
         "ray/protocol/ForwardTaskRequest.py",
         "ray/protocol/FreeObjectsRequest.py",
-        "ray/protocol/GetTaskReply.py",
+        # "ray/protocol/GetTaskReply.py",
         "ray/protocol/MessageType.py",
         "ray/protocol/NotifyUnblocked.py",
         "ray/protocol/PushErrorRequest.py",

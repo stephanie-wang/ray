@@ -92,3 +92,7 @@ cdef extern from "ray/raylet/raylet_client.h" nogil:
         CDriverID GetDriverID() const
         c_bool IsWorker() const
         const ResourceMappingType &GetResourceIDs() const
+
+cdef extern from "ray/raylet/raylet_client.h" nogil:
+    cdef cppclass CWordCountReducer "WordCountReducer":
+        void count(const c_string& words)

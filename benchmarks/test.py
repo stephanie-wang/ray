@@ -143,3 +143,13 @@ d2 = ray.get(x)
 process_batch_reducer3(state, d2[0])
 end = time.time()
 print("E2E test 2 took ", end - start)
+
+reducer = ray._raylet.ReducerState()
+
+start = time.time()
+d = cython_process_batch4(batch, num_reducers)
+x = ray.put(d)
+d2 = ray.get(x)
+reducer.count(d2[0])
+end = time.time()
+print("E2E test 3 took ", end - start)

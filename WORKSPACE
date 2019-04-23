@@ -49,6 +49,12 @@ new_git_repository(
     remote = "https://github.com/cython/cython",
 )
 
+git_repository(
+    name = "com_google_absl",
+    commit = "88a152ae747c3c42dc9167d46c590929b048d436",
+    remote = "https://github.com/abseil/abseil-cpp.git",
+)
+
 load("@//bazel:python_configure.bzl", "python_configure")
 
 python_configure(name = "local_config_python")

@@ -6,6 +6,8 @@
 #include <unordered_map>
 #include <vector>
 
+#include "absl/container/flat_hash_map.h"
+
 #include "ray/raylet/task_spec.h"
 #include "ray/status.h"
 
@@ -200,6 +202,20 @@ class RayletClient {
   ResourceMappingType resource_ids_;
   /// The connection to the raylet server.
   std::unique_ptr<RayletConnection> conn_;
+};
+
+class WordCountReducer {
+public:
+  void count(const std::string& words) {
+    std::size_t start = 0, end = 0;
+    while ((end = words.find(" ", start)) != std::string::npos) {
+      std::string word = words.substr(start, end - start);
+      state[word] += 1;
+      start = end + 1;
+    }
+  }
+private:
+  absl::flat_hash_map<std::string, int> state;
 };
 
 #endif
