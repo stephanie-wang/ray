@@ -23,9 +23,9 @@ DURATION=60
 FAILURE_ARGS=""
 if [[ $TEST_FAILURE -ne 0 ]]
 then
-    CHECKPOINT_DURATION=60
+    CHECKPOINT_DURATION=30
     DURATION=120
-    FAILURE_ARGS="--checkpoint-interval $(( $THROUGHPUT / $NUM_RAYLETS * $CHECKPOINT_DURATION )) --num-mapper-failures 1 --fail-at $(( CHECKPOINT_DURATION * 3 / 2 ))"
+    FAILURE_ARGS="--checkpoint-interval $(( $THROUGHPUT / $NUM_RAYLETS * $CHECKPOINT_DURATION )) --num-mapper-failures 1 --fail-at 42"
     latency_prefix=failure-$latency_prefix$CHECKPOINT_DURATION-checkpoint-
 fi
 

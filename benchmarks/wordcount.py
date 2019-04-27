@@ -219,7 +219,7 @@ class WordSource(object):
             assert(len(batch) > 0), len(batch)
             timestamp = 0
             if self.num_records_since_timestamp > self.timestamp_interval:
-                timestamp = self.record_timestamp
+                timestamp = self.record_timestamp + (time_slice * np.random.rand())
                 self.num_records_since_timestamp -= self.timestamp_interval
             batch_id = ray.put(batch)
 
@@ -1016,7 +1016,7 @@ if __name__ == '__main__':
         backpressure = False
         # No checkpoint set. Checkpoint every 30s.
         if checkpoint_interval == 0:
-            checkpoint_interval = args.target_throughput // 30
+            checkpoint_interval = args.target_throughput // args.num_mappers * 30
     if checkpoint_interval == 0:
         checkpoint_interval = 100000  # Default checkpoint interval is 100k records/source.
     print("Using a checkpoint interval of", checkpoint_interval, "records")

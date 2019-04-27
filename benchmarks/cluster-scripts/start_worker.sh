@@ -30,7 +30,7 @@ ray start --redis-address=$HEAD_IP:6379 \
     "initial_reconstruction_timeout_milliseconds": 200,
     "gcs_delay_ms": '$GCS_DELAY_MS',
     "lineage_stash_max_failures": -1,
-    "num_heartbeats_timeout": 20,
+    "num_heartbeats_timeout": 10,
     "async_message_max_buffer_size": 100,
     "object_manager_repeated_push_delay_ms": 1000,
     "object_manager_pull_timeout_ms": 1000,
