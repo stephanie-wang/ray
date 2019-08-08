@@ -98,6 +98,7 @@ table TaskExecutionSpecification {
   num_resubmissions: int;
   version: int;
   nondeterministic_events: [string];
+  num_tasks_executed: long;
 }
 
 table Task {

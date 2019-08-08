@@ -22,6 +22,10 @@ void Task::SetExecutionDependencies(const std::vector<ObjectID> &dependencies) {
   ComputeDependencies();
 }
 
+void Task::SetNumTasksExecuted(int64_t num_tasks_executed) {
+  task_execution_spec_.SetNumTasksExecuted(num_tasks_executed);
+}
+
 void Task::IncrementNumForwards() { task_execution_spec_.IncrementNumForwards(); }
 
 void Task::IncrementNumExecutions() {

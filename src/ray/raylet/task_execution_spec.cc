@@ -38,6 +38,10 @@ void TaskExecutionSpecification::SetExecutionDependencies(
   }
 }
 
+void TaskExecutionSpecification::SetNumTasksExecuted(int64_t num_tasks_executed) {
+  execution_spec_.num_tasks_executed = num_tasks_executed;
+}
+
 int TaskExecutionSpecification::NumForwards() const {
   return execution_spec_.num_forwards;
 }

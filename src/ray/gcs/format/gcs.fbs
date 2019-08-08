@@ -159,6 +159,7 @@ table TaskTableData {
   task_info: string;
   // TODO(pcm): This is at the moment duplicated in task_info, remove that one
   updated: bool;
+  num_tasks_executed: long;
 }
 
 table TaskTableTestAndUpdate {

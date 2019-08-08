@@ -72,6 +72,8 @@ class Task {
   /// \param dependencies The value to set the execution dependencies to.
   void SetExecutionDependencies(const std::vector<ObjectID> &dependencies);
 
+  void SetNumTasksExecuted(int64_t num_tasks_executed);
+
   /// Increment the number of times this task has been forwarded.
   void IncrementNumForwards();
 

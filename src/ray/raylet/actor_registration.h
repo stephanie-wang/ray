@@ -149,6 +149,7 @@ class ActorRegistration {
   void AddUnfinishedActorObject(const ObjectID &object_id);
   const std::unordered_set<ObjectID> GetUnfinishedActorObjects();
   bool TaskUnfinished(const ObjectID &object_id);
+  int64_t NumTasksExecuted() const { return num_tasks_executed_; }
 
  private:
   void AddDownstreamActorId(const ActorID &downstream_actor_id);
@@ -187,6 +188,7 @@ class ActorRegistration {
   // actors that we have not gotten a FlushLineageReply from yet.
   std::unordered_set<ActorID> downstream_actor_ids_;
   std::unordered_map<ActorHandleID, int64_t> recovery_frontier_;
+  int64_t num_tasks_executed_;
   bool recovered_;
 };
 

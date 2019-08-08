@@ -61,6 +61,10 @@ class TaskExecutionSpecification {
   /// \param dependencies The value to set the execution dependencies to.
   void SetExecutionDependencies(const std::vector<ObjectID> &dependencies);
 
+  void SetNumTasksExecuted(int64_t num_tasks_executed);
+
+  int64_t NumTasksExecuted() const { return execution_spec_.num_tasks_executed; };
+
   /// Get the number of times this task has been forwarded.
   ///
   /// \return The number of times this task has been forwarded.

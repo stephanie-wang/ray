@@ -9,7 +9,8 @@ namespace ray {
 namespace raylet {
 
 ActorRegistration::ActorRegistration(const ActorTableDataT &actor_table_data)
-    : actor_table_data_(actor_table_data) {
+    : actor_table_data_(actor_table_data),
+      num_tasks_executed_(0) {
   if (GetActorVersion() == 0) {
     recovered_ = true;
   }
@@ -18,7 +19,8 @@ ActorRegistration::ActorRegistration(const ActorTableDataT &actor_table_data)
 ActorRegistration::ActorRegistration(const ActorTableDataT &actor_table_data,
                                      const ActorCheckpointDataT &checkpoint_data)
     : actor_table_data_(actor_table_data),
-      execution_dependency_(ObjectID::from_binary(checkpoint_data.execution_dependency)) {
+      execution_dependency_(ObjectID::from_binary(checkpoint_data.execution_dependency)),
+      num_tasks_executed_(0) {
   // Restore `frontier_`.
   for (size_t i = 0; i < checkpoint_data.handle_ids.size(); i++) {
     auto handle_id = ActorHandleID::from_binary(checkpoint_data.handle_ids[i]);
@@ -27,7 +29,9 @@ ActorRegistration::ActorRegistration(const ActorTableDataT &actor_table_data,
     frontier_entry.execution_dependency =
         ObjectID::from_binary(checkpoint_data.frontier_dependencies[i]);
     RAY_LOG(DEBUG) << "Checkpoint frontier entry " << handle_id << ": " << frontier_entry.task_counter << " " << frontier_entry.execution_dependency;
+    num_tasks_executed_ += frontier_entry.task_counter;
   }
+  RAY_LOG(DEBUG) << "Checkpoint num tasks executed: " << num_tasks_executed_;
   // Restore `dummy_objects_`.
   for (size_t i = 0; i < checkpoint_data.unreleased_dummy_objects.size(); i++) {
     auto dummy = ObjectID::from_binary(checkpoint_data.unreleased_dummy_objects[i]);
@@ -137,6 +141,7 @@ ObjectID ActorRegistration::ExtendFrontier(const ActorHandleID &handle_id,
     }
   }
 
+  num_tasks_executed_++;
   return object_to_release;
 }
 
