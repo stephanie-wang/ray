@@ -2,9 +2,9 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-if [[ $# -gt 6 || $# -lt 2 ]]
+if [[ $# -gt 5 || $# -lt 2 ]]
 then
-    echo "Usage: ./run_job.sh <head ip> <num raylets> <batch size> <target tput> <failure?> <num stragglers?>"
+    echo "Usage: ./run_streaming_job.sh <head ip> <num raylets> <batch size> <target tput> <failure?> <num stragglers?>"
     exit
 fi
 
@@ -13,20 +13,21 @@ NUM_RAYLETS=$2
 BATCH_SIZE=${3:-1000}
 TOTAL_THROUGHPUT=${4:-$(( 12500 * $NUM_RAYLETS ))}
 TEST_FAILURE=${5:-0}
-NUM_STRAGGLERS=${6:-0}
 NUM_SHARDS=8
 
 
 latency_prefix=latency-$NUM_RAYLETS-workers-$NUM_SHARDS-shards-$BATCH_SIZE-batch-$TOTAL_THROUGHPUT-tput-
+throughput_prefix=throughput-$NUM_RAYLETS-workers-$NUM_SHARDS-shards-$BATCH_SIZE-batch-$TOTAL_THROUGHPUT-tput-
 DURATION=60
 
+CHECKPOINT_DURATION=30
 FAILURE_ARGS=""
 if [[ $TEST_FAILURE -ne 0 ]]
 then
-    CHECKPOINT_DURATION=60
-    DURATION=120
-    FAILURE_ARGS="--checkpoint-interval $(( $TOTAL_THROUGHPUT / $NUM_RAYLETS * $CHECKPOINT_DURATION )) --num-mapper-failures 1 --fail-at $(( CHECKPOINT_DURATION * 3 / 2 ))"
+    DURATION=$(( CHECKPOINT_DURATION * 5 / 2  ))
+    FAILURE_ARGS="--num-mapper-failures 1 --fail-at $(( CHECKPOINT_DURATION * 3 / 2 ))"
     latency_prefix=failure-$latency_prefix$CHECKPOINT_DURATION-checkpoint-
+    throughput_prefix=failure-$throughput_prefix$CHECKPOINT_DURATION-checkpoint-
 fi
 
 NUM_RECORDS=1000000
@@ -35,17 +36,14 @@ then
     NUM_RECORDS=$(( $TOTAL_THROUGHPUT * $DURATION ))
 fi
 
-if [[ $NUM_STRAGGLERS -ne 0 ]]
-then
-    latency_prefix=$latency_prefix$NUM_STRAGGLERS-stragglers-
-fi
-
 #if ls $latency_prefix* 1> /dev/null 2>&1
 #then
 #    echo "Latency file with prefix $latency_prefix already found, skipping..."
 #    continue
 #fi
-latency_file=$latency_prefix`date +%h-%d-%M-%S`.txt
+date=`date +%h-%d-%M-%S`.txt
+latency_file=$latency_prefix$date
+throughput_file=$throughput_prefix$date
 echo "Logging to file $latency_file..."
 
 
@@ -81,6 +79,8 @@ python $DIR/../wordcount.py \
     --num-records $NUM_RECORDS \
     --mapper-submit-batch-size $(( $NUM_RAYLETS / 2 )) \
     --target-throughput $TOTAL_THROUGHPUT \
-    --latency-file $DIR/$latency_file $FAILURE_ARGS --dump streaming.json
+    --latency-file $DIR/$latency_file \
+    --checkpoint-interval $(( $TOTAL_THROUGHPUT / $NUM_RAYLETS * $CHECKPOINT_DURATION )) \
+    $FAILURE_ARGS
 
-bash $DIR/collect_latencies.sh $DIR/$latency_file
+bash $DIR/collect_latencies.sh $DIR/$latency_file $DIR/$throughput_file

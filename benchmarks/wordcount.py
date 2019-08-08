@@ -219,7 +219,8 @@ class WordSource(object):
             assert(len(batch) > 0), len(batch)
             timestamp = 0
             if self.num_records_since_timestamp > self.timestamp_interval:
-                timestamp = self.record_timestamp
+                # Timestamp a record in the middle of the batch.
+                timestamp = self.record_timestamp + (time_slice / 2)
                 self.num_records_since_timestamp -= self.timestamp_interval
             batch_id = ray.put(batch)
 
@@ -742,9 +743,15 @@ class Reducer(NondeterministicOperator):
 
 @ray.remote(max_reconstructions=100)
 class Sink(NondeterministicOperator):
-    def __init__(self, checkpoint_tracker, *args):
+    def __init__(self, checkpoint_tracker, num_reducers, timestamp_interval, *args):
         super().__init__(*args)
         self.latencies = []
+
+        # For calculating throughput
+        self.num_reducers = num_reducers
+        self.timestamp_interval = timestamp_interval
+        self.last_batch_timestamp = time.time()
+        self.num_timestamps_seen = 0
 
         self.checkpoint_tracker = checkpoint_tracker
         self.logger.info("SINK: %s", self.operator_id)
@@ -760,9 +767,24 @@ class Sink(NondeterministicOperator):
 
     def process_batch(self, timestamp, batch):
         if timestamp > 0:
-            latency = time.time() - timestamp
+            now = time.time()
+            latency = now - timestamp
             self.logger.info("LATENCY sink %s;timestamp:%f,cur_time:%f,latency:%f", self.operator_id, timestamp, time.time(), latency)
             self.latencies.append(latency)
+            self.num_timestamps_seen += 1
+
+            # Log a throughput measurement every 1s.
+            if now - self.last_batch_timestamp > 1:
+                # Each timestamp represents self.timestamp_interval records.
+                # Each timestamp went to self.num_reducers reducers, so divide
+                # by that amount to get the total records seen.
+                records_seen = self.num_timestamps_seen * self.timestamp_interval / self.num_reducers
+                # Divide by the time since the last throughput computation.
+                throughput = records_seen / (time.time() - self.last_batch_timestamp)
+                self.logger.info("THROUGHPUT sink %s;timestamp:%f,cur_time:%f,throughput:%f", self.operator_id, timestamp, time.time(), throughput)
+                # Reset state to compute the next throughput.
+                self.num_timestamps_seen = 0
+                self.last_batch_timestamp = now
         return {}
 
     def push_checkpoint_marker(self):
@@ -1027,7 +1049,9 @@ if __name__ == '__main__':
     for i, sink_key in enumerate(sink_keys):
         resource = reducer_resources[(i+1) % len(reducer_resources)]
         upstream_keys = [reducer_keys[(i+1) % len(reducer_keys)]]
-        sink_args = [checkpoint_tracker, i, sink_key, [], args.max_queue_length, upstream_keys, checkpoint_dir, None, 1, [1]]
+        sink_args = [checkpoint_tracker, args.num_reducers, args.timestamp_interval]
+        sink_args += [i, sink_key, [], args.max_queue_length, upstream_keys,
+                checkpoint_dir, None, 1, [1]]
         print("Starting sink", sink_key, "resource:", resource)
         sink = Sink._remote(
                 args=sink_args,
@@ -1171,9 +1195,11 @@ if __name__ == '__main__':
     print("Total throughput:", sum(throughputs))
     all_latencies = ray.get([sink.flush_latencies.remote() for sink in sinks])
     for i, latencies in enumerate(all_latencies):
-        print("Sink", i, "mean latency:", np.mean(latencies), "max latency:", np.max(latencies))
+        print("Sink", i, "mean latency:", np.mean(latencies), "max latency:", np.max(latencies),
+                "len latencies:", len(latencies))
     all_latencies = [latency for latencies in all_latencies for latency in latencies]
-    print("FINAL Mean latency:", np.mean(all_latencies), "max latency:", np.max(all_latencies))
+    print("FINAL Mean latency:", np.mean(all_latencies), "max latency:", np.max(all_latencies),
+            "len latencies:", len(all_latencies))
     with open(args.latency_file, 'w+') as f:
         for latency in all_latencies:
             f.write('{}\n'.format(latency))
