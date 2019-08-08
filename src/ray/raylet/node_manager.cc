@@ -666,36 +666,38 @@ void NodeManager::DispatchTasks(
   std::unordered_set<TaskID> removed_task_ids;
 
   for (auto queue_it = actor_reexecution_queues_.begin(); queue_it != actor_reexecution_queues_.end(); ) {
-    ActorID actor_id = queue_it->first;
-    auto actor_entry = actor_registry_.find(actor_id);
-    RAY_CHECK(actor_entry != actor_registry_.end());
-    int64_t expected_tasks_executed = actor_entry->second.NumTasksExecuted();
-    std::vector<Task> batch;
+    if (queue_it->second.size() > 10) {
+      ActorID actor_id = queue_it->first;
+      auto actor_entry = actor_registry_.find(actor_id);
+      RAY_CHECK(actor_entry != actor_registry_.end());
+      int64_t expected_tasks_executed = actor_entry->second.NumTasksExecuted();
+      std::vector<Task> batch;
 
-    auto it = queue_it->second.begin();
-    int max_tasks = 0;
-    for (; it != queue_it->second.end(); it++) {
-      if (it->second.GetTaskExecutionSpec().NumTasksExecuted() != expected_tasks_executed || max_tasks > 100) {
-        break;
+      auto it = queue_it->second.begin();
+      int max_tasks = 0;
+      for (; it != queue_it->second.end(); it++) {
+        if (it->second.GetTaskExecutionSpec().NumTasksExecuted() != expected_tasks_executed || max_tasks > 100) {
+          break;
+        }
+        batch.push_back(it->second);
+        expected_tasks_executed++;
+        //max_tasks++;
       }
-      batch.push_back(it->second);
-      expected_tasks_executed++;
-      //max_tasks++;
-    }
 
-    if (!batch.empty()) {
-      RAY_LOG(DEBUG) << "Submitting reexecuted task batch "
-                     << batch.front().GetTaskExecutionSpec().NumTasksExecuted()
-                     << " to task "
-                     << batch.back().GetTaskExecutionSpec().NumTasksExecuted()
-                     << " for actor " << actor_id;
+      if (!batch.empty()) {
+        RAY_LOG(DEBUG) << "Submitting reexecuted task batch "
+                       << batch.front().GetTaskExecutionSpec().NumTasksExecuted()
+                       << " to task "
+                       << batch.back().GetTaskExecutionSpec().NumTasksExecuted()
+                       << " for actor " << actor_id;
 
-      const auto task_resources = batch.front().GetTaskSpecification().GetRequiredResources();
-      bool assigned = AssignActorTaskBatch(actor_id, task_resources, batch);
-      if (assigned) {
-        queue_it->second.erase(queue_it->second.begin(), it);
-        for (const auto &task : batch) {
-          removed_task_ids.insert(task.GetTaskSpecification().TaskId());
+        const auto task_resources = batch.front().GetTaskSpecification().GetRequiredResources();
+        bool assigned = AssignActorTaskBatch(actor_id, task_resources, batch);
+        if (assigned) {
+          queue_it->second.erase(queue_it->second.begin(), it);
+          for (const auto &task : batch) {
+            removed_task_ids.insert(task.GetTaskSpecification().TaskId());
+          }
         }
       }
     }
