@@ -681,7 +681,7 @@ void NodeManager::DispatchTasks(
         }
         batch.push_back(it->second);
         expected_tasks_executed++;
-        //max_tasks++;
+        max_tasks++;
       }
 
       if (!batch.empty()) {
@@ -1956,6 +1956,7 @@ void NodeManager::AssignTasksToWorker(const std::vector<Task> &tasks, std::share
   if (first_spec.IsActorTask()) {
     auto actor_entry = actor_registry_.find(first_spec.ActorId());
     auto execution_dependency = actor_entry->second.GetExecutionDependency();
+    int64_t num_tasks_executed = actor_entry->second.NumTasksExecuted();
     for (auto &assigned_task : assigned_tasks) {
       RAY_LOG(DEBUG) << "Assigning task " << assigned_task.GetTaskSpecification().TaskId()
                      << " to worker with pid " << worker->Pid()
@@ -2008,6 +2009,7 @@ void NodeManager::AssignTasksToWorker(const std::vector<Task> &tasks, std::share
           RAY_LOG(DEBUG) << "Set num tasks executed for task " << spec.TaskId() << " " << assigned_task.GetTaskExecutionSpec().NumTasksExecuted();
         }
         execution_dependency = spec.ActorDummyObject();
+        num_tasks_executed++;
       } else {
         RAY_CHECK(spec.NewActorHandles().empty());
       }
