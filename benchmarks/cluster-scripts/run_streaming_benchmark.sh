@@ -8,11 +8,13 @@ SOURCE_RATE_PER_WORKER=8000
 PDSH_RCMD_TYPE=ssh bash ~/flink-wordcount/run_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS )) 1
 # Run the lineage stash failure experiment.
 bash ~/ray/benchmarks/cluster-scripts/run_streaming_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS )) 1
+# Run the WriteFirst failure experiment.
+bash ~/ray/benchmarks/cluster-scripts/run_streaming_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS )) 1 0
 
 SOURCE_RATE_PER_WORKER=10000
 # Run the Flink latency experiment.
 PDSH_RCMD_TYPE=ssh bash ~/flink-wordcount/run_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS ))
 # Run the lineage stash latency experiment.
 bash ~/ray/benchmarks/cluster-scripts/run_streaming_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS ))
-# Run the WriteFirst latency experiment
-bash ~/ray/benchmarks/cluster-scripts/run_streaming_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS )) 0 1
+# Run the WriteFirst latency experiment.
+bash ~/ray/benchmarks/cluster-scripts/run_streaming_job.sh $head_node_ip $NUM_WORKERS $(( $SOURCE_RATE_PER_WORKER * $NUM_WORKERS )) 0 0

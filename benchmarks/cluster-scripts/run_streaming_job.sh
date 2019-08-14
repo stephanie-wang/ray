@@ -55,7 +55,7 @@ then
     USE_GCS_ONLY=1
     MAX_FAILURES=1
     latency_file="writefirst-"$latency_file
-    throughput_file="writefirst-"$latency_file
+    throughput_file="writefirst-"$throughput_file
 fi
 GCS_DELAY_MS=0
 NONDETERMINISM=1
