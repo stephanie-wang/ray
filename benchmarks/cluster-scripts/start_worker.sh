@@ -45,7 +45,7 @@ then
     echo "Starting object store with hugepages enabled, $object_store_memory bytes"
 fi
 
-RAY_BACKEND_LOG_LEVEL=debug ray start --redis-address=$HEAD_IP:6379 \
+ray start --redis-address=$HEAD_IP:6379 \
     --resources='{"'$NODE_RESOURCE'": 100}' \
     --plasma-eviction-fraction $OBJECT_STORE_EVICTION \
     $hugepages_config \

@@ -16,11 +16,12 @@ NUM_SHARDS=1
 NONDETERMINISM=0
 MAX_FAILURES=1
 OBJECT_STORE_MEMORY_GB=18
-OBJECT_STORE_EVICTION=50
+OBJECT_STORE_EVICTION=100
 PEG=0
 OBJECT_MANAGER_THREADS=4
 
 if [[ $NUM_FLOAT32 -gt 25000000 ]]; then
+  OBJECT_STORE_EVICTION=20
   NUM_ITERATIONS=20
 fi
 
@@ -57,3 +58,5 @@ echo "Logging to file $latency_file..."
 cmd="python $DIR/../allreduce.py --num-workers $NUM_RAYLETS --size $NUM_FLOAT32 --num-iterations $NUM_ITERATIONS --redis-address $HEAD_IP:6379 --object-store-memory-gb $OBJECT_STORE_MEMORY_GB --latency-file $latency_file $FAILURE_ARG"
 echo $cmd | tee $latency_file
 $cmd 2>&1 | tee -a $latency_file
+
+ray stop
