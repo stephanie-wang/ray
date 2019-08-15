@@ -8,7 +8,7 @@ Time estimates are listed in parentheses.
     Please contact me (swang@cs.berkeley.edu) so that I can share the AMI with you.
 
     If you would like to build your own image, I recommend that you start with Ubuntu 16.04 and make sure that you can run standalone clusters for Flink, Hadoop, and OpenMPI.
-    You will also need to clone this repository, as well as this the [flink-wordcount repository](https://github.com/stephanie-wang/flink-wordcount).
+    You will also need to clone this repository, as well as the `lineage-stash-artifact` [repo](https://github.com/stephanie-wang/lineage-stash-artifact/), which includes the Flink and OpenMPI baselines.
 
 2. (10min) Installing Ray.
     All of the following benchmarks are run with the Ray autoscaler, a utility for launching clusters and deploying Ray jobs from your local machine.
@@ -18,7 +18,8 @@ Time estimates are listed in parentheses.
 3. (up to 1 day, if AWS limit requests required) We'll be using AWS EC2 for all experiments.
     You can check out the autoscaler configurations for the clusters we'll be deploying in `ray/benchmarks/cluster-scripts/*.yaml`.
     The default AWS region in the included autoscaler configs is `us-west-2`, but you can always replace this with your preferred region (just search and replace `us-west-2` in the .yaml files).
-    Here are the minimum instance types that we required for the lineage stash paper, but note that you can always decrease the quantity that you use and run a smaller version of the experiment.
+    Here are the instance types that we used for the lineage stash paper.
+    The maximum quantity is the quantity used in the SOSP'19 paper, but note that you can always decrease the quantity that you use and run a smaller version of the experiment.
     Also, we have listed which instances we recommend you run as spot requests, but note that you can always run with on-demand instead.
     Please check your AWS EC2 dashboard to make sure that your minimum instance limits match these in your specified region.
 
@@ -264,3 +265,8 @@ max_workers: 64
 
     ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/allreduce/recovery-64-workers.png "Latency during recovery")
 
+5. Finally, tear down the cluster with `ray down`:
+    ```bash
+    cd ray/benchmarks/cluster-scripts
+    ray down ray/benchmarks/cluster-scripts/allreduce.yaml
+    ```
