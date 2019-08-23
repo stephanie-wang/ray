@@ -13,7 +13,14 @@ Time estimates are listed in parentheses.
 2. (10min) Installing Ray.
     All of the following benchmarks are run with the Ray autoscaler, a utility for launching clusters and deploying Ray jobs from your local machine.
     Before running any of the following commands, please install Ray locally by following the instructions [here](https://github.com/stephanie-wang/ray/blob/lineage-stash/doc/source/installation.rst#building-ray-from-source).
+    From now on, we'll reference the root directory of your `ray` clone with `$RAY_HOME`.
     Make sure to follow the instructions for "Building Ray from source".
+
+    We recommend that you use Python 3.7 from [Anaconda](https://www.anaconda.com/distribution/) and install Ray in a clean [Anaconda environment](https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html#creating-an-environment-with-commands).
+    Also, once inside your new environment, please install boto3, which is required for the cluster setup here:
+    ```bash
+    pip install boto3
+    ```
 
 3. (up to 1 day, if AWS limit requests required) We'll be using AWS EC2 for all experiments.
     You can check out the autoscaler configurations for the clusters we'll be deploying in `ray/benchmarks/cluster-scripts/*.yaml`.
@@ -32,7 +39,8 @@ Time estimates are listed in parentheses.
 4. (10min) Next, we'll walk through setting up a basic cluster with the autoscaler to get you started.
     Create your first cluster with the `ray up` command.
     ```bash
-    cd ray/benchmarks
+    RAY_HOME=`~/ray`  # or wherever you have cloned the ray repo.
+    cd $RAY_HOME/benchmarks
     ray up -y cluster-scripts/test.yaml
     ```
     This will create a cluster with 2 nodes, one of which will be designated the "head node".
@@ -40,11 +48,14 @@ Time estimates are listed in parentheses.
     You can also check out your EC2 console to make sure that you see the running instances.
     They should be labeled with something like `ray-test-worker` or `ray-test-head`.
 
-    For your convenience, the clusters for the benchmarks below will be setup with the script `ray/benchmarks/cluster-scripts/setup_cluster.sh`, which calls `ray up` internally, gathers the workers' IP addresses, and makes sure all workers have the same software.
+    For your convenience, the clusters for the benchmarks below will be setup with the script `$RAY_HOME/benchmarks/cluster-scripts/setup_cluster.sh`, which calls `ray up` internally, gathers the workers' IP addresses, and makes sure all workers have the same software.
 
 5. (5min) Now that you've created your first cluster, the Ray autoscaler should have automatically created a new `.pem` file for you in your `~/.ssh` directory.
     It should look something like `ray-autoscaler_1_<region>.pem`.
-    It's not strictly necessary to run the benchmarks, but please add this identity to your SSH agent and make sure you have SSH agent forwarding setup on your local machine to make the cluster setup smoother.
+
+    Please add this identity to your SSH agent (via `ssh-add ray-autoscaler_<...>`) and make sure you have SSH agent forwarding setup on your local machine to make the cluster setup smoother.
+    [Here](https://developer.github.com/v3/guides/using-ssh-agent-forwarding/) are some good instructions for setting up your SSH agent if you haven't done so before.
+    For the hostname, you can this to match all AWS hostnames: `*.<region>.compute.amazonaws.com`.
 
 6. (5min) You can now tear down your test cluster and get started on the benchmarks!
     ```bash
@@ -57,7 +68,7 @@ In this benchmark, we will run a streaming wordcount job on Ray and on Flink.
 We'll collect the latency distribution when there are no failures, as well as the latency and throughput when a failure is introduced partway between checkpoints.
 
 The instructions given are for 4 worker nodes, while the experiment in the lineage stash paper is for 32 nodes.
-If you would like to replicate the experiment exactly, then you must modify the lines in `ray/benchmarks/cluster-scripts/streaming.yaml` to the following:
+If you would like to replicate the experiment exactly, then you must modify the lines in `$RAY_HOME/benchmarks/cluster-scripts/streaming.yaml` to the following:
 ```
 min_workers: 32
 ...
@@ -66,14 +77,27 @@ max_workers: 32
 
 1. (10min) Make sure you are in the `cluster-scripts` directory for all following commands, and start the cluster with:
     ```bash
-    cd ray/benchmarks/cluster-scripts
+    cd $RAY_HOME/benchmarks/cluster-scripts
     bash setup_cluster.sh streaming.yaml 4
     ```
     If you are running the experiment with 32 nodes, you should run this instead:
     ```bash
-    cd ray/benchmarks/cluster-scripts
+    cd $RAY_HOME/benchmarks/cluster-scripts
     bash setup_cluster.sh streaming.yaml 32
     ```
+    **NOTE:** Running with spot instances is usually much cheaper than with
+    on-demand, but in some cases there will not be enough instances available
+    for you to use. If the `setup_cluster.sh` command prints `Waiting for x
+    more workers to start...` and `x` has not changed for at least a minute,
+    then it is likely that your cluster will not finish setup. This is probably
+    because: a) your spot instance limit is too low, or b) there are not enough
+    spot instances available. In case (a), contact AWS to request an increase
+    in your spot instance limit. In case (b), you can either try on-demand
+    instances or try again with spot instances later.  To try with on-demand
+    instances, comment out [this
+    block](https://github.com/stephanie-wang/ray/blob/lineage-stash/benchmarks/cluster-scripts/streaming.yaml#L67)
+    in the configuration file. Note that again, you may have to first contact
+    AWS to request an increase, this time in your *on-demand* instance limit.
 
 2. (20min) Attach to the cluster, and run the benchmark.
     `ray attach` will connect you to a `screen` session on the head node of the cluster.
@@ -105,20 +129,21 @@ max_workers: 32
     * writefirst-latency-4-workers-8-shards-1000-batch-40000-tput-Aug-14-23-25-50.csv
     * writefirst-throughput-4-workers-8-shards-1000-batch-40000-tput-Aug-14-23-25-50.csv
 
-    Copy the output to your local directory by running:
+    Make a new local directory for the results, and copy the output there by running:
     ```bash
-    scp ubuntu@`ray get_head_ip streaming.yaml`:~/flink-wordcount/*.csv .
-    scp ubuntu@`ray get_head_ip streaming.yaml`:~/ray/benchmarks/cluster-scripts/*.csv .
+    mkdir streaming-4-workers
+    scp ubuntu@`ray get_head_ip streaming.yaml`:~/flink-wordcount/*.csv streaming-4-workers
+    scp ubuntu@`ray get_head_ip streaming.yaml`:~/ray/benchmarks/cluster-scripts/*.csv streaming-4-workers
     ```
 
-4. (5min) Plot the results!
+4. (5min) Plot the latency results!
     To get the plotting scripts and to see some example data, clone the lineage-stash-artifact repo like this:
     ```
     git clone https://github.com/stephanie-wang/lineage-stash-artifact.git
     ```
     This repo includes some example plots in `lineage-stash-artifact/data/streaming`.
 
-    To plot the latency results:
+    To plot the example latency results for 4 workers:
     ```bash
     cd lineage-stash-artifact/data/streaming
     tar -xzvf 4-workers.tar.gz
@@ -133,7 +158,18 @@ max_workers: 32
 
     ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-32-workers.png "Latency")
 
-    To plot the results from the recovery experiment:
+    To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
+    You should see a window pop up with the plots.
+    Alternatively, you can pass in a pathname to save the results as, with the `--save-filename` option.
+    For example:
+    ```bash
+    python plot_latency_cdf.py \
+        --directory $RAY_HOME/benchmarks/cluster-scripts/streaming-4-workers
+        --save-filename latency-4-workers.png
+    ```
+
+5. (5min) Plot the recovery results!
+    To plot the example results from the recovery experiment:
     ```bash
     cd lineage-stash-artifact/data/streaming
     tar -xzvf 4-workers.tar.gz
@@ -150,10 +186,21 @@ max_workers: 32
     ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-recovery-32-workers.png "Latency during recovery")
     ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/throughput-recovery-32-workers.png "Throughput during recovery")
 
-5. Finally, tear down the cluster with `ray down`:
+    To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
+    You should see a window pop up with the plots.
+    Alternatively, you can pass in a pathname to save the results as, with the `--save-filename` option.
+    Note that this command will produce two plots for the recovery experiment, one for latency and one for throughput.
+    For example:
     ```bash
-    cd ray/benchmarks/cluster-scripts
-    ray down ray/benchmarks/cluster-scripts/streaming.yaml
+    python plot_recovery.py \
+        --directory $RAY_HOME/benchmarks/cluster-scripts/streaming-4-workers
+        --save-filename recovery-4-workers.png  # Produces latency-recovery-4-workers.png and throughput-recovery-4-workers.png.
+    ```
+
+6. Finally, tear down the cluster with `ray down`:
+    ```bash
+    cd $RAY_HOME/benchmarks/cluster-scripts
+    ray down streaming.yaml
     ```
 
 ## Allreduce benchmark
@@ -162,7 +209,7 @@ In this benchmark, we will run the allreduce benchmark on Ray and on Flink.
 We'll collect the latency for each iteration of allreduce, with and without failures.
 
 The instructions given are for 4 worker nodes, while the experiment in the lineage stash paper is for 64 nodes.
-If you would like to replicate the experiment exactly, then you must modify the lines in `ray/benchmarks/cluster-scripts/allreduce.yaml` to the following:
+If you would like to replicate the experiment exactly, then you must modify the lines in `$RAY_HOME/benchmarks/cluster-scripts/allreduce.yaml` to the following:
 ```
 min_workers: 64
 ...
@@ -171,9 +218,27 @@ max_workers: 64
 
 1. (10min) Make sure you are in the `cluster-scripts` directory for all following commands, and start the cluster with:
     ```bash
-    cd ray/benchmarks/cluster-scripts
+    cd $RAY_HOME/benchmarks/cluster-scripts
+    bash setup_cluster.sh allreduce.yaml 4
+    ```
+    If you are running the experiment with 64 nodes, you should run this instead:
+    ```bash
+    cd $RAY_HOME/benchmarks/cluster-scripts
     bash setup_cluster.sh allreduce.yaml 64
     ```
+    **NOTE:** Running with spot instances is usually much cheaper than with
+    on-demand, but in some cases there will not be enough instances available
+    for you to use. If the `setup_cluster.sh` command prints `Waiting for x
+    more workers to start...` and `x` has not changed for at least a minute,
+    then it is likely that your cluster will not finish setup. This is probably
+    because: a) your spot instance limit is too low, or b) there are not enough
+    spot instances available. In case (a), contact AWS to request an increase
+    in your spot instance limit. In case (b), you can either try on-demand
+    instances or try again with spot instances later.  To try with on-demand
+    instances, comment out [this
+    block](https://github.com/stephanie-wang/ray/blob/lineage-stash/benchmarks/cluster-scripts/allreduce.yaml#L67)
+    in the configuration file. Note that again, you may have to first contact
+    AWS to request an increase, this time in your *on-demand* instance limit.
 
 2. (25min on 4 nodes, 40min on 64 nodes) Attach to the cluster, and run the benchmark.
     `ray attach` will connect you to a `screen` session on the head node of the cluster.
@@ -223,12 +288,13 @@ max_workers: 64
     * mpi-latency-4-workers-25000000-bytes-19-08-14-23-03-29.txt
     * mpi-latency-4-workers-250000000-bytes-19-08-14-23-04-05.txt
 
-    Copy the output to your local directory by running:
+    Make a new local directory for the results, and copy the output there by running:
     ```bash
-    scp -r ubuntu@`ray get_head_ip allreduce.yaml`:~/ray/benchmarks/cluster-scripts/allreduce-* .
+    mkdir allreduce-4-workers
+    scp -r ubuntu@`ray get_head_ip allreduce.yaml`:~/ray/benchmarks/cluster-scripts/allreduce-* allreduce-4-workers
     ```
 
-4. (5min) Plot the results!
+4. (5min) Plot the latency results!
     To get the plotting scripts and to see some example data, clone the lineage-stash-artifact repo like this:
     ```
     git clone https://github.com/stephanie-wang/lineage-stash-artifact.git
@@ -250,6 +316,18 @@ max_workers: 64
 
     ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/allreduce/latency-64-workers.png "Latency")
 
+    To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
+    You should see a window pop up with the plots.
+    Alternatively, you can pass in a pathname to save the results as, with the `--save-filename` option.
+    For example:
+    ```bash
+    python plot_allreduce_latency.py \
+        --directory $RAY_HOME/benchmarks/cluster-scripts/allreduce-4-workers
+        --save-filename latency-4-workers.png
+    ```
+
+5. (5min) Plot the recovery results!
+
     To plot the results from the recovery experiment:
     ```bash
     cd lineage-stash-artifact/data/allreduce
@@ -265,8 +343,18 @@ max_workers: 64
 
     ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/allreduce/recovery-64-workers.png "Latency during recovery")
 
-5. Finally, tear down the cluster with `ray down`:
+    To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
+    You should see a window pop up with the plots.
+    Alternatively, you can pass in a pathname to save the results as, with the `--save-filename` option.
+    For example:
     ```bash
-    cd ray/benchmarks/cluster-scripts
-    ray down ray/benchmarks/cluster-scripts/allreduce.yaml
+    python plot_allreduce_recovery.py \
+        --directory $RAY_HOME/benchmarks/cluster-scripts/allreduce-4-workers
+        --save-filename recovery-4-workers.png
+    ```
+
+6. Finally, tear down the cluster with `ray down`:
+    ```bash
+    cd $RAY_HOME/benchmarks/cluster-scripts
+    ray down allreduce.yaml
     ```
