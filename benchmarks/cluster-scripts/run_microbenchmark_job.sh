@@ -82,9 +82,9 @@ then
         ssh -o StrictHostKeyChecking=no -i ~/ray_bootstrap_key.pem $worker "grep LATENCY /tmp/ray/*/logs/worker*" | awk -F'LATENCY:' '{ print (($2 / '$NUM_RAYLETS') - '$TASK_DURATION') * 1000 }' >> $output_file
     done
 else
-    echo "uncommitted_lineage" >> $output_file
+    echo "worker,timestamp,num_tasks,uncommitted_lineage" >> $output_file
     for worker in `tail -n $NUM_RAYLETS ~/workers.txt`; do
-      ssh -o "StrictHostKeyChecking no" -i ~/ray_bootstrap_key.pem $worker "grep 'UNCOMMITTED' /tmp/ray/*/logs/raylet.err" | awk -F':' '{ print $5 }' >> $raylet_log_file
+      ssh -o "StrictHostKeyChecking no" -i ~/ray_bootstrap_key.pem $worker "grep 'UNCOMMITTED' /tmp/ray/*/logs/raylet.err" | awk -F':' '{ print '$worker'","$5 }' | tail -n $NUM_RAYLETS >> $raylet_log_file
     done
     sort $raylet_log_file | uniq -c | sort -bgr >> $output_file
     rm $raylet_log_file
