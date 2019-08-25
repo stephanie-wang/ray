@@ -2,15 +2,15 @@
 
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
-HEAD_IP=$1
-NUM_RAYLETS=${2:-64}
-OUTPUT_DIR=${3:-"$DIR/latency-$(date +"%y-%m-%d-%H-%M-%S")"}
+HEAD_IP=$(head -n 1 ~/workers.txt)
+NUM_RAYLETS=${1:-64}
+OUTPUT_DIR=${2:-"$DIR/latency-$(date +"%y-%m-%d-%H-%M-%S")"}
 NUM_SHARDS=1
 TASK_DURATION=0
 
-if [[ $# -ne 1 && $# -ne 2 && $# -ne 3 ]]
+if [[ $# -ne 1 && $# -ne 2 ]]
 then
-    echo "Usage: ./run_jobs.sh <head IP address> <num raylets> <output dir>"
+    echo "Usage: ./run_jobs.sh <num raylets> <output dir>"
     exit
 fi
 
@@ -30,11 +30,11 @@ for GCS_DELAY_MS in 0 1 5; do
         for NONDETERMINISM in 1 0; do
             if [[ $NONDETERMINISM -eq 1 && $USE_GCS_ONLY -eq 0 ]]; then
                 for MAX_FAILURES in -1 $PARTIAL_FORWARDING; do
-                    bash -x $DIR/run_microbenchmark_job.sh $NUM_RAYLETS $HEAD_IP $USE_GCS_ONLY $GCS_DELAY_MS $NONDETERMINISM $NUM_SHARDS $TASK_DURATION $MAX_FAILURES $OUTPUT_DIR
+                    bash -x $DIR/run_microbenchmark_job.sh $NUM_RAYLETS $HEAD_IP $USE_GCS_ONLY $GCS_DELAY_MS $NONDETERMINISM $NUM_SHARDS $TASK_DURATION $MAX_FAILURES 1 $OUTPUT_DIR
                 done
             else
                 MAX_FAILURES=1
-                bash -x $DIR/run_microbenchmark_job.sh $NUM_RAYLETS $HEAD_IP $USE_GCS_ONLY $GCS_DELAY_MS $NONDETERMINISM $NUM_SHARDS $TASK_DURATION $MAX_FAILURES $OUTPUT_DIR
+                bash -x $DIR/run_microbenchmark_job.sh $NUM_RAYLETS $HEAD_IP $USE_GCS_ONLY $GCS_DELAY_MS $NONDETERMINISM $NUM_SHARDS $TASK_DURATION $MAX_FAILURES 1 $OUTPUT_DIR
             fi
         done
     done

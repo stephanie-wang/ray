@@ -54,6 +54,9 @@ class RingWorker(object):
 
     @ray.method(num_return_vals=0)
     def send(self, token, num_tasks_remaining, timestamp):
+        # Set the timestamp for the first task.
+        if timestamp is None:
+            timestamp = time.time()
         debug("send", token, num_tasks_remaining, timestamp)
 
         if self.task_duration > 0:
@@ -62,6 +65,7 @@ class RingWorker(object):
         if token == self.token:
             num_tasks_remaining -= 1
             now = time.time()
+            debug("LATENCY:{}".format(now - timestamp))
             self.latencies.append(now - timestamp)
             timestamp = now
 
@@ -75,6 +79,7 @@ class RingWorker(object):
             debug("DONE", self.token, self.iteration)
 
     def get_latencies(self):
+        debug("get_latencies", self.token)
         # The first task doesn't count because the timestamp was assigned by
         # the driver.
         latencies = self.latencies[1:][:]
@@ -102,7 +107,7 @@ class ProgressTracker(object):
 def step(iteration, workers, tokens, num_tasks, task_duration):
     tasks = []
     for worker, token in zip(workers, tokens):
-        tasks.append(worker.send.remote(token, num_tasks, time.time()))
+        tasks.append(worker.send.remote(token, num_tasks, None))
 
     start = time.time()
     next_iteration = iteration + 1
@@ -120,18 +125,6 @@ def step(iteration, workers, tokens, num_tasks, task_duration):
                 break
 
     log.debug("Round %d done after %f", iteration, time.time() - start)
-    start = time.time()
-    latencies = ray.get([worker.get_latencies.remote() for worker in workers])
-    log.debug("Got latencies for round %d after %f", iteration, time.time() - start)
-
-    latencies = np.array(latencies)
-    latencies -= task_duration * (len(workers))
-    latencies /= len(workers)
-    latencies = np.reshape(latencies, (num_tasks - 1) * len(workers))
-    log.info("Mean latency round %d: %f", iteration, np.mean(latencies))
-    log.info("Max latency round %d: %f", iteration, np.max(latencies))
-    log.info("Stddev latency round %d: %f", iteration, np.std(latencies))
-    return latencies
 
 def main(args):
     if args.record_latency and args.latency_file is None:
@@ -220,17 +213,9 @@ def main(args):
             [worker.ip.remote() for worker in workers])
         assert (len(set(node_ips)) == args.num_workers)
 
-    latencies = []
     for i in range(args.num_iterations):
         log.info("Starting iteration %d", i)
-        results = step(i, workers, tokens, args.num_tasks, args.task_duration)
-        latencies.append(results)
-
-    if latency_file is not None:
-        with open(latency_file, 'a+') as f:
-            for i, latency in enumerate(latencies):
-                for l in latency:
-                    f.write('{},{}\n'.format(i, l))
+        step(i, workers, tokens, args.num_tasks, args.task_duration)
 
     if args.dump is not None:
         events = ray.global_state.chrome_tracing_dump()
