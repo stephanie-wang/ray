@@ -79,7 +79,7 @@ if [[ $COLLECT_LATENCY -eq 1 ]]
 then
     echo "latency" >> $output_file
     for worker in `tail -n $NUM_RAYLETS ~/workers.txt`; do
-        ssh -o StrictHostKeyChecking=no -i ~/ray_bootstrap_key.pem $worker "grep LATENCY /tmp/ray/*/logs/worker*" | awk -F'LATENCY:' '{ print $2 }' >> $output_file
+        ssh -o StrictHostKeyChecking=no -i ~/ray_bootstrap_key.pem $worker "grep LATENCY /tmp/ray/*/logs/worker*" | awk -F'LATENCY:' '{ print (($2 / '$NUM_RAYLETS') - '$TASK_DURATION') * 1000 }' >> $output_file
     done
 else
     echo "uncommitted_lineage" >> $output_file
