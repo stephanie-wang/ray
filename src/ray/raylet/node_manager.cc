@@ -260,6 +260,10 @@ void NodeManager::Heartbeat() {
   }
   last_heartbeat_at_ms_ = now_ms;
 
+  for (const auto &entry : uncommitted_lineage_counter_) {
+    RAY_LOG(INFO) << "UNCOMMITTED LINEAGE:" << now_ms << "," << entry.first << "," << entry.second;
+  }
+
   auto &heartbeat_table = gcs_client_->heartbeat_table();
   auto heartbeat_data = std::make_shared<HeartbeatTableDataT>();
   const auto &my_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -2752,7 +2756,7 @@ void NodeManager::ForwardTask(const Task &task, const ClientID &node_id,
   }
 
   auto uncommitted_lineage_size = uncommitted_lineage.GetEntries().size() - 1;
-  RAY_LOG(INFO) << "UNCOMMITTED_LINEAGE:" << uncommitted_lineage_size;
+  uncommitted_lineage_counter_[uncommitted_lineage_size]++;
 
   auto entry = uncommitted_lineage.GetEntryMutable(task_id);
   Task &lineage_cache_entry_task = entry->TaskDataMutable();

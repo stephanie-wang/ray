@@ -558,6 +558,9 @@ class NodeManager {
     std::function<void(ray::Status)> callback;
   };
   std::unordered_map<WorkerID, AssignTaskCallback> gcs_assign_buffer_;
+
+  // Used for uncommitted lineage microbenchmark.
+  std::unordered_map<size_t, size_t> uncommitted_lineage_counter_;
 };
 
 }  // namespace raylet
