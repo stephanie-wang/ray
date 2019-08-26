@@ -34,6 +34,6 @@ sleep 60
 echo "Done"
 
 echo "Initializing cluster..."
-ray exec $CLUSTER_YAML "cd ~/ray && git fetch && git checkout origin/lineage-stash"
+ray exec $CLUSTER_YAML "cd ~/ray && git remote set-url origin https://github.com/stephanie-wang/ray.git && git fetch origin && git checkout origin/lineage-stash"
 ray exec $CLUSTER_YAML "~/ray/benchmarks/cluster-scripts/init.sh"
 echo "Done"

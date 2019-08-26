@@ -358,3 +358,241 @@ max_workers: 64
     cd $RAY_HOME/benchmarks/cluster-scripts
     ray down allreduce.yaml
     ```
+
+## Microbenchmarks
+
+In this benchmark, we will run the microbenchmarks to collect the latency distribution for the lineage stash vs a WriteFirst method and to measure the amount of uncommitted lineage that gets forwarded.
+
+1. (10min) Make sure you are in the `cluster-scripts` directory for all following commands, and start the cluster with:
+    ```bash
+    cd $RAY_HOME/benchmarks/cluster-scripts
+    bash setup_cluster.sh microbenchmark.yaml 64
+    ```
+    **NOTE:** Running with spot instances is usually much cheaper than with
+    on-demand, but in some cases there will not be enough instances available
+    for you to use. If the `setup_cluster.sh` command prints `Waiting for x
+    more workers to start...` and `x` has not changed for at least a minute,
+    then it is likely that your cluster will not finish setup. This is probably
+    because: a) your spot instance limit is too low, or b) there are not enough
+    spot instances available. In case (a), contact AWS to request an increase
+    in your spot instance limit. In case (b), you can either try on-demand
+    instances or try again with spot instances later.  To try with on-demand
+    instances, comment out [this
+    block](https://github.com/stephanie-wang/ray/blob/lineage-stash/benchmarks/cluster-scripts/streaming.yaml#L67)
+    in the configuration file. Note that again, you may have to first contact
+    AWS to request an increase, this time in your *on-demand* instance limit.
+
+2. (30min) Run the latency distribution benchmark.
+    First, attach to the cluster.
+    `ray attach` will connect you to a `screen` session on the head node of the cluster.
+    ```bash
+    ray attach microbenchmark.yaml
+    # These commands should run on the head node, not on your local machine.
+    cd ~/ray/benchmarks/cluster-scripts
+    bash run_latency_microbenchmark.sh 64
+    ```
+
+    The `run_latency_microbenchmark.sh` command will create a new directory in the current directory with a name like `latency-19-08-26-03-20-32`.
+    You can `tail` files in this directory to make sure that the benchmark is running properly.
+    Also, if you need to restart the benchmark for any reason, you can run the same command, but with the previous directory as an argument.
+    This will restart the benchmark and execute any lineage stash jobs that do not already have output.
+    For example:
+    ```bash
+    bash run_latency_microbenchmark.sh 64 latency-19-08-26-03-20-32
+    ```
+
+3. (5min) Once the command is complete, make sure you have the correct output.
+    You can also look for these files while the benchmark runs, to make sure that it's running properly.
+    In `~/ray/benchmarks/cluster-scripts/`, there should be a directory called
+    `latency-<timestamp>` with 15 `.csv` files, with names like this:
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-0-gcsdelay-0-nondeterminism-0-task-1-failures-19-08-26-03-23-13.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-0-gcsdelay-1-nondeterminism-0-task--1-failures-19-08-26-03-20-32.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-0-gcsdelay-1-nondeterminism-0-task-8-failures-19-08-26-04-05-26.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-1-gcsdelay-0-nondeterminism-0-task-1-failures-19-08-26-03-39-41.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-1-gcsdelay-1-nondeterminism-0-task--1-failures-19-08-26-03-37-11.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-1-gcsdelay-1-nondeterminism-0-task-8-failures-19-08-26-04-06-34.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-5-gcsdelay-0-nondeterminism-0-task-1-failures-19-08-26-03-45-38.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-5-gcsdelay-1-nondeterminism-0-task--1-failures-19-08-26-03-43-08.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-0-gcs-5-gcsdelay-1-nondeterminism-0-task-8-failures-19-08-26-04-07-42.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-1-gcs-0-gcsdelay-0-nondeterminism-0-task-1-failures-19-08-26-03-36-07.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-1-gcs-0-gcsdelay-1-nondeterminism-0-task-1-failures-19-08-26-03-34-58.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-1-gcs-1-gcsdelay-0-nondeterminism-0-task-1-failures-19-08-26-03-41-59.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-1-gcs-1-gcsdelay-1-nondeterminism-0-task-1-failures-19-08-26-03-40-42.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-1-gcs-5-gcsdelay-0-nondeterminism-0-task-1-failures-19-08-26-03-48-47.csv
+    * latency-19-08-26-03-20-32/latency-64-workers-1-shards-1-gcs-5-gcsdelay-1-nondeterminism-0-task-1-failures-19-08-26-03-46-40.csv
+
+    Tar the directory on the head node like this:
+    ```bash
+    tar -czvf latency-<timestamp>.tar.gz latency-<timestamp>
+    ```
+
+    Copy the output to your local machine by running:
+    ```bash
+    scp ubuntu@`ray get_head_ip microbenchmark.yaml`:~/ray/benchmarks/cluster-scripts/latency-*.tar.gz .
+    tar -xzvf latency-<timestamp>.tar.gz
+    ```
+
+4. (5min) Plot the latency results!
+    To get the plotting scripts and to see some example data, clone the lineage-stash-artifact repo like this:
+    ```
+    git clone https://github.com/stephanie-wang/lineage-stash-artifact.git
+    ```
+    This repo includes some example plots in `lineage-stash-artifact/data/microbenchmark`.
+
+    To plot the example latency results:
+    ```bash
+    cd lineage-stash-artifact/data/microbenchmark
+    tar -xzvf latency-19-08-26-03-20-32.tar.gz
+    python plot_latency_cdf.py \
+        --directory latency-19-08-26-03-20-32.tar.gz/
+    ```
+    This command produces three graphs like this:
+
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/microbenchmark/deterministic-latency-64-workers.png "Latency")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/microbenchmark/nondeterministic-8-failures-latency-64-workers.png "Latency")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/microbenchmark/nondeterministic--1-failures-latency-64-workers.png "Latency")
+                        
+    To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
+    You should see a window pop up, one for each plot.
+    Alternatively, you can pass in a pathname to save the results as, with the `--save-filename` option.
+    Note that this command will produce three plots for the experiment, one each for the deterministic application, the nondeterministic application with *f*=64, and the nondeterministic application with *f*=8.
+    All of them will have the pathname that you passed in as the suffix.
+    This will also create a CSV file with some stats from the plotted results, such as the p50 latency, which will have the same pathname that you saved the plot to, but ending with `.csv`.
+    For example:
+    ```bash
+    python plot_latency_cdf.py \
+        --directory $RAY_HOME/benchmarks/cluster-scripts/latency-<timestamp>
+        --save-filename latency-64-workers.png
+    ls *-latency-64-workers.png
+    # deterministic-latency-64-workers.png
+    # nondeterministic-8-failures-latency-64-workers.png
+    # nondeterministic--1-failures-latency-64-workers.png
+    cat latency-64-workers.csv
+    # workers,shards,gcs,gcsdelay,nondeterminism,task,failures,p50,p90,p95,p99
+    # 64,1,0,0,0,0,1,0.4808845,0.5088611,0.5292043500000001,0.5838749100000002
+    # 64,1,0,1,0,0,1,0.488071,0.5113015,0.51899715,0.56703822
+    # 64,1,0,5,0,0,1,0.483224,0.5190009000000001,0.5424929,0.5819955200000001
+    # ...
+    ```
+
+6. If you are also running the uncommitted lineage benchmark below, you can leave the cluster running (they use the exact same configuration).
+    Otherwise, tear down the cluster with `ray down`:
+    ```bash
+    cd $RAY_HOME/benchmarks/cluster-scripts
+    ray down streaming.yaml
+    ```
+
+7. **(5 hours)** Run the uncommitted lineage benchmark.
+    First, attach to the cluster.
+    `ray attach` will connect you to a `screen` session on the head node of the cluster.
+    ```bash
+    ray attach microbenchmark.yaml
+    # These commands should run on the head node, not on your local machine.
+    cd ~/ray/benchmarks/cluster-scripts
+    bash run_uncommitted_lineage_microbenchmark.sh 64
+    ```
+
+    The `run_uncommitted_lineage_microbenchmark.sh` command will create a new directory in the current directory with a name like `lineage-19-08-25-00-21-56`.
+    You can `tail` files in this directory to make sure that the benchmark is running properly.
+    Also, if you need to restart the benchmark for any reason, you can run the same command, but with the previous directory as an argument.
+    This will restart the benchmark and execute any lineage stash jobs that do not already have output.
+    For example:
+    ```bash
+    bash run_uncommitted_lineage_microbenchmark.sh 64 lineage-19-08-25-00-21-56
+    ```
+
+    Note that the full version of this benchmark runs for a very long time.
+    It sweeps parameters along 2 axes: task duration and *F*, the number of times a task gets forwarded.
+    There are a couple things you can do to shorten the benchmark or collect incremental results.
+
+    * You can reduce the number of values of *F* to collect.
+        To do that, modify the line in the benchmark script (`run_uncommitted_lineage_microbenchmark.sh`) found [here](https://github.com/stephanie-wang/ray/blob/lineage-stash/benchmarks/cluster-scripts/run_uncommitted_lineage_microbenchmark.sh#L26):
+        ```
+            for MAX_FAILURES in 8 16 32 -1; do
+        ```
+        `MAX_FAILURES` is equivalent to *F*, the maximum number of times that a task gets forwarded.
+        The value `-1` is a special value that means forward infinitely many times, or equivalently, forward up to the number of nodes.
+        You can take out some values of `MAX_FAILURES` and use something like this, which should halve the total runtime:
+        ```
+            for MAX_FAILURES in 8 -1; do
+        ```
+
+    * The benchmark sweeps task durations from 0ms to 100ms, starting with the endpoints and recursively sampling the midpoint.
+        This means that you can collect incremental results while the benchmark is still running.
+        The resolution of your plot will not be as high as the exampel plot included here, but you can get a rough estimate of the trend.
+
+    * You can manually remove sample points from the task duration sweep by modifying the line in the benchmark script (`run_uncommitted_lineage_microbenchmark.sh`) found [here](https://github.com/stephanie-wang/ray/blob/lineage-stash/benchmarks/cluster-scripts/run_uncommitted_lineage_microbenchmark.sh#L26):
+        ```
+        for TASK_DURATION in 000 100 012 005 018 002 008 014 030 001 003 006 009 013 015 019 040 004 007 010 016 020 050; do
+        ```
+        `TASK_DURATION` is how long, in milliseconds, each (no-op) task in the job executes for.
+        The longer the task duration, the longer the job.
+        Therefore, you can take out some of the values, especially the higher ones, and use something like this.
+        Note that the script expects that all values here are zero-padded to 3 digits:
+        ```
+        for TASK_DURATION in 000 010 020 030 040; do
+        ```
+
+7. (5min) Once the command is complete, or (recommended) while the job is still running, make sure you have the correct output.
+    You can also look for these files while the benchmark runs, to make sure that it's running properly.
+    In `~/ray/benchmarks/cluster-scripts/`, there should be a directory called
+    `lineage-<timestamp>` with many `.csv` files, one for each pair of `TASK_DURATION` and `MAX_FAILURES` values that you ran, with names like this:
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-000-task--1-failures-19-08-25-23-28-34.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-000-task-16-failures-19-08-25-23-26-05.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-000-task-32-failures-19-08-25-23-27-20.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-000-task-8-failures-19-08-25-23-25-00.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-001-task--1-failures-19-08-25-23-34-05.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-001-task-16-failures-19-08-25-23-31-22.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-001-task-32-failures-19-08-25-23-32-39.csv
+    * lineage-19-08-25-23-25-00/lineage-64-workers-1-shards-0-gcs-100-gcsdelay-1-nondeterminism-001-task-8-failures-19-08-25-23-30-07.csv
+    * ...
+
+    Tar the directory on the head node like this:
+    ```bash
+    tar -czvf lineage-<timestamp>.tar.gz lineage-<timestamp>
+    ```
+
+    Copy the output to your local machine by running:
+    ```bash
+    scp ubuntu@`ray get_head_ip microbenchmark.yaml`:~/ray/benchmarks/cluster-scripts/lineage-*.tar.gz .
+    tar -xzvf latency-<timestamp>.tar.gz
+    ```
+
+8. (5min) Plot the latency results!
+    To get the plotting scripts and to see some example data, clone the lineage-stash-artifact repo like this:
+    ```
+    git clone https://github.com/stephanie-wang/lineage-stash-artifact.git
+    ```
+    This repo includes some example plots in `lineage-stash-artifact/data/microbenchmark`.
+
+    To plot the example uncommitted lineage results:
+    ```bash
+    cd lineage-stash-artifact/data/microbenchmark
+    tar -xzvf lineage-19-08-25-23-25-00.tar.gz
+    python plot_uncommitted_lineage.py \
+        --directory lineage-19-08-25-23-25-00/
+    ```
+    This command produces a graph like this:
+
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/microbenchmark/64-workers-uncommitted-lineage.png "Uncommitted lineage")
+                        
+    To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
+    You should see a window pop up with the plot.
+    Alternatively, you can pass in a pathname to save the results as, with the `--save-filename` option.
+    This will also create a CSV file with some stats from the plotted results, such as the p50 latency, which will have the same pathname that you saved the plot to, but ending with `.csv`.
+    For example:
+    ```bash
+    python plot_uncommitted_lineage.py \
+        --directory $RAY_HOME/benchmarks/cluster-scripts/lineage-<timestamp>
+        --save-filename uncommitted-lineage-64-workers.png
+    cat uncommitted-lineage-64-workers.csv
+    # f,task_duration_ms,uncommitted_lineage
+    # 8,0,7.996863476030143
+    # 8,1,7.996843434343434
+    # 8,2,7.996843434343434
+    ```
+9. Finally, tear down the cluster with `ray down`:
+    ```bash
+    cd $RAY_HOME/benchmarks/cluster-scripts
+    ray down microbenchmark.yaml
+    ```
