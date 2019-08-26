@@ -14,9 +14,9 @@ then
     exit
 fi
 
-# Forward lineage to 1/4 of the nodes, or 1 other node if there are fewer than
-# 4 nodes.
-PARTIAL_FORWARDING=$(( $NUM_RAYLETS / 4 ))
+# Forward lineage to 1/8 of the nodes, or 1 other node if there are fewer than
+# 8 nodes.
+PARTIAL_FORWARDING=$(( $NUM_RAYLETS / 8 ))
 if [[ $PARTIAL_FORWARDING -lt 1 ]]
 then
     PARTIAL_FORWARDING=1

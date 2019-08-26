@@ -39,7 +39,6 @@ fi
 
 output_prefix=$output_prefix`date +%y-%m-%d-%H-%M-%S`
 output_file=$output_prefix.csv
-raylet_log_file=$output_prefix.out
 
 exit_code=1
 i=0
@@ -84,8 +83,6 @@ then
 else
     echo "worker,timestamp,num_tasks,uncommitted_lineage" >> $output_file
     for worker in `tail -n $NUM_RAYLETS ~/workers.txt`; do
-      ssh -o "StrictHostKeyChecking no" -i ~/ray_bootstrap_key.pem $worker "grep 'UNCOMMITTED' /tmp/ray/*/logs/raylet.err" | awk -F':' '{ print '$worker'","$5 }' | tail -n $NUM_RAYLETS >> $raylet_log_file
+      ssh -o "StrictHostKeyChecking no" -i ~/ray_bootstrap_key.pem $worker "grep 'UNCOMMITTED' /tmp/ray/*/logs/raylet.err" | awk -F':' '{ print '$worker'","$5 }' | tail -n $NUM_RAYLETS >> $output_file
     done
-    sort $raylet_log_file | uniq -c | sort -bgr >> $output_file
-    rm $raylet_log_file
 fi
