@@ -574,7 +574,7 @@ In this benchmark, we will run the microbenchmarks to collect the latency distri
     ```
     This command produces a graph like this:
 
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/microbenchmark/64-workers-uncommitted-lineage.png "Uncommitted lineage")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/microbenchmark/uncommitted-lineage-64-workers.png "Uncommitted lineage")
                         
     To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
     You should see a window pop up with the plot.
