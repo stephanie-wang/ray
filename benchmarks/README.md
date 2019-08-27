@@ -555,10 +555,10 @@ In this benchmark, we will run the microbenchmarks to collect the latency distri
     Copy the output to your local machine by running:
     ```bash
     scp ubuntu@`ray get_head_ip microbenchmark.yaml`:~/ray/benchmarks/cluster-scripts/lineage-*.tar.gz .
-    tar -xzvf latency-<timestamp>.tar.gz
+    tar -xzvf lineage-<timestamp>.tar.gz
     ```
 
-8. (5min) Plot the latency results!
+8. (5min) Plot the uncommitted lineage results!
     To get the plotting scripts and to see some example data, clone the lineage-stash-artifact repo like this:
     ```
     git clone https://github.com/stephanie-wang/lineage-stash-artifact.git
