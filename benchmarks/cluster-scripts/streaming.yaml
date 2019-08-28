@@ -54,7 +54,7 @@ head_node:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 worker_nodes:
-    InstanceType: m4.xlarge
+    InstanceType: m5.xlarge
     ImageId: ami-0b3f35f1421c4adc3  # Default Ubuntu 16.04 AMI.
 
     # Set primary volume to 25 GiB

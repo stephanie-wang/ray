@@ -146,17 +146,22 @@ max_workers: 32
     To plot the example latency results for 4 workers:
     ```bash
     cd lineage-stash-artifact/data/streaming
-    tar -xzvf 4-workers.tar.gz
+    tar -xzvf 4-workers-m4-xlarge.tar.gz
     python plot_latency_cdf.py \
-        --directory 4-workers/
+        --directory 4-workers-m4-xlarge/
     ```
-    This command produces a graph like this:
+    On m4.xlarge worker machines, this command produces a graph like this.
+    Yours might look a little different because the YAML configuration uses m5.xlarge workers.
 
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-4-workers.png "Latency")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-4-workers-m4-xlarge.png "Latency")
 
-    Here's the same graph, but on 32 workers (data in `lineage-stash-artifact/data/streaming/32-workers.tar.gz`):
+    Here's the same graph, but on 32 m4.xlarge workers (data in `lineage-stash-artifact/data/streaming/32-workers-m4-xlarge.tar.gz`):
 
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-32-workers.png "Latency")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-32-workers-m4-xlarge.png "Latency")
+
+    Running it on m5.xlarge workers gives a slightly different graph (data in `lineage-stash-artifact/data/streaming/32-workers-m5-xlarge.tar.gz`):
+
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-32-workers-m5-xlarge.png "Latency")
 
     To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
     You should see a window pop up with the plots.
@@ -172,19 +177,25 @@ max_workers: 32
     To plot the example results from the recovery experiment:
     ```bash
     cd lineage-stash-artifact/data/streaming
-    tar -xzvf 4-workers.tar.gz
+    tar -xzvf 4-workers-m4-xlarge.tar.gz
     python plot_recovery.py \
-        --directory 4-workers/
+        --directory 4-workers-m4-xlarge/
     ```
-    This command produces two graphs, one for latency and one for throughput, like this:
+    On m4.xlarge worker machines, this command produces two graphs, one for latency and one for throughput, like this.
+    Yours might look a little different because the YAML configuration uses m5.xlarge workers.
 
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-recovery-4-workers.png "Latency during recovery")
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/throughput-recovery-4-workers.png "Throughput during recovery")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-recovery-4-workers-m4-xlarge.png "Latency during recovery")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/throughput-recovery-4-workers-m4-xlarge.png "Throughput during recovery")
 
-    Here's the same graph, but on 32 workers (data in `lineage-stash-artifact/data/streaming/32-workers.tar.gz`):
+    Here are the same graphs, but on 32 m4.xlarge workers (data in `lineage-stash-artifact/data/streaming/32-workers-m4-xlarge.tar.gz`):
 
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-recovery-32-workers.png "Latency during recovery")
-    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/throughput-recovery-32-workers.png "Throughput during recovery")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-recovery-32-workers-m4-xlarge.png "Latency during recovery")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/throughput-recovery-32-workers-m4-xlarge.png "Throughput during recovery")
+
+    Running it on m5.xlarge workers gives slightly different graphs (data in `lineage-stash-artifact/data/streaming/32-workers-m5-xlarge.tar.gz`):
+
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/latency-recovery-32-workers-m5-xlarge.png "Latency during recovery")
+    ![](https://github.com/stephanie-wang/lineage-stash-artifact/blob/master/data/streaming/throughput-recovery-32-workers-m5-xlarge.png "Throughput during recovery")
 
     To produce these plots from your own run, pass in the new directory that you created with all of the CSV files.
     You should see a window pop up with the plots.
