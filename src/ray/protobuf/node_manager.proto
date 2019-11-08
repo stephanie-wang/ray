@@ -14,15 +14,9 @@ message SubmitTaskReply {
 message WaitForDirectActorCallArgsRequest {
   // List of object ids we'll be waiting on.
   repeated bytes object_ids = 1;
-  // Id used to uniquely identify this request. This is sent back to the core
-  // worker to notify the wait has completed.
-  int64 tag = 2;
 }
 
 message WaitForDirectActorCallArgsReply {
-  // Id used to uniquely identify this request. This is sent back to the core
-  // worker to notify the wait has completed.
-  int64 tag = 1;
 }
 
 message ForwardTaskRequest {

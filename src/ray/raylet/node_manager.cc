@@ -1346,7 +1346,6 @@ void NodeManager::HandleWaitForDirectActorCallArgsRequestMessage(
     const rpc::WaitForDirectActorCallArgsRequest &request,
     rpc::WaitForDirectActorCallArgsReply *reply,
     rpc::SendReplyCallback send_reply_callback) {
-  int64_t tag = request.tag();
   std::vector<ObjectID> object_ids = IdVectorFromProtobuf<ObjectID>(request.object_ids());
   std::vector<ObjectID> required_object_ids;
   for (const auto &object_id : object_ids) {
@@ -1358,14 +1357,13 @@ void NodeManager::HandleWaitForDirectActorCallArgsRequestMessage(
     }
   }
 
-  ray::Status status = object_manager_.Wait(
-      object_ids, -1, object_ids.size(), false,
-      [reply, send_reply_callback, tag](std::vector<ObjectID> found,
-                                        std::vector<ObjectID> remaining) {
-        RAY_CHECK(remaining.empty());
-        reply->set_tag(tag);
-        send_reply_callback(Status::OK(), nullptr, nullptr);
-      });
+  ray::Status status =
+      object_manager_.Wait(object_ids, -1, object_ids.size(), false,
+                           [send_reply_callback](std::vector<ObjectID> found,
+                                                 std::vector<ObjectID> remaining) {
+                             RAY_CHECK(remaining.empty());
+                             send_reply_callback(Status::OK(), nullptr, nullptr);
+                           });
   RAY_CHECK_OK(status);
 }
 

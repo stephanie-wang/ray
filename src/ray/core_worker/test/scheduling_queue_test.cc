@@ -10,14 +10,14 @@ class MockWaiter : public DependencyWaiter {
   MockWaiter() {}
 
   void Wait(const std::vector<ObjectID> &dependencies,
-            std::function<void()> on_dependencies_available) override {
-    callbacks_.push_back([on_dependencies_available]() { on_dependencies_available(); });
+            std::function<void(Status)> on_dependencies_available) override {
+    callbacks_.push_back(on_dependencies_available);
   }
 
-  void Complete(int index) { callbacks_[index](); }
+  void Complete(int index, Status status = Status::OK()) { callbacks_[index](status); }
 
  private:
-  std::vector<std::function<void()>> callbacks_;
+  std::vector<std::function<void(Status)>> callbacks_;
 };
 
 TEST(SchedulingQueueTest, TestInOrder) {
@@ -62,6 +62,37 @@ TEST(SchedulingQueueTest, TestWaitForObjects) {
 
   waiter.Complete(1);
   ASSERT_EQ(n_ok, 4);
+}
+
+// Test multiple tasks queued waiting on objects, then we fail to get the
+// dependencies for a task in the middle of the queue.
+TEST(SchedulingQueueTest, TestWaitForObjectsError) {
+  ObjectID obj1 = ObjectID::FromRandom();
+  ObjectID obj2 = ObjectID::FromRandom();
+  ObjectID obj3 = ObjectID::FromRandom();
+  boost::asio::io_service io_service;
+  MockWaiter waiter;
+  SchedulingQueue queue(io_service, waiter, nullptr, 0);
+  int n_ok = 0;
+  int n_rej = 0;
+  auto fn_ok = [&n_ok]() { n_ok++; };
+  auto fn_rej = [&n_rej]() { n_rej++; };
+  queue.Add(0, -1, fn_ok, fn_rej, {obj1});
+  queue.Add(1, -1, fn_ok, fn_rej, {obj2});
+  queue.Add(2, -1, fn_ok, fn_rej, {obj3});
+  ASSERT_EQ(n_ok, 0);
+  ASSERT_EQ(n_rej, 0);
+
+  waiter.Complete(1);
+  ASSERT_EQ(n_ok, 0);
+  ASSERT_EQ(n_rej, 0);
+
+  waiter.Complete(2, Status::Invalid(""));
+  ASSERT_EQ(n_ok, 0);
+  ASSERT_EQ(n_rej, 1);
+
+  waiter.Complete(0);
+  ASSERT_EQ(n_ok, 2);
 }
 
 TEST(SchedulingQueueTest, TestWaitForObjectsNotSubjectToSeqTimeout) {

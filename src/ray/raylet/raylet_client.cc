@@ -285,12 +285,11 @@ ray::Status RayletClient::Wait(const std::vector<ObjectID> &object_ids, int num_
 }
 
 ray::Status RayletClient::WaitForDirectActorCallArgs(
-    const std::vector<ray::ObjectID> &object_ids, int64_t tag,
+    const std::vector<ray::ObjectID> &object_ids,
     const ray::rpc::ClientCallback<ray::rpc::WaitForDirectActorCallArgsReply> &callback) {
   ray::rpc::WaitForDirectActorCallArgsRequest request;
   ray::IdVectorToProtobuf<ObjectID, ray::rpc::WaitForDirectActorCallArgsRequest>(
       object_ids, request, &ray::rpc::WaitForDirectActorCallArgsRequest::add_object_ids);
-  request.set_tag(tag);
   return grpc_client_->WaitForDirectActorCallArgs(request, callback);
 }
 

@@ -123,11 +123,10 @@ class RayletClient {
   /// Wait for the given objects, asynchronously.
   ///
   /// \param object_ids The objects to wait for.
-  /// \param tag Value that will be sent to the core worker via gRPC on completion.
   /// \param callback Callback to be called once the given objects are available.
   /// \return ray::Status.
   ray::Status WaitForDirectActorCallArgs(
-      const std::vector<ray::ObjectID> &object_ids, int64_t tag,
+      const std::vector<ray::ObjectID> &object_ids,
       const ray::rpc::ClientCallback<ray::rpc::WaitForDirectActorCallArgsReply>
           &callback);
 

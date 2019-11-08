@@ -153,9 +153,11 @@ class InboundRequest {
 /// Waits for an object dependency to become available. Abstract for testing.
 class DependencyWaiter {
  public:
-  /// Calls `callback` once the specified objects become available.
+  /// Calls `callback` once the specified objects become available. If the
+  /// status passed into the callback is not OK, then there was an error and
+  /// the objects may not be available yet.
   virtual void Wait(const std::vector<ObjectID> &dependencies,
-                    std::function<void()> on_dependencies_available) = 0;
+                    std::function<void(Status)> on_dependencies_available) = 0;
 };
 
 class DependencyWaiterImpl : public DependencyWaiter {
@@ -163,28 +165,16 @@ class DependencyWaiterImpl : public DependencyWaiter {
   DependencyWaiterImpl(RayletClient &raylet_client) : raylet_client_(raylet_client) {}
 
   void Wait(const std::vector<ObjectID> &dependencies,
-            std::function<void()> on_dependencies_available) override {
-    auto tag = next_request_id_++;
-    requests_[tag] = on_dependencies_available;
+            std::function<void(Status)> on_dependencies_available) override {
     raylet_client_.WaitForDirectActorCallArgs(
-        dependencies, tag,
+        dependencies,
         [this, on_dependencies_available](
             Status status, const rpc::WaitForDirectActorCallArgsReply &reply) {
-          OnWaitComplete(reply.tag());
+          on_dependencies_available(status);
         });
   }
 
-  /// Fulfills the callback stored by Wait().
-  void OnWaitComplete(int64_t tag) {
-    auto it = requests_.find(tag);
-    RAY_CHECK(it != requests_.end());
-    it->second();
-    requests_.erase(it);
-  }
-
  private:
-  int64_t next_request_id_ = 0;
-  std::unordered_map<int64_t, std::function<void()>> requests_;
   RayletClient &raylet_client_;
 };
 
@@ -247,12 +237,17 @@ class SchedulingQueue {
     pending_tasks_[seq_no] =
         InboundRequest(accept_request, reject_request, dependencies.size() > 0);
     if (dependencies.size() > 0) {
-      waiter_.Wait(dependencies, [seq_no, this]() {
+      waiter_.Wait(dependencies, [seq_no, this](Status status) {
         RAY_CHECK(boost::this_thread::get_id() == main_thread_id_);
         auto it = pending_tasks_.find(seq_no);
         if (it != pending_tasks_.end()) {
           it->second.MarkDependenciesSatisfied();
-          ScheduleRequests();
+          if (!status.ok()) {
+            it->second.Cancel();
+            pending_tasks_.erase(it);
+          } else {
+            ScheduleRequests();
+          }
         }
       });
     }
