@@ -16,6 +16,10 @@ class NodeManagerServiceHandler {
   virtual void HandleSubmitTask(const SubmitTaskRequest &request, SubmitTaskReply *reply,
                                 SendReplyCallback send_reply_callback) = 0;
 
+  virtual void HandleWaitForDirectActorCallArgsRequestMessage(
+      const WaitForDirectActorCallArgsRequest &request,
+      WaitForDirectActorCallArgsReply *reply, SendReplyCallback send_reply_callback) = 0;
+
   /// Handle a `ForwardTask` request.
   /// The implementation can handle this request asynchronously. When handling is done,
   /// the `send_reply_callback` should be called.

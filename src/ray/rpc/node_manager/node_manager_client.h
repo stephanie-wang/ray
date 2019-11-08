@@ -82,6 +82,18 @@ class NodeManagerWorkerClient
     return call->GetStatus();
   }
 
+  ray::Status WaitForDirectActorCallArgs(
+      const WaitForDirectActorCallArgsRequest &request,
+      const ClientCallback<WaitForDirectActorCallArgsReply> &callback) {
+    auto call =
+        client_call_manager_
+            .CreateCall<NodeManagerService, WaitForDirectActorCallArgsRequest,
+                        WaitForDirectActorCallArgsReply>(
+                *stub_, &NodeManagerService::Stub::PrepareAsyncWaitForDirectActorCallArgs,
+                request, callback);
+    return call->GetStatus();
+  }
+
  private:
   /// Constructor.
   ///

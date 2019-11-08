@@ -68,22 +68,6 @@ class DirectActorClient : public std::enable_shared_from_this<DirectActorClient>
     return ray::Status::OK();
   }
 
-  /// Notify a wait has completed for direct actor call arguments.
-  ///
-  /// \param[in] request The request message.
-  /// \param[in] callback The callback function that handles reply.
-  /// \return if the rpc call succeeds
-  ray::Status DirectActorCallArgWaitComplete(
-      const DirectActorCallArgWaitCompleteRequest &request,
-      const ClientCallback<DirectActorCallArgWaitCompleteReply> &callback) {
-    auto call = client_call_manager_.CreateCall<DirectActorService,
-                                                DirectActorCallArgWaitCompleteRequest,
-                                                DirectActorCallArgWaitCompleteReply>(
-        *stub_, &DirectActorService::Stub::PrepareAsyncDirectActorCallArgWaitComplete,
-        request, callback);
-    return call->GetStatus();
-  }
-
   /// Send as many pending tasks as possible. This method is thread-safe.
   ///
   /// The client will guarantee no more than kMaxBytesInFlight bytes of RPCs are being

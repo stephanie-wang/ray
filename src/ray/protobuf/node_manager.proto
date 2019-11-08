@@ -11,6 +11,20 @@ message SubmitTaskRequest {
 message SubmitTaskReply {
 }
 
+message WaitForDirectActorCallArgsRequest {
+  // List of object ids we'll be waiting on.
+  repeated bytes object_ids = 1;
+  // Id used to uniquely identify this request. This is sent back to the core
+  // worker to notify the wait has completed.
+  int64 tag = 2;
+}
+
+message WaitForDirectActorCallArgsReply {
+  // Id used to uniquely identify this request. This is sent back to the core
+  // worker to notify the wait has completed.
+  int64 tag = 1;
+}
+
 message ForwardTaskRequest {
   // The ID of the task to be forwarded.
   bytes task_id = 1;
@@ -69,4 +83,6 @@ service NodeManagerService {
   rpc ForwardTask(ForwardTaskRequest) returns (ForwardTaskReply);
   // Get the current node stats.
   rpc GetNodeStats(NodeStatsRequest) returns (NodeStatsReply);
+  // Notify wait for direct actor call args has completed
+  rpc WaitForDirectActorCallArgs(WaitForDirectActorCallArgsRequest) returns (WaitForDirectActorCallArgsReply);
 }

@@ -13,6 +13,7 @@
 #include <sys/un.h>
 
 #include "ray/common/common_protocol.h"
+#include "ray/common/grpc_util.h"
 #include "ray/common/ray_config.h"
 #include "ray/common/task/task_spec.h"
 #include "ray/raylet/format/node_manager_generated.h"
@@ -284,12 +285,13 @@ ray::Status RayletClient::Wait(const std::vector<ObjectID> &object_ids, int num_
 }
 
 ray::Status RayletClient::WaitForDirectActorCallArgs(
-    const std::vector<ObjectID> &object_ids, int64_t tag) {
-  flatbuffers::FlatBufferBuilder fbb;
-  auto message = ray::protocol::CreateWaitForDirectActorCallArgsRequest(
-      fbb, to_flatbuf(fbb, object_ids), tag);
-  fbb.Finish(message);
-  return conn_->WriteMessage(MessageType::WaitForDirectActorCallArgsRequest, &fbb);
+    const std::vector<ray::ObjectID> &object_ids, int64_t tag,
+    const ray::rpc::ClientCallback<ray::rpc::WaitForDirectActorCallArgsReply> &callback) {
+  ray::rpc::WaitForDirectActorCallArgsRequest request;
+  ray::IdVectorToProtobuf<ObjectID, ray::rpc::WaitForDirectActorCallArgsRequest>(
+      object_ids, request, &ray::rpc::WaitForDirectActorCallArgsRequest::add_object_ids);
+  request.set_tag(tag);
+  return grpc_client_->WaitForDirectActorCallArgs(request, callback);
 }
 
 ray::Status RayletClient::PushError(const ray::JobID &job_id, const std::string &type,

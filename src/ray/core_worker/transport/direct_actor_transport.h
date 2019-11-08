@@ -166,7 +166,12 @@ class DependencyWaiterImpl : public DependencyWaiter {
             std::function<void()> on_dependencies_available) override {
     auto tag = next_request_id_++;
     requests_[tag] = on_dependencies_available;
-    raylet_client_.WaitForDirectActorCallArgs(dependencies, tag);
+    raylet_client_.WaitForDirectActorCallArgs(
+        dependencies, tag,
+        [this, on_dependencies_available](
+            Status status, const rpc::WaitForDirectActorCallArgsReply &reply) {
+          OnWaitComplete(reply.tag());
+        });
   }
 
   /// Fulfills the callback stored by Wait().
@@ -349,16 +354,6 @@ class CoreWorkerDirectActorTaskReceiver : public rpc::DirectActorHandler {
   /// \param[in] send_reply_callback The callback to be called when the request is done.
   void HandlePushTask(const rpc::PushTaskRequest &request, rpc::PushTaskReply *reply,
                       rpc::SendReplyCallback send_reply_callback) override;
-
-  /// Handle a `DirectActorCallArgWaitComplete` request.
-  ///
-  /// \param[in] request The request message.
-  /// \param[out] reply The reply message.
-  /// \param[in] send_reply_callback The callback to be called when the request is done.
-  void HandleDirectActorCallArgWaitComplete(
-      const rpc::DirectActorCallArgWaitCompleteRequest &request,
-      rpc::DirectActorCallArgWaitCompleteReply *reply,
-      rpc::SendReplyCallback send_reply_callback) override;
 
   /// Set the max concurrency at runtime. It cannot be changed once set.
   void SetMaxActorConcurrency(int max_concurrency);

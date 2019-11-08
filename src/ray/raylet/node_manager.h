@@ -422,14 +422,6 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   void ProcessWaitRequestMessage(const std::shared_ptr<LocalClientConnection> &client,
                                  const uint8_t *message_data);
 
-  /// Process client message of WaitForDirectActorCallArgsRequest
-  ///
-  /// \param client The client that sent the message.
-  /// \param message_data A pointer to the message data.
-  /// \return Void.
-  void ProcessWaitForDirectActorCallArgsRequestMessage(
-      const std::shared_ptr<LocalClientConnection> &client, const uint8_t *message_data);
-
   /// Process client message of PushErrorRequest
   ///
   /// \param message_data A pointer to the message data.
@@ -492,6 +484,16 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   void HandleSubmitTask(const rpc::SubmitTaskRequest &request,
                         rpc::SubmitTaskReply *reply,
                         rpc::SendReplyCallback send_reply_callback) override;
+
+  /// Process client message of WaitForDirectActorCallArgsRequest
+  ///
+  /// \param client The client that sent the message.
+  /// \param message_data A pointer to the message data.
+  /// \return Void.
+  virtual void HandleWaitForDirectActorCallArgsRequestMessage(
+      const rpc::WaitForDirectActorCallArgsRequest &request,
+      rpc::WaitForDirectActorCallArgsReply *reply,
+      rpc::SendReplyCallback send_reply_callback) override;
 
   /// Handle a `ForwardTask` request.
   void HandleForwardTask(const rpc::ForwardTaskRequest &request,
