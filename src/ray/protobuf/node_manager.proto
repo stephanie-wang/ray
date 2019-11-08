@@ -4,6 +4,7 @@ package ray.rpc;
 
 import "src/ray/protobuf/common.proto";
 
+// Submit a task for execution.
 message SubmitTaskRequest {
   TaskSpec task_spec = 1;
 }
@@ -11,6 +12,7 @@ message SubmitTaskRequest {
 message SubmitTaskReply {
 }
 
+// Wait for objects asynchronously.
 message WaitForDirectActorCallArgsRequest {
   // List of object ids we'll be waiting on.
   repeated bytes object_ids = 1;

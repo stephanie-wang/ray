@@ -481,15 +481,12 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// \return void.
   void FinishAssignTask(const TaskID &task_id, Worker &worker, bool success);
 
+  /// Handle a `SubmitTask` request.
   void HandleSubmitTask(const rpc::SubmitTaskRequest &request,
                         rpc::SubmitTaskReply *reply,
                         rpc::SendReplyCallback send_reply_callback) override;
 
-  /// Process client message of WaitForDirectActorCallArgsRequest
-  ///
-  /// \param client The client that sent the message.
-  /// \param message_data A pointer to the message data.
-  /// \return Void.
+  /// Handle a `WaitForDirectActorCallArgsRequest` request.
   virtual void HandleWaitForDirectActorCallArgsRequestMessage(
       const rpc::WaitForDirectActorCallArgsRequest &request,
       rpc::WaitForDirectActorCallArgsReply *reply,

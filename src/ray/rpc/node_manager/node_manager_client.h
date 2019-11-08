@@ -73,6 +73,7 @@ class NodeManagerWorkerClient
     return std::shared_ptr<NodeManagerWorkerClient>(instance);
   }
 
+  /// Submit a task.
   ray::Status SubmitTask(const SubmitTaskRequest &request,
                          const ClientCallback<SubmitTaskReply> &callback) {
     auto call = client_call_manager_
@@ -82,6 +83,8 @@ class NodeManagerWorkerClient
     return call->GetStatus();
   }
 
+  /// Wait for the given objects, asynchronously. The callback will be called
+  /// once the wait completes.
   ray::Status WaitForDirectActorCallArgs(
       const WaitForDirectActorCallArgsRequest &request,
       const ClientCallback<WaitForDirectActorCallArgsReply> &callback) {
