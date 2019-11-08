@@ -487,7 +487,7 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
                         rpc::SendReplyCallback send_reply_callback) override;
 
   /// Handle a `WaitForDirectActorCallArgsRequest` request.
-  virtual void HandleWaitForDirectActorCallArgsRequestMessage(
+  virtual void HandleWaitForDirectActorCallArgs(
       const rpc::WaitForDirectActorCallArgsRequest &request,
       rpc::WaitForDirectActorCallArgsReply *reply,
       rpc::SendReplyCallback send_reply_callback) override;

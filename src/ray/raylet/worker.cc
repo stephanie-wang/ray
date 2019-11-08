@@ -4,8 +4,8 @@
 
 #include "ray/raylet/format/node_manager_generated.h"
 #include "ray/raylet/raylet.h"
-#include "src/ray/protobuf/direct_actor.grpc.pb.h"
-#include "src/ray/protobuf/direct_actor.pb.h"
+#include "src/ray/protobuf/core_worker.grpc.pb.h"
+#include "src/ray/protobuf/core_worker.pb.h"
 
 namespace ray {
 
@@ -27,8 +27,6 @@ Worker::Worker(const WorkerID &worker_id, pid_t pid, const Language &language, i
   if (port_ > 0) {
     rpc_client_ = std::unique_ptr<rpc::WorkerTaskClient>(
         new rpc::WorkerTaskClient("127.0.0.1", port_, client_call_manager_));
-    direct_rpc_client_ = std::unique_ptr<rpc::DirectActorClient>(
-        new rpc::DirectActorClient("127.0.0.1", port_, client_call_manager_));
   }
 }
 

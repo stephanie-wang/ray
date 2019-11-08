@@ -27,7 +27,7 @@ class NodeManagerServiceHandler {
   virtual void HandleSubmitTask(const SubmitTaskRequest &request, SubmitTaskReply *reply,
                                 SendReplyCallback send_reply_callback) = 0;
 
-  virtual void HandleWaitForDirectActorCallArgsRequestMessage(
+  virtual void HandleWaitForDirectActorCallArgs(
       const WaitForDirectActorCallArgsRequest &request,
       WaitForDirectActorCallArgsReply *reply, SendReplyCallback send_reply_callback) = 0;
 
@@ -66,6 +66,14 @@ class NodeManagerGrpcService : public GrpcService {
             service_handler_, &NodeManagerServiceHandler::HandleSubmitTask, cq,
             main_service_));
 
+    // Initialize the factory for requests.
+    std::unique_ptr<ServerCallFactory> wait_for_direct_actor_call_args_factory(
+        new ServerCallFactoryImpl<NodeManagerService, NodeManagerServiceHandler,
+                                  WaitForDirectActorCallArgsRequest, WaitForDirectActorCallArgsReply>(
+            service_, &NodeManagerService::AsyncService::RequestWaitForDirectActorCallArgs,
+            service_handler_, &NodeManagerServiceHandler::HandleWaitForDirectActorCallArgs, cq,
+            main_service_));
+
     std::unique_ptr<ServerCallFactory> forward_task_call_factory(
         new ServerCallFactoryImpl<NodeManagerService, NodeManagerServiceHandler,
                                   ForwardTaskRequest, ForwardTaskReply>(
@@ -83,6 +91,8 @@ class NodeManagerGrpcService : public GrpcService {
     // Set accept concurrency.
     server_call_factories_and_concurrencies->emplace_back(
         std::move(submit_task_call_factory), 100);
+    server_call_factories_and_concurrencies->emplace_back(
+        std::move(wait_for_direct_actor_call_args_factory), 100);
     server_call_factories_and_concurrencies->emplace_back(
         std::move(forward_task_call_factory), 100);
     server_call_factories_and_concurrencies->emplace_back(
