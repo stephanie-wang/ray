@@ -26,9 +26,9 @@
 /// 1) Add the rpc to the WorkerService in core_worker.proto, e.g., "ExampleCall"
 /// 2) Add a new handler to the macro below: "RAY_CORE_WORKER_RPC_HANDLER(ExampleCall, 1)"
 /// 3) Add a method to the CoreWorker class below: "CoreWorker::HandleExampleCall"
-#define RAY_CORE_WORKER_RPC_HANDLERS                       \
-  RAY_CORE_WORKER_RPC_HANDLER(AssignTask, 5)               \
-  RAY_CORE_WORKER_RPC_HANDLER(DirectActorAssignTask, 9999) \
+#define RAY_CORE_WORKER_RPC_HANDLERS         \
+  RAY_CORE_WORKER_RPC_HANDLER(AssignTask, 5) \
+  RAY_CORE_WORKER_RPC_HANDLER(DirectActorAssignTask, 9999)
 
 namespace ray {
 

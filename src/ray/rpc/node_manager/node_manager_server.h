@@ -69,9 +69,12 @@ class NodeManagerGrpcService : public GrpcService {
     // Initialize the factory for requests.
     std::unique_ptr<ServerCallFactory> wait_for_direct_actor_call_args_factory(
         new ServerCallFactoryImpl<NodeManagerService, NodeManagerServiceHandler,
-                                  WaitForDirectActorCallArgsRequest, WaitForDirectActorCallArgsReply>(
-            service_, &NodeManagerService::AsyncService::RequestWaitForDirectActorCallArgs,
-            service_handler_, &NodeManagerServiceHandler::HandleWaitForDirectActorCallArgs, cq,
+                                  WaitForDirectActorCallArgsRequest,
+                                  WaitForDirectActorCallArgsReply>(
+            service_,
+            &NodeManagerService::AsyncService::RequestWaitForDirectActorCallArgs,
+            service_handler_,
+            &NodeManagerServiceHandler::HandleWaitForDirectActorCallArgs, cq,
             main_service_));
 
     std::unique_ptr<ServerCallFactory> forward_task_call_factory(
