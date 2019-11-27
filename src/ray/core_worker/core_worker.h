@@ -28,7 +28,8 @@
 #define RAY_CORE_WORKER_RPC_HANDLERS          \
   RAY_CORE_WORKER_RPC_HANDLER(AssignTask, 5)  \
   RAY_CORE_WORKER_RPC_HANDLER(PushTask, 9999) \
-  RAY_CORE_WORKER_RPC_HANDLER(DirectActorCallArgWaitComplete, 100)
+  RAY_CORE_WORKER_RPC_HANDLER(DirectActorCallArgWaitComplete, 100) \
+  RAY_CORE_WORKER_RPC_HANDLER(Heartbeat, 100)
 
 namespace ray {
 

@@ -87,6 +87,12 @@ message DirectActorCallArgWaitCompleteRequest {
 message DirectActorCallArgWaitCompleteReply {
 }
 
+message HeartbeatRequest {
+}
+
+message HeartbeatReply {
+}
+
 service CoreWorkerService {
   // Push a task to a worker from the raylet.
   rpc AssignTask(AssignTaskRequest) returns (AssignTaskReply);
@@ -95,4 +101,6 @@ service CoreWorkerService {
   // Reply from raylet that wait for direct actor call args has completed.
   rpc DirectActorCallArgWaitComplete(DirectActorCallArgWaitCompleteRequest)
       returns (DirectActorCallArgWaitCompleteReply);
+  // An empty request used to see if the owner is still alive.
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatReply);
 }

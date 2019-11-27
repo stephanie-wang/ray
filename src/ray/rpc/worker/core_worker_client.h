@@ -81,6 +81,11 @@ class CoreWorkerClientInterface {
     return Status::NotImplemented("");
   }
 
+  /// Ask the worker if it is still alive.
+  virtual ray::Status Heartbeat(const ClientCallback<HeartbeatReply> &callback) {
+    return Status::NotImplemented("");
+  }
+
   virtual ~CoreWorkerClientInterface(){};
 };
 
@@ -145,6 +150,15 @@ class CoreWorkerClient : public std::enable_shared_from_this<CoreWorkerClient>,
                                                 DirectActorCallArgWaitCompleteReply>(
         *stub_, &CoreWorkerService::Stub::PrepareAsyncDirectActorCallArgWaitComplete,
         request, callback);
+    return call->GetStatus();
+  }
+
+  virtual ray::Status Heartbeat(const ClientCallback<HeartbeatReply> &callback) {
+    HeartbeatRequest request;
+    auto call = client_call_manager_
+                    .CreateCall<CoreWorkerService, HeartbeatRequest, HeartbeatReply>(
+                        *stub_, &CoreWorkerService::Stub::PrepareAsyncHeartbeat, request,
+                        callback);
     return call->GetStatus();
   }
 
