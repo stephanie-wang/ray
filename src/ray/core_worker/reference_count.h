@@ -227,7 +227,8 @@ class ReferenceCounter {
                                  const rpc::Address &owner_address)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
-void OnRefRemoved(const ObjectID &object_id, rpc::WaitForRefRemovedReply *reply, rpc::SendReplyCallback send_reply_callback)
+  void OnRefRemoved(const ObjectID &object_id, rpc::WaitForRefRemovedReply *reply,
+                    rpc::SendReplyCallback send_reply_callback)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   /// Helper method to delete an entry from the reference map and run any necessary

@@ -481,26 +481,27 @@ void ReferenceCounter::WrapObjectId(
   }
 }
 
-void ReferenceCounter::OnRefRemoved(const ObjectID &object_id, rpc::WaitForRefRemovedReply *reply,
-    rpc::SendReplyCallback send_reply_callback) {
-    ReferenceTable borrower_refs;
-    RAY_UNUSED(PopBorrowerRefsInternal(object_id, &borrower_refs));
-    for (const auto &pair : borrower_refs) {
-      RAY_LOG(DEBUG) << pair.first << " has " << pair.second.NumBorrowers()
-                     << " borrowers";
-    }
-    auto it = object_id_refs_.find(object_id);
-    if (it != object_id_refs_.end()) {
-      // We should only have called this callback once our local ref count for
-      // the object was zero. Also, we should have popped our borrowers and
-      // returned them in the reply to the owner.
-      RAY_CHECK(it->second.RefCount() + it->second.NumBorrowers() == 0);
-      RAY_CHECK(!it->second.contained_in_borrowed_id.has_value());
-    }
-    // RAY_CHECK(object_id_refs_.count(object_id) == 0);
-    *reply = ReferenceTableToWaitForRefRemovedReply(borrower_refs);
-    RAY_LOG(DEBUG) << "Replying to WaitForRefRemoved, reply has " << reply->borrower_refs().size();
-    send_reply_callback(Status::OK(), nullptr, nullptr);
+void ReferenceCounter::OnRefRemoved(const ObjectID &object_id,
+                                    rpc::WaitForRefRemovedReply *reply,
+                                    rpc::SendReplyCallback send_reply_callback) {
+  ReferenceTable borrower_refs;
+  RAY_UNUSED(PopBorrowerRefsInternal(object_id, &borrower_refs));
+  for (const auto &pair : borrower_refs) {
+    RAY_LOG(DEBUG) << pair.first << " has " << pair.second.NumBorrowers() << " borrowers";
+  }
+  auto it = object_id_refs_.find(object_id);
+  if (it != object_id_refs_.end()) {
+    // We should only have called this callback once our local ref count for
+    // the object was zero. Also, we should have popped our borrowers and
+    // returned them in the reply to the owner.
+    RAY_CHECK(it->second.RefCount() + it->second.NumBorrowers() == 0);
+    RAY_CHECK(!it->second.contained_in_borrowed_id.has_value());
+  }
+  // RAY_CHECK(object_id_refs_.count(object_id) == 0);
+  *reply = ReferenceTableToWaitForRefRemovedReply(borrower_refs);
+  RAY_LOG(DEBUG) << "Replying to WaitForRefRemoved, reply has "
+                 << reply->borrower_refs().size();
+  send_reply_callback(Status::OK(), nullptr, nullptr);
 }
 
 void ReferenceCounter::HandleWaitForRefRemoved(
@@ -509,7 +510,8 @@ void ReferenceCounter::HandleWaitForRefRemoved(
   absl::MutexLock lock(&mutex_);
   const ObjectID &object_id = ObjectID::FromBinary(request.reference().object_id());
   RAY_LOG(DEBUG) << "Received WaitForRefRemoved " << object_id;
-  auto ref_removed_callback = boost::bind(&ReferenceCounter::OnRefRemoved, this, object_id, reply, send_reply_callback);
+  auto ref_removed_callback = boost::bind(&ReferenceCounter::OnRefRemoved, this,
+                                          object_id, reply, send_reply_callback);
 
   auto it = object_id_refs_.find(object_id);
 
