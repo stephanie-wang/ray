@@ -538,8 +538,6 @@ cdef CRayStatus task_execution_handler(
                 # it does, that indicates that there was an internal error.
                 execute_task(task_type, ray_function, c_resources, c_args,
                              c_arg_reference_ids, c_return_ids, returns)
-                import gc;gc.collect()
-                print("after callback", ray.worker.global_worker.core_worker.get_all_reference_counts())
             except Exception:
                 traceback_str = traceback.format_exc() + (
                     "An unexpected internal error occurred while the worker "

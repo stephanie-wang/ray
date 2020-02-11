@@ -457,7 +457,6 @@ Status CoreWorker::Get(const std::vector<ObjectID> &ids, const int64_t timeout_m
   auto start_time = current_time_ms();
 
   if (!memory_object_ids.empty()) {
-    RAY_LOG(ERROR) << "IN-MEMORY GET";
     RAY_RETURN_NOT_OK(memory_store_->Get(memory_object_ids, timeout_ms, worker_context_,
                                          &result_map, &got_exception));
   }
@@ -478,7 +477,6 @@ Status CoreWorker::Get(const std::vector<ObjectID> &ids, const int64_t timeout_m
                                   timeout_ms - (current_time_ms() - start_time));
     }
     RAY_LOG(DEBUG) << "Plasma GET timeout " << local_timeout_ms;
-    RAY_LOG(ERROR) << "PLASMA GET";
     RAY_RETURN_NOT_OK(plasma_store_provider_->Get(plasma_object_ids, local_timeout_ms,
                                                   worker_context_, &result_map,
                                                   &got_exception));
