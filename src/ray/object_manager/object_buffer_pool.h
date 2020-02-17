@@ -130,6 +130,9 @@ class ObjectBufferPool {
   /// \return string.
   std::string DebugString() const;
 
+  /// Abort an object that is pending creation.
+  void Abort(const ObjectID &object_id);
+
  private:
   /// Abort the create operation associated with an object. This destroys the buffer
   /// state, including create operations in progress for all chunks of the object.

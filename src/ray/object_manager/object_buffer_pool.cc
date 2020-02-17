@@ -162,6 +162,13 @@ void ObjectBufferPool::SealChunk(const ObjectID &object_id, const uint64_t chunk
   }
 }
 
+void ObjectBufferPool::Abort(const ObjectID &object_id) {
+  std::lock_guard<std::mutex> lock(pool_mutex_);
+  if (create_buffer_state_.find(object_id) != create_buffer_state_.end()) {
+    AbortCreate(object_id);
+  }
+}
+
 void ObjectBufferPool::AbortCreate(const ObjectID &object_id) {
   const plasma::ObjectID plasma_id = object_id.ToPlasmaId();
   RAY_ARROW_CHECK_OK(store_client_.Release(plasma_id));

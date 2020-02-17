@@ -706,7 +706,7 @@ ray::Status ObjectManager::ReceiveObjectChunk(const ClientID &client_id,
   } else {
     RAY_LOG(WARNING) << "ReceiveObjectChunk index " << chunk_index << " of object "
                      << object_id << " failed: " << chunk_status.second.message();
-    // TODO(hme): If the object isn't local, create a pull request for this chunk.
+    buffer_pool_.AbortCreateChunk(object_id, chunk_index);
   }
   return status;
 }
