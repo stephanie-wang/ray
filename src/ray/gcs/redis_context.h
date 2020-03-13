@@ -168,6 +168,16 @@ class RedisContext {
                                          const TablePubsub pubsub_channel,
                                          int log_length = -1);
 
+  int64_t IncrDecrSync(const std::string &command, const std::string &key) {
+    void *redis_reply = nullptr;
+    redis_reply = redisCommand(context_, command.c_str(), key.data(), key.length());
+    RAY_CHECK(redis_reply);
+    std::shared_ptr<CallbackReply> callback_reply =
+        std::make_shared<CallbackReply>(reinterpret_cast<redisReply *>(redis_reply));
+    freeReplyObject(redis_reply);
+    return callback_reply->ReadAsInteger();
+  }
+
   /// Run an operation on some table key.
   ///
   /// \param command The command to run. This must match a registered Ray Redis
@@ -194,6 +204,8 @@ class RedisContext {
   /// \param args The vector of command args to pass to Redis.
   /// \return Status.
   Status RunArgvAsync(const std::vector<std::string> &args);
+
+  Status RunArgvSync(const std::vector<std::string> &args);
 
   /// Subscribe to a specific Pub-Sub channel.
   ///

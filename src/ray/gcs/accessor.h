@@ -181,6 +181,8 @@ class TaskInfoAccessor {
   virtual Status AsyncAdd(const std::shared_ptr<rpc::TaskTableData> &data_ptr,
                           const StatusCallback &callback) = 0;
 
+  virtual Status SyncAdd(const std::shared_ptr<rpc::TaskTableData> &data_ptr) = 0;
+
   /// Get task information from GCS asynchronously.
   ///
   /// \param task_id The ID of the task to look up in GCS.

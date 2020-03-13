@@ -253,6 +253,12 @@ Status RedisTaskInfoAccessor::AsyncAdd(const std::shared_ptr<TaskTableData> &dat
   return task_table.Add(JobID::Nil(), task_id, data_ptr, on_done);
 }
 
+Status RedisTaskInfoAccessor::SyncAdd(const std::shared_ptr<TaskTableData> &data_ptr) {
+  TaskID task_id = TaskID::FromBinary(data_ptr->task().task_spec().task_id());
+  raylet::TaskTable &task_table = client_impl_->raylet_task_table();
+  return task_table.SyncAdd(JobID::Nil(), task_id, data_ptr);
+}
+
 Status RedisTaskInfoAccessor::AsyncGet(
     const TaskID &task_id, const OptionalItemCallback<TaskTableData> &callback) {
   RAY_CHECK(callback != nullptr);

@@ -353,6 +353,8 @@ class Table : private Log<ID, Data>,
   Status Add(const JobID &job_id, const ID &id, const std::shared_ptr<Data> &data,
              const WriteCallback &done);
 
+  Status SyncAdd(const JobID &job_id, const ID &id, const std::shared_ptr<Data> &data);
+
   /// Lookup an entry asynchronously.
   ///
   /// \param job_id The ID of the job.

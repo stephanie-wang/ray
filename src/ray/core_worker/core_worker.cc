@@ -768,18 +768,7 @@ Status CoreWorker::SubmitTask(const RayFunction &function,
       task_options.is_direct_call ? TaskTransportType::DIRECT : TaskTransportType::RAYLET,
       return_ids);
   TaskSpecification task_spec = builder.Build();
-  if (RayConfig::instance().centralized_owner()) {
-    // XXX: Centralized.
-    task_manager_->AddPendingTask(GetCallerId(), rpc_address_, task_spec, max_retries);
-    std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
-    data->mutable_task()->mutable_task_spec()->CopyFrom(task_spec.GetMessage());
-    RAY_CHECK_OK(
-        gcs_client_->Tasks().AsyncAdd(data, [this, task_spec](const Status status) {
-          RAY_CHECK_OK(status);
-          RAY_CHECK_OK(direct_task_submitter_->SubmitTask(task_spec));
-        }));
-    return Status::OK();
-  } else if (task_options.is_direct_call) {
+  if (task_options.is_direct_call) {
     task_manager_->AddPendingTask(GetCallerId(), rpc_address_, task_spec, max_retries);
     return direct_task_submitter_->SubmitTask(task_spec);
   } else {

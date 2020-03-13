@@ -29,7 +29,7 @@ void TaskManager::MaybeWriteTaskSpecToGcs(const TaskSpecification &spec) {
   if (gcs_client_) {
     std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
     data->mutable_task()->mutable_task_spec()->CopyFrom(spec.GetMessage());
-    RAY_CHECK_OK(gcs_client_->Tasks().AsyncAdd(data, nullptr));
+    RAY_CHECK_OK(gcs_client_->Tasks().SyncAdd(data));
   }
 }
 
@@ -37,22 +37,25 @@ void TaskManager::MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object
   // Use gcs_client_ as feature flag.
   if (gcs_client_) {
     for (const ObjectID &object_id : object_ids) {
-      RAY_LOG(DEBUG) << "REDIS: "
-                     << "INCR " << object_id.Hex();
-      RAY_CHECK_OK(
-          gcs_client_->primary_context()->RunArgvAsync({"INCR", object_id.Hex()}));
+      RAY_LOG(DEBUG) << "REDIS: INCR " << object_id.Hex();
+      int64_t new_val =
+          gcs_client_->primary_context()->IncrDecrSync("INCR %b", object_id.Hex());
+      RAY_LOG(DEBUG) << "New val: " << new_val;
     }
   }
 }
 
 void TaskManager::MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object_ids) {
-  // Use gcs_client_ as feature flag.
-  if (gcs_client_) {
-    for (const ObjectID &object_id : object_ids) {
-      RAY_LOG(DEBUG) << "REDIS: "
-                     << "DECR " << object_id.Hex();
-      RAY_CHECK_OK(
-          gcs_client_->primary_context()->RunArgvAsync({"DECR", object_id.Hex()}));
+  {
+    absl::MutexLock lock(&mu_);
+    // Use gcs_client_ as feature flag.
+    if (gcs_client_) {
+      for (const ObjectID &object_id : object_ids) {
+        RAY_LOG(DEBUG) << "REDIS: DECR " << object_id.Hex();
+        int64_t new_val =
+            gcs_client_->primary_context()->IncrDecrSync("DECR %b", object_id.Hex());
+        RAY_LOG(DEBUG) << "New val: " << new_val;
+      }
     }
   }
 }
@@ -87,8 +90,6 @@ void TaskManager::AddPendingTask(const TaskID &caller_id,
     task_deps.push_back(actor_creation_return_id);
   }
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
-  // XXX: Centralized.
-  MaybeIncrementGcsRefcounts(task_deps);
 
   // Add new owned objects for the return values of the task.
   size_t num_returns = spec.NumReturns();
@@ -104,6 +105,10 @@ void TaskManager::AddPendingTask(const TaskID &caller_id,
     reference_counter_->AddOwnedObject(spec.ReturnId(i, TaskTransportType::DIRECT),
                                        /*inner_ids=*/{}, caller_id, caller_address);
   }
+
+  // XXX: Centralized.
+  MaybeWriteTaskSpecToGcs(spec);
+  MaybeIncrementGcsRefcounts(task_deps);
 }
 
 void TaskManager::DrainAndShutdown(std::function<void()> shutdown) {
@@ -135,6 +140,9 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
         << "Tried to complete task that was not pending " << task_id;
     spec = it->second.first;
     pending_tasks_.erase(it);
+
+    // XXX: Centralized.
+    MaybeWriteTaskSpecToGcs(spec);
   }
 
   RemoveFinishedTaskReferences(spec, worker_addr, reply.borrowed_refs());
@@ -169,9 +177,6 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
     }
   }
 
-  // XXX: Centralized.
-  MaybeWriteTaskSpecToGcs(spec);
-
   ShutdownIfNeeded();
 }
 
@@ -196,6 +201,9 @@ void TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
       RAY_CHECK(num_retries_left > 0);
       it->second.second--;
     }
+
+    // XXX: Centralized.
+    MaybeWriteTaskSpecToGcs(spec);
   }
 
   // We should not hold the lock during these calls because they may trigger
@@ -231,9 +239,6 @@ void TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
                                  ReferenceCounter::ReferenceTableProto());
     MarkPendingTaskFailed(task_id, spec, error_type);
   }
-
-  // XXX: Centralized.
-  MaybeWriteTaskSpecToGcs(spec);
 
   ShutdownIfNeeded();
 }

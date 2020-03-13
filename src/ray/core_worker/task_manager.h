@@ -121,13 +121,16 @@ class TaskManager : public TaskFinisherInterface {
 
  private:
   /// XXX: Centralized.
-  void MaybeWriteTaskSpecToGcs(const TaskSpecification &spec);
+  void MaybeWriteTaskSpecToGcs(const TaskSpecification &spec)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   /// XXX: Centralized.
-  void MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object_ids);
+  void MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object_ids)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
 
   /// XXX: Centralized.
-  void MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object_ids);
+  void MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object_ids)
+      LOCKS_EXCLUDED(mu_);
 
   /// Treat a pending task as failed. The lock should not be held when calling
   /// this method because it may trigger callbacks in this or other classes.
@@ -182,7 +185,7 @@ class TaskManager : public TaskFinisherInterface {
   /// Optional shutdown hook to call when pending tasks all finish.
   std::function<void()> shutdown_hook_ GUARDED_BY(mu_) = nullptr;
 
-  std::shared_ptr<gcs::RedisGcsClient> gcs_client_;
+  std::shared_ptr<gcs::RedisGcsClient> gcs_client_ GUARDED_BY(mu_);
 };
 
 }  // namespace ray

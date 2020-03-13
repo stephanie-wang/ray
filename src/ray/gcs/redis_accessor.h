@@ -136,6 +136,8 @@ class RedisTaskInfoAccessor : public TaskInfoAccessor {
   Status AsyncAdd(const std::shared_ptr<TaskTableData> &data_ptr,
                   const StatusCallback &callback) override;
 
+  Status SyncAdd(const std::shared_ptr<TaskTableData> &data_ptr) override;
+
   Status AsyncGet(const TaskID &task_id,
                   const OptionalItemCallback<TaskTableData> &callback) override;
 
