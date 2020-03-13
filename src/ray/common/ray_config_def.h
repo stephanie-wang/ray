@@ -260,3 +260,5 @@ RAY_CONFIG(int32_t, object_store_full_max_retries, 5)
 /// Duration to sleep after failing to put an object in plasma because it is full.
 /// This will be exponentially increased for each retry.
 RAY_CONFIG(uint32_t, object_store_full_initial_delay_ms, 1000)
+
+RAY_CONFIG(bool, centralized_owner, false)

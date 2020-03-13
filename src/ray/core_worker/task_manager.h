@@ -49,11 +49,17 @@ class TaskManager : public TaskFinisherInterface {
   TaskManager(std::shared_ptr<CoreWorkerMemoryStore> in_memory_store,
               std::shared_ptr<ReferenceCounter> reference_counter,
               std::shared_ptr<ActorManagerInterface> actor_manager,
-              RetryTaskCallback retry_task_callback)
+              RetryTaskCallback retry_task_callback,
+              std::shared_ptr<gcs::GcsClient> gcs_client = nullptr)
       : in_memory_store_(in_memory_store),
         reference_counter_(reference_counter),
         actor_manager_(actor_manager),
-        retry_task_callback_(retry_task_callback) {}
+        retry_task_callback_(retry_task_callback),
+        gcs_client_(std::dynamic_pointer_cast<gcs::RedisGcsClient>(gcs_client)) {
+    if (gcs_client_) {
+      RAY_LOG(INFO) << "** Using centralized owner!";
+    }
+  }
 
   /// Add a task that is pending execution.
   ///
@@ -114,6 +120,15 @@ class TaskManager : public TaskFinisherInterface {
   int NumPendingTasks() const { return pending_tasks_.size(); }
 
  private:
+  /// XXX: Centralized.
+  void MaybeWriteTaskSpecToGcs(const TaskSpecification &spec);
+
+  /// XXX: Centralized.
+  void MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object_ids);
+
+  /// XXX: Centralized.
+  void MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object_ids);
+
   /// Treat a pending task as failed. The lock should not be held when calling
   /// this method because it may trigger callbacks in this or other classes.
   void MarkPendingTaskFailed(const TaskID &task_id, const TaskSpecification &spec,
@@ -166,6 +181,8 @@ class TaskManager : public TaskFinisherInterface {
 
   /// Optional shutdown hook to call when pending tasks all finish.
   std::function<void()> shutdown_hook_ GUARDED_BY(mu_) = nullptr;
+
+  std::shared_ptr<gcs::RedisGcsClient> gcs_client_;
 };
 
 }  // namespace ray
