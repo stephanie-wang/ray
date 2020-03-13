@@ -104,9 +104,6 @@ void TaskManager::AddPendingTask(const TaskID &caller_id,
     reference_counter_->AddOwnedObject(spec.ReturnId(i, TaskTransportType::DIRECT),
                                        /*inner_ids=*/{}, caller_id, caller_address);
   }
-
-  // XXX: Centralized.
-  MaybeWriteTaskSpecToGcs(spec);
 }
 
 void TaskManager::DrainAndShutdown(std::function<void()> shutdown) {
