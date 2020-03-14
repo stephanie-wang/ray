@@ -36,12 +36,8 @@ void TaskManager::MaybeWriteTaskSpecToGcs(const TaskSpecification &spec) {
 void TaskManager::MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object_ids) {
   // Use gcs_client_ as feature flag.
   if (gcs_client_) {
-    for (const ObjectID &object_id : object_ids) {
-      RAY_LOG(DEBUG) << "REDIS: INCR " << object_id.Hex();
-      int64_t new_val =
-          gcs_client_->primary_context()->IncrDecrSync("INCR %b", object_id.Hex());
-      RAY_LOG(DEBUG) << "New val: " << new_val;
-    }
+    std::vector<int64_t> new_vals =
+        gcs_client_->primary_context()->IncrPipelineSync(object_ids);
   }
 }
 
@@ -50,12 +46,8 @@ void TaskManager::MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object
     absl::MutexLock lock(&mu_);
     // Use gcs_client_ as feature flag.
     if (gcs_client_) {
-      for (const ObjectID &object_id : object_ids) {
-        RAY_LOG(DEBUG) << "REDIS: DECR " << object_id.Hex();
-        int64_t new_val =
-            gcs_client_->primary_context()->IncrDecrSync("DECR %b", object_id.Hex());
-        RAY_LOG(DEBUG) << "New val: " << new_val;
-      }
+      std::vector<int64_t> new_vals =
+          gcs_client_->primary_context()->DecrPipelineSync(object_ids);
     }
   }
 }

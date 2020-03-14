@@ -168,14 +168,31 @@ class RedisContext {
                                          const TablePubsub pubsub_channel,
                                          int log_length = -1);
 
-  int64_t IncrDecrSync(const std::string &command, const std::string &key) {
-    void *redis_reply = nullptr;
-    redis_reply = redisCommand(context_, command.c_str(), key.data(), key.length());
-    RAY_CHECK(redis_reply);
-    std::shared_ptr<CallbackReply> callback_reply =
-        std::make_shared<CallbackReply>(reinterpret_cast<redisReply *>(redis_reply));
-    freeReplyObject(redis_reply);
-    return callback_reply->ReadAsInteger();
+  std::vector<int64_t> IncrDecrPipelineSync(const std::string &command,
+                                            const std::vector<ObjectID> &object_ids) {
+    void *reply = nullptr;
+    for (const ObjectID &object_id : object_ids) {
+      redisAppendCommand(context_, command.c_str(), object_id.Data(), object_id.Size());
+    }
+
+    std::vector<int64_t> replies(object_ids.size());
+    for (int i; i < object_ids.size(); i++) {
+      redisGetReply(context_, &reply);
+      RAY_CHECK(reply);
+      std::shared_ptr<CallbackReply> callback_reply =
+          std::make_shared<CallbackReply>(reinterpret_cast<redisReply *>(reply));
+      freeReplyObject(reply);
+      replies[i] = callback_reply->ReadAsInteger();
+    }
+    return replies;
+  }
+
+  std::vector<int64_t> IncrPipelineSync(const std::vector<ObjectID> &object_ids) {
+    return IncrDecrPipelineSync("INCR %b", object_ids);
+  }
+
+  std::vector<int64_t> DecrPipelineSync(const std::vector<ObjectID> &object_ids) {
+    return IncrDecrPipelineSync("DECR %b", object_ids);
   }
 
   /// Run an operation on some table key.
