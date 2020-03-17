@@ -7,6 +7,7 @@ import ray
 import numpy as np
 
 parser = argparse.ArgumentParser()
+parser.add_argument("--connect", default=False, action="store_true")
 parser.add_argument("--chained", default=False, action="store_true")
 parser.add_argument("--centralized", default=False, action="store_true")
 parser.add_argument("--no-by-ref", default=False, action="store_true")
@@ -42,8 +43,12 @@ def do_ray_init(args):
         # Set threshold to 1 TiB to force everything to be inlined.
         internal_config["max_direct_call_object_size"] = 1024**4
 
+    address = None
+    if args.connect:
+        address = "auto"
+
     print("Starting ray with:", internal_config)
-    ray.init(_internal_config=json.dumps(internal_config))
+    ray.init(address=address, _internal_config=json.dumps(internal_config))
 
 
 def main(opts):
