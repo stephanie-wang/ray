@@ -137,15 +137,19 @@ class ReferenceCounter {
   /// possible to have leftover references after a task has finished.
   ///
   /// \param[in] object_id The ID of the object that we own.
-  /// \param[in] inner_ids ObjectIDs that are contained in the object's value.
+  /// \param[in] contained_ids ObjectIDs that are contained in the object's value.
   /// As long as the object_id is in scope, the inner objects should not be GC'ed.
   /// \param[in] owner_id The ID of the object's owner.
   /// \param[in] owner_address The address of the object's owner.
-  /// \param[in] dependencies The objects that the object depends on.
+  /// \param[in] call_site Description of the call site where the reference was created.
+  /// \param[in] object_size Object size if known, otherwise -1;
+  /// \param[in] is_reconstructable Whether the object can be reconstructed
+  /// through lineage re-execution.
   void AddOwnedObject(const ObjectID &object_id,
                       const std::vector<ObjectID> &contained_ids, const TaskID &owner_id,
                       const rpc::Address &owner_address, const std::string &call_site,
-                      const int64_t object_size) LOCKS_EXCLUDED(mutex_);
+                      const int64_t object_size, bool is_reconstructable)
+      LOCKS_EXCLUDED(mutex_);
 
   /// Update the size of the object.
   ///
@@ -302,11 +306,12 @@ class ReferenceCounter {
         : call_site(call_site), object_size(object_size) {}
     /// Constructor for a reference that we created.
     Reference(const TaskID &owner_id, const rpc::Address &owner_address,
-              std::string call_site, const int64_t object_size)
+              std::string call_site, const int64_t object_size, bool is_reconstructable)
         : call_site(call_site),
           object_size(object_size),
           owned_by_us(true),
-          owner({owner_id, owner_address}) {}
+          owner({owner_id, owner_address}),
+          is_reconstructable(is_reconstructable) {}
 
     /// Constructor from a protobuf. This is assumed to be a message from
     /// another process, so the object defaults to not being owned by us.
@@ -329,13 +334,19 @@ class ReferenceCounter {
     /// - The reference was contained in another ID that we were borrowing, and
     ///   we haven't told the process that gave us that ID yet.
     /// - We gave the reference to at least one other process.
-    bool OutOfScope() const {
+    bool OutOfScope(bool lineage_pinning_enabled) const {
       bool in_scope = RefCount() > 0;
       bool was_contained_in_borrowed_id = contained_in_borrowed_id.has_value();
       bool has_borrowers = borrowers.size() > 0;
       bool was_stored_in_objects = stored_in_objects.size() > 0;
+
+      bool has_downstream_tasks = false;
+      if (lineage_pinning_enabled && owned_by_us && !is_reconstructable) {
+        has_downstream_tasks = lineage_ref_count > 0;
+      }
+
       return !(in_scope || was_contained_in_borrowed_id || has_borrowers ||
-               was_stored_in_objects);
+               was_stored_in_objects || has_downstream_tasks);
     }
 
     /// Whether the Reference can be deleted. A Reference can only be deleted
@@ -345,9 +356,9 @@ class ReferenceCounter {
     /// the object that may be retried in the future.
     bool ShouldDelete(bool lineage_pinning_enabled) const {
       if (lineage_pinning_enabled) {
-        return OutOfScope() && (lineage_ref_count == 0);
+        return OutOfScope(lineage_pinning_enabled) && (lineage_ref_count == 0);
       } else {
-        return OutOfScope();
+        return OutOfScope(lineage_pinning_enabled);
       }
     }
 
@@ -364,6 +375,7 @@ class ReferenceCounter {
     /// if we do not know the object's owner (because distributed ref counting
     /// is not yet implemented).
     absl::optional<std::pair<TaskID, rpc::Address>> owner;
+    const bool is_reconstructable = false;
 
     /// The local ref count for the ObjectID in the language frontend.
     size_t local_ref_count = 0;
