@@ -250,6 +250,7 @@ void CoreWorkerDirectTaskReceiver::HandlePushTask(
     RAY_CHECK(num_returns >= 0);
 
     std::vector<std::shared_ptr<RayObject>> return_objects;
+    RAY_CHECK(reply) << task_spec.TaskId();
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
                                 reply->mutable_borrowed_refs());
 

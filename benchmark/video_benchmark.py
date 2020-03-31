@@ -120,7 +120,7 @@ def process_video(video_pathname):
 
 def main():
     internal_config = json.dumps({
-        "initial_reconstruction_timeout_milliseconds": 200,
+        "initial_reconstruction_timeout_milliseconds": 100000,
         "num_heartbeats_timeout": 10,
         "lineage_pinning_enabled": 1,
     })
@@ -134,18 +134,14 @@ def main():
     ray.init(address=cluster.address)
     start = time.time()
 
-    #cmd = DURATION_CMD.format(TEST_VIDEO).split()
-    #duration_s = subprocess.check_output(cmd)
-    #duration_s = float(duration_s)
-
-    def kill_node():
-        cluster.remove_node(preprocess_nodes[-1], allow_graceful=False)
-
-    t = threading.Timer(10.0, kill_node)
+    t = threading.Thread(target=process_video, args=(TEST_VIDEO,))
     t.start()
 
-
-    process_video(TEST_VIDEO)
+    time.sleep(10)
+    cluster.remove_node(preprocess_nodes[-1], allow_graceful=False)
+    time.sleep(1)
+    cluster.add_node(num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config)
+    t.join()
 
     end = time.time()
     num_frames = FRAMES_PER_SECOND * MAX_DURATION

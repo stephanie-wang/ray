@@ -571,7 +571,7 @@ void CoreWorker::OnNodeRemoved(const rpc::GcsNodeInfo &node_info) {
   // UnreconstructableError or a value reconstructed from lineage).
   memory_store_->Delete(lost_objects);
   for (const auto &object_id : lost_objects) {
-    RAY_LOG(INFO) << "Object " << object_id << " lost due to node failure " << node_id;
+    RAY_LOG(WARNING) << "Object " << object_id << " lost due to node failure " << node_id;
     // The lost object must have been owned by us.
     RAY_CHECK_OK(object_recovery_manager_->RecoverObject(object_id));
   }
@@ -1370,6 +1370,7 @@ Status CoreWorker::AllocateReturnObjects(
         object_already_exists = !data_buffer;
       }
     }
+
     // Leave the return object as a nullptr if the object already exists.
     if (!object_already_exists) {
       return_objects->at(i) =
@@ -1453,11 +1454,21 @@ Status CoreWorker::ExecuteTask(const TaskSpecification &task_spec,
                              : worker_context_.GetCurrentTask()->CallerAddress());
   for (size_t i = 0; i < return_objects->size(); i++) {
     // The object is nullptr if it already existed in the object store.
-    if (!return_objects->at(i)) {
-      continue;
-    }
-    if (return_objects->at(i)->GetData() != nullptr &&
-        return_objects->at(i)->GetData()->IsPlasmaBuffer()) {
+    auto &return_object = return_objects->at(i);
+    if (!return_object) {
+      bool got_exception = false;
+      absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> result_map;
+      plasma_store_provider_->Get({return_ids[i]}, 0, worker_context_, &result_map, &got_exception);
+      return_objects->at(i) = result_map[return_ids[i]];
+      return_object = return_objects->at(i);
+      RAY_CHECK_OK(local_raylet_client_->PinObjectIDs(
+          caller_address, {return_ids[i]},
+          [this, return_object](const Status &status, const rpc::PinObjectIDsReply &reply) {
+            // Only release the object once the raylet has responded to avoid the race
+            // condition that the object could be evicted before the raylet pins it.
+            RAY_UNUSED(return_object);
+          }));
+    } else if (return_object->GetData()->IsPlasmaBuffer()) {
       if (!Seal(return_ids[i], /*pin_object=*/true, caller_address).ok()) {
         RAY_LOG(FATAL) << "Task " << task_spec.TaskId() << " failed to seal object "
                        << return_ids[i] << " in store: " << status.message();
