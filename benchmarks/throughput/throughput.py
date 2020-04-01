@@ -11,15 +11,12 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--connect", default=False, action="store_true")
 parser.add_argument("--chained", default=False, action="store_true")
 parser.add_argument("--centralized", default=False, action="store_true")
-parser.add_argument("--no-by-ref", default=False, action="store_true")
 parser.add_argument("--tasks-per-batch", type=int, default=10)
 parser.add_argument(
     "--arg-size", type=str, required=True, help="'small' or 'large'")
 parser.add_argument("--num-args", type=int, default=1)
-parser.add_argument("--iterations", type=int, required=True)
 parser.add_argument("--tree", default=False, action="store_true")
 
-WARM_UP_ITERATIONS = 10
 SMALL_ARG_SIZE = 10 * 1024  # 10 KiB
 LARGE_ARG_SIZE = 1024 * 1024  # 1 MiB
 TREE_DEPTH = 2
@@ -36,7 +33,7 @@ def do_batch(f, opts, args=None, depth=0):
     ])
 
 
-@ray.remote
+@ray.remote(max_retries=0)
 def f(opts, *args, depth=0):
     if not opts.tree or depth == TREE_DEPTH:
         return args
