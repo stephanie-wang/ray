@@ -8,57 +8,51 @@ import ray
 import numpy as np
 
 parser = argparse.ArgumentParser()
-parser.add_argument("--connect", default=False, action="store_true")
-parser.add_argument("--chained", default=False, action="store_true")
-parser.add_argument("--centralized", default=False, action="store_true")
-parser.add_argument("--tasks-per-batch", type=int, default=10)
 parser.add_argument(
     "--arg-size", type=str, required=True, help="'small' or 'large'")
-parser.add_argument("--num-args", type=int, default=1)
-parser.add_argument("--tree", default=False, action="store_true")
 
 SMALL_ARG_SIZE = 10 * 1024  # 10 KiB
 LARGE_ARG_SIZE = 1024 * 1024  # 1 MiB
-TREE_DEPTH = 2
+TASKS_PER_BATCH = 20
 
 
-def do_batch(f, opts, args=None, depth=0):
+def do_batch(f, opts, args=None):
     if args is None:
         args = [
             np.zeros(opts.arg_size, dtype=np.uint8)
-            for _ in range(opts.num_args)
+            for _ in range(TASKS_PER_BATCH)
         ]
-    return ray.get([
-        f.remote(opts, *args, depth=depth) for _ in range(opts.tasks_per_batch)
-    ])
+    results = [f.remote(arg) for arg in args]
+    ray.get(results)
+    return results
 
 
-@ray.remote(max_retries=0)
-def f(opts, *args, depth=0):
-    if not opts.tree or depth == TREE_DEPTH:
-        return args
-    return do_batch(f, opts, depth=depth + 1)
+@ray.remote
+def f(arg):
+    return arg
 
 
-def do_ray_init(args):
-    internal_config = {"centralized_owner": int(args.centralized)}
+def do_ray_init(arg):
+    internal_config = {"record_ref_creation_sites": 0}
+    if os.environ.get("CENTRALIZED", False):
+        internal_config["centralized_owner"] = 1
     if os.environ.get("BY_VAL_ONLY", False):
         # Set threshold to 1 TiB to force everything to be inlined.
         internal_config["max_direct_call_object_size"] = 1024**4
 
-    address = None
-    if args.connect:
-        address = "auto"
+    internal_config = json.dumps(internal_config)
+    if os.environ.get("RAY_0_7", False):
+        internal_config = None
 
     print("Starting ray with:", internal_config)
-    ray.init(address=address, _internal_config=json.dumps(internal_config))
+    ray.init(address="auto", _internal_config=internal_config)
 
 
 def timeit(fn, multiplier=1):
     # warmup
     start = time.time()
     prev = None
-    while time.time() - start < 1:
+    while time.time() - start < 5:
         prev = fn(prev)
     # real run
     stats = []
@@ -68,11 +62,12 @@ def timeit(fn, multiplier=1):
         start = time.time()
         count = 0
         prev = None
-        while time.time() - start < 2:
+        while time.time() - start < 10:
             prev = fn(prev)
             count += 1
         end = time.time()
         stats.append(multiplier * count / (end - start))
+        print("finished", count)
     print("per second", round(np.mean(stats), 2), "+-", round(
         np.std(stats), 2))
 
@@ -81,15 +76,9 @@ def main(opts):
     do_ray_init(opts)
 
     def chained_batch(prev_batch):
-        args = None
-        if opts.chained and prev_batch is not None:
-            args = prev_batch
-        return do_batch(f, opts, args=args)
+        return do_batch(f, opts, args=prev_batch)
 
-    multiplier = opts.tasks_per_batch
-    if args.tree:
-        multiplier = multiplier**TREE_DEPTH
-    timeit(chained_batch, multiplier=multiplier)
+    timeit(chained_batch, multiplier=TASKS_PER_BATCH)
 
 
 if __name__ == "__main__":
@@ -98,4 +87,6 @@ if __name__ == "__main__":
         args.arg_size = SMALL_ARG_SIZE
     elif args.arg_size == "large":
         args.arg_size = LARGE_ARG_SIZE
+    else:
+        assert False
     main(args)
