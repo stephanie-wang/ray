@@ -389,7 +389,7 @@ void ObjectManager::Push(const ObjectID &object_id, const ClientID &client_id) {
         RayConfig::instance().object_manager_repeated_push_delay_ms()) {
       // We pushed this object to the object manager recently, so don't do it
       // again.
-      RAY_LOG(DEBUG) << "Object " << object_id << " recently pushed to " << client_id;
+      RAY_LOG(WARNING) << "Object " << object_id << " recently pushed to " << client_id;
       return;
     } else {
       it->second = current_time;

@@ -5,54 +5,57 @@ import numpy as np
 import time
 import json
 import threading
+import tempfile
 
 import ray
 import ray.cluster_utils
 
 OUTPUT_DIR = "/home/swang/data/images"
 TEST_VIDEO = "/home/swang/data/test.mp4"
-DURATION_CMD = "ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 {}"
-DECODE_CMD = "ffmpeg -i {input} -vf fps={fps} -ss {start} -t {duration} {output_dir}/%03d.png"
 
-NUM_FRAMES_PER_CHUNK = 10
-FRAMES_PER_SECOND = 1
-MAX_DURATION = 1200.0
+NUM_FRAMES_PER_CHUNK = 300
+MAX_FRAMES = 1200.0
 
 CLEANUP = False
 
-MSE_THRESHOLD = 100
-
-def get_chunk_dir(chunk_index):
-    chunk_dir = os.path.join(OUTPUT_DIR, "image-{}".format(chunk_index))
-    return chunk_dir
+MSE_THRESHOLD = 70
 
 def get_chunk_file(chunk_index, frame):
-    chunk_dir = get_chunk_dir(chunk_index)
-    filename = os.path.join(chunk_dir, "{:03d}.png".format(frame))
+    frame = chunk_index * NUM_FRAMES_PER_CHUNK + frame
+    filename = os.path.join(OUTPUT_DIR, "image-{:06d}.png".format(frame))
     return filename
 
 @ray.remote(resources={"query": 1})
 def process_frame(frame):
-    time.sleep(0.1)
+    time.sleep(0.2)
     return "a result"
 
 @ray.remote(resources={"preprocess": 1})
-def load_frame(filename):
+def load_frames(filename):
     image = cv2.imread(filename)
+    assert image is not None
     image = cv2.resize(image, (416, 416))
     return image
+
+@ray.remote(resources={"preprocess": 1})
+def load_frames(filename, start_frame, num_frames):
+    v = cv2.VideoCapture(filename)
+    v.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+    frames = []
+    for _ in range(num_frames):
+        grabbed, frame = v.read()
+        assert grabbed
+        frame = cv2.resize(frame, (416, 416))
+        frames.append(frame)
+    return frames
 
 @ray.remote(resources={"preprocess": 1})
 def compute_mse(frame1, frame2):
     return np.square(frame1 - frame2).mean()
 
 @ray.remote(resources={"preprocess": 1})
-def process_chunk(chunk_index, num_frames):
-    frames = []
-    for frame in range(num_frames):
-        frame += 1
-        filename = get_chunk_file(chunk_index, frame)
-        frames.append(load_frame.remote(filename))
+def process_chunk(filename, start_frame, num_frames):
+    frames = load_frames.options(num_return_vals=num_frames).remote(filename, start_frame, num_frames)
 
     last_frame_index = None
     results = []
@@ -66,49 +69,27 @@ def process_chunk(chunk_index, num_frames):
             results.append(process_frame.remote(frame))
             last_frame_index = i
             if i != 0:
-                print("SWITCHING", i)
+                print("switch frame", i)
     return ray.get(results)
 
 
 def cleanup_chunk(chunk_index, num_frames):
-    chunk_dir = get_chunk_dir(chunk_index)
     for frame in range(num_frames, 0, -1):
         filename = get_chunk_file(chunk_index, frame)
         os.remove(filename)
-    os.rmdir(chunk_dir)
 
 
-def decode_chunk(video_pathname, chunk_index, num_frames, start, duration):
-    chunk_dir = get_chunk_dir(chunk_index)
-    try:
-        os.mkdir(chunk_dir)
-    except FileExistsError:
-        pass
-    last_output = get_chunk_file(chunk_index, num_frames)
-    if not os.path.exists(last_output):
-        cmd = DECODE_CMD.format(
-                input=video_pathname,
-                start=start,
-                fps=FRAMES_PER_SECOND,
-                duration=duration,
-                output_dir=chunk_dir).split()
-        subprocess.check_output(cmd)
-    else:
-        print("Skipping chunk, {} already exists".format(last_output))
-
-def process_video(video_pathname):
-    chunk_duration = float(NUM_FRAMES_PER_CHUNK) / FRAMES_PER_SECOND
-    start = 0
-    chunk_index = 0
+def process_video(video_pathname, num_total_frames):
     results = []
     futures = []
-    while start < MAX_DURATION:
-        decode_chunk(TEST_VIDEO, chunk_index, NUM_FRAMES_PER_CHUNK, start, chunk_duration)
-        if len(futures) >= 6:
+    start_frame = 0
+    while start_frame < num_total_frames:
+        if len(futures) >= 4:
             results += ray.get(futures.pop(0))
-        futures.append(process_chunk.remote(chunk_index, NUM_FRAMES_PER_CHUNK))
-        chunk_index += 1
-        start += chunk_duration
+        print("Processing chunk at index", start_frame)
+        num_frames = min(NUM_FRAMES_PER_CHUNK, num_total_frames - start_frame)
+        futures.append(process_chunk.remote(video_pathname, start_frame, num_frames))
+        start_frame += num_frames
 
     for f in futures:
         results += ray.get(f)
@@ -118,35 +99,48 @@ def process_video(video_pathname):
             cleanup_chunk(i, NUM_FRAMES_PER_CHUNK)
 
 
-def main():
+def main(test_failure):
     internal_config = json.dumps({
         "initial_reconstruction_timeout_milliseconds": 100000,
         "num_heartbeats_timeout": 10,
         "lineage_pinning_enabled": 1,
+        "free_objects_period_milliseconds": -1,
+        "object_manager_repeated_push_delay_ms": 1000,
     })
     cluster = ray.cluster_utils.Cluster()
-    cluster.add_node(num_cpus=0, _internal_config=internal_config)
-    preprocess_nodes = [cluster.add_node(num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config) for _ in range(2)]
-    query_nodes = [cluster.add_node(num_cpus=2, resources={"query": 100}, _internal_config=internal_config) for _ in range(2)]
+    cluster.add_node(num_cpus=0, _internal_config=internal_config, include_webui=False)
+    preprocess_nodes = [cluster.add_node(object_store_memory=10**9, num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config) for _ in range(2)]
+    query_nodes = [cluster.add_node(object_store_memory=10**9, num_cpus=2, resources={"query": 100}, _internal_config=internal_config) for _ in range(1)]
     cluster.wait_for_nodes()
     
 
     ray.init(address=cluster.address)
     start = time.time()
 
-    t = threading.Thread(target=process_video, args=(TEST_VIDEO,))
+    v = cv2.VideoCapture(TEST_VIDEO)
+    num_total_frames = min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES)
+    print("FRAMES", num_total_frames)
+    t = threading.Thread(target=process_video, args=(TEST_VIDEO, num_total_frames))
     t.start()
 
-    time.sleep(10)
-    cluster.remove_node(preprocess_nodes[-1], allow_graceful=False)
-    time.sleep(1)
-    cluster.add_node(num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config)
+    if test_failure:
+        time.sleep(5)
+        cluster.remove_node(preprocess_nodes[-1], allow_graceful=False)
+        time.sleep(1)
+        cluster.add_node(num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config)
+
     t.join()
 
     end = time.time()
-    num_frames = FRAMES_PER_SECOND * MAX_DURATION
     print("Finished in", end - start)
-    print("Throughput:", num_frames / (end - start))
+    print("Throughput:", num_total_frames / (end - start))
+
+    ray.timeline(filename="dump.json")
 
 if __name__ == "__main__":
-    main()
+    import argparse
+    parser = argparse.ArgumentParser(description='Run the video benchmark.')
+
+    parser.add_argument("--failure", action="store_true")
+    args = parser.parse_args()
+    main(args.failure)
