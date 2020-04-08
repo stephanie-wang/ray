@@ -12,6 +12,7 @@ import ray.cluster_utils
 
 OUTPUT_DIR = "/home/swang/data/images"
 TEST_VIDEO = "/home/swang/data/test.mp4"
+YOLO_PATH = "/home/swang/darknet"
 
 NUM_FRAMES_PER_CHUNK = 300
 MAX_FRAMES = 1200.0
@@ -25,17 +26,34 @@ def get_chunk_file(chunk_index, frame):
     filename = os.path.join(OUTPUT_DIR, "image-{:06d}.png".format(frame))
     return filename
 
+def load_model():
+    global net, ln
+    weightsPath = os.path.join(YOLO_PATH, "yolov3-tiny.weights")
+    configPath = os.path.join(YOLO_PATH, "cfg/yolov3-tiny.cfg")
+    net = cv2.dnn.readNetFromDarknet(configPath, weightsPath)
+    ln = net.getLayerNames()
+    ln = [ln[i[0] - 1] for i in net.getUnconnectedOutLayers()]
+
+
 @ray.remote(resources={"query": 1})
 def process_frame(frame):
-    time.sleep(0.2)
-    return "a result"
+    global net, ln
+    if "net" not in globals():
+        load_model()
 
-@ray.remote(resources={"preprocess": 1})
-def load_frames(filename):
-    image = cv2.imread(filename)
-    assert image is not None
-    image = cv2.resize(image, (416, 416))
-    return image
+    frame = frame / 255.
+    net.setInput(frame)
+    layerOutputs = net.forward(ln)
+
+    classes = []
+    for output in layerOutputs:
+        for detection in output:
+            scores = detection[5:]
+            classId = np.argmax(scores)
+            confidence = scores[classId]
+            if confidence > 0:
+                classes.append(classId)
+    return classes
 
 @ray.remote(resources={"preprocess": 1})
 def load_frames(filename, start_frame, num_frames):
@@ -45,7 +63,9 @@ def load_frames(filename, start_frame, num_frames):
     for _ in range(num_frames):
         grabbed, frame = v.read()
         assert grabbed
-        frame = cv2.resize(frame, (416, 416))
+        # Use uint8_t to reduce image size.
+        frame = cv2.dnn.blobFromImage(frame, 1, (416, 416),
+            swapRB=True, crop=False, ddepth=cv2.CV_8U)
         frames.append(frame)
     return frames
 
@@ -69,7 +89,7 @@ def process_chunk(filename, start_frame, num_frames):
             results.append(process_frame.remote(frame))
             last_frame_index = i
             if i != 0:
-                print("switch frame", i)
+                print("switch frame", start_frame + i)
     return ray.get(results)
 
 
