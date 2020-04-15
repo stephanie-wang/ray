@@ -13,7 +13,7 @@ parser.add_argument(
 
 SMALL_ARG_SIZE = 10 * 1024  # 10 KiB
 LARGE_ARG_SIZE = 1024 * 1024  # 1 MiB
-TASKS_PER_BATCH = 20
+TASKS_PER_BATCH = 36
 
 
 def do_batch(f, opts, args=None):
