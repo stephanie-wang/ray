@@ -6,6 +6,7 @@ import time
 import json
 import threading
 import tempfile
+import sys
 
 import ray
 import ray.cluster_utils
@@ -21,10 +22,12 @@ CLEANUP = False
 
 MSE_THRESHOLD = 70
 
+
 def get_chunk_file(chunk_index, frame):
     frame = chunk_index * NUM_FRAMES_PER_CHUNK + frame
     filename = os.path.join(OUTPUT_DIR, "image-{:06d}.png".format(frame))
     return filename
+
 
 def load_model():
     global net, ln
@@ -55,6 +58,7 @@ def process_frame(frame):
                 classes.append(classId)
     return classes
 
+
 @ray.remote(resources={"preprocess": 1})
 def load_frames(filename, start_frame, num_frames):
     v = cv2.VideoCapture(filename)
@@ -64,18 +68,21 @@ def load_frames(filename, start_frame, num_frames):
         grabbed, frame = v.read()
         assert grabbed
         # Use uint8_t to reduce image size.
-        frame = cv2.dnn.blobFromImage(frame, 1, (416, 416),
-            swapRB=True, crop=False, ddepth=cv2.CV_8U)
+        frame = cv2.dnn.blobFromImage(
+            frame, 1, (416, 416), swapRB=True, crop=False, ddepth=cv2.CV_8U)
         frames.append(frame)
     return frames
+
 
 @ray.remote(resources={"preprocess": 1})
 def compute_mse(frame1, frame2):
     return np.square(frame1 - frame2).mean()
 
+
 @ray.remote(resources={"preprocess": 1})
 def process_chunk(filename, start_frame, num_frames):
-    frames = load_frames.options(num_return_vals=num_frames).remote(filename, start_frame, num_frames)
+    frames = load_frames.options(num_return_vals=num_frames).remote(
+        filename, start_frame, num_frames)
 
     last_frame_index = None
     results = []
@@ -108,7 +115,8 @@ def process_video(video_pathname, num_total_frames):
             results += ray.get(futures.pop(0))
         print("Processing chunk at index", start_frame)
         num_frames = min(NUM_FRAMES_PER_CHUNK, num_total_frames - start_frame)
-        futures.append(process_chunk.remote(video_pathname, start_frame, num_frames))
+        futures.append(
+            process_chunk.remote(video_pathname, start_frame, num_frames))
         start_frame += num_frames
 
     for f in futures:
@@ -128,11 +136,23 @@ def main(test_failure):
         "object_manager_repeated_push_delay_ms": 1000,
     })
     cluster = ray.cluster_utils.Cluster()
-    cluster.add_node(num_cpus=0, _internal_config=internal_config, include_webui=False)
-    preprocess_nodes = [cluster.add_node(object_store_memory=10**9, num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config) for _ in range(2)]
-    query_nodes = [cluster.add_node(object_store_memory=10**9, num_cpus=2, resources={"query": 100}, _internal_config=internal_config) for _ in range(1)]
+    cluster.add_node(
+        num_cpus=0, _internal_config=internal_config, include_webui=False)
+    preprocess_nodes = [
+        cluster.add_node(
+            object_store_memory=10**9,
+            num_cpus=2,
+            resources={"preprocess": 100},
+            _internal_config=internal_config) for _ in range(2)
+    ]
+    query_nodes = [
+        cluster.add_node(
+            object_store_memory=10**9,
+            num_cpus=2,
+            resources={"query": 100},
+            _internal_config=internal_config) for _ in range(1)
+    ]
     cluster.wait_for_nodes()
-    
 
     ray.init(address=cluster.address)
     start = time.time()
@@ -140,14 +160,19 @@ def main(test_failure):
     v = cv2.VideoCapture(TEST_VIDEO)
     num_total_frames = min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES)
     print("FRAMES", num_total_frames)
-    t = threading.Thread(target=process_video, args=(TEST_VIDEO, num_total_frames))
+    t = threading.Thread(
+        target=process_video, args=(TEST_VIDEO, num_total_frames))
     t.start()
 
     if test_failure:
-        time.sleep(5)
+        time.sleep(3)
         cluster.remove_node(preprocess_nodes[-1], allow_graceful=False)
         time.sleep(1)
-        cluster.add_node(num_cpus=2, resources={"preprocess": 100}, _internal_config=internal_config)
+        cluster.add_node(
+            object_store_memory=10**9,
+            num_cpus=2,
+            resources={"preprocess": 100},
+            _internal_config=internal_config)
 
     t.join()
 
@@ -156,6 +181,7 @@ def main(test_failure):
     print("Throughput:", num_total_frames / (end - start))
 
     ray.timeline(filename="dump.json")
+
 
 if __name__ == "__main__":
     import argparse
