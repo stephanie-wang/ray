@@ -473,10 +473,10 @@ class ReferenceCounter {
 
     /// Callback that will be called when this ObjectID no longer has
     /// references.
-    std::function<void(const ObjectID &)> on_delete;
+    std::function<void(const ObjectID &)> on_delete = nullptr;
     /// Callback that is called when this process is no longer a borrower
     /// (RefCount() == 0).
-    std::function<void(const ObjectID &)> on_ref_removed;
+    std::function<void(const ObjectID &)> on_ref_removed = nullptr;
   };
 
   using ReferenceTable = absl::flat_hash_map<ObjectID, Reference>;

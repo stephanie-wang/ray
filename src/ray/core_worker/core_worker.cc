@@ -1455,20 +1455,7 @@ Status CoreWorker::ExecuteTask(const TaskSpecification &task_spec,
   for (size_t i = 0; i < return_objects->size(); i++) {
     // The object is nullptr if it already existed in the object store.
     auto &return_object = return_objects->at(i);
-    if (!return_object) {
-      bool got_exception = false;
-      absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> result_map;
-      plasma_store_provider_->Get({return_ids[i]}, 0, worker_context_, &result_map, &got_exception);
-      return_objects->at(i) = result_map[return_ids[i]];
-      return_object = return_objects->at(i);
-      RAY_CHECK_OK(local_raylet_client_->PinObjectIDs(
-          caller_address, {return_ids[i]},
-          [this, return_object](const Status &status, const rpc::PinObjectIDsReply &reply) {
-            // Only release the object once the raylet has responded to avoid the race
-            // condition that the object could be evicted before the raylet pins it.
-            RAY_UNUSED(return_object);
-          }));
-    } else if (return_object->GetData()->IsPlasmaBuffer()) {
+    if (return_object && return_object->GetData()->IsPlasmaBuffer()) {
       if (!Seal(return_ids[i], /*pin_object=*/true, caller_address).ok()) {
         RAY_LOG(FATAL) << "Task " << task_spec.TaskId() << " failed to seal object "
                        << return_ids[i] << " in store: " << status.message();

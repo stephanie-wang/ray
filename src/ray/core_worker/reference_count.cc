@@ -453,7 +453,11 @@ bool ReferenceCounter::SetDeleteCallback(
     return false;
   }
 
-  RAY_CHECK(!it->second.on_delete) << object_id;
+  if (it->second.on_delete) {
+    RAY_LOG(WARNING) << "Object " << object_id << " already pinned.";
+    return false;
+  }
+
   it->second.on_delete = callback;
   return true;
 }
