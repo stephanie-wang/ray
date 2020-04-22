@@ -177,12 +177,14 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   }
 
   auto lease_client = GetOrConnectLeaseClient(raylet_address);
+  RAY_CHECK(lease_client);
   TaskSpecification &resource_spec = it->second.front();
   TaskID task_id = resource_spec.TaskId();
   RAY_LOG(DEBUG) << "Lease requested " << task_id;
   RAY_UNUSED(lease_client->RequestWorkerLease(
-      resource_spec, [this, scheduling_key](const Status &status,
+      resource_spec, [this, scheduling_key, task_id](const Status &status,
                                             const rpc::RequestWorkerLeaseReply &reply) {
+        RAY_LOG(DEBUG) << "HERE " << task_id;
         absl::MutexLock lock(&mu_);
 
         auto it = pending_lease_requests_.find(scheduling_key);
@@ -219,12 +221,13 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
           // A local request failed. This shouldn't happen if the raylet is still alive
           // and we don't currently handle raylet failures, so treat it as a fatal
           // error.
-          RAY_LOG(FATAL) << status.ToString();
+          RAY_LOG(FATAL) << "Local raylet unreachable " << status.ToString();
         }
+        RAY_LOG(DEBUG) << "THERE " << task_id;
       }));
   RAY_CHECK(pending_lease_requests_
                 .emplace(scheduling_key, std::make_pair(lease_client, task_id))
-                .second);
+                .second) << task_id;
 }
 
 void CoreWorkerDirectTaskSubmitter::PushNormalTask(
