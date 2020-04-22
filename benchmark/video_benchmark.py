@@ -127,13 +127,14 @@ def process_video(video_pathname, num_total_frames):
             cleanup_chunk(i, NUM_FRAMES_PER_CHUNK)
 
 
-def main(test_failure):
+def main(test_failure, timeline):
     internal_config = json.dumps({
         "initial_reconstruction_timeout_milliseconds": 100000,
         "num_heartbeats_timeout": 10,
         "lineage_pinning_enabled": 1,
         "free_objects_period_milliseconds": -1,
         "object_manager_repeated_push_delay_ms": 1000,
+        "task_retry_delay_ms": 100,
     })
     cluster = ray.cluster_utils.Cluster()
     cluster.add_node(
@@ -180,7 +181,8 @@ def main(test_failure):
     print("Finished in", end - start)
     print("Throughput:", num_total_frames / (end - start))
 
-    ray.timeline(filename="dump.json")
+    if timeline:
+        ray.timeline(filename="dump.json")
 
 
 if __name__ == "__main__":
@@ -188,5 +190,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Run the video benchmark.')
 
     parser.add_argument("--failure", action="store_true")
+    parser.add_argument("--timeline", action="store_true")
     args = parser.parse_args()
-    main(args.failure)
+    main(args.failure, args.timeline)
