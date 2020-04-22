@@ -464,6 +464,10 @@ cdef execute_task(
             with core_worker.profile_event(b"task:store_outputs"):
                 core_worker.store_task_outputs(
                     worker, outputs, c_return_ids, returns)
+        except RayletError as error:
+            exit = SystemExit(0)
+            exit.is_ray_terminate = True
+            raise exit
         except Exception as error:
             if (<int>task_type == <int>TASK_TYPE_ACTOR_CREATION_TASK):
                 worker.mark_actor_init_failed(error)
