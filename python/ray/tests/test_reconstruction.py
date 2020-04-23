@@ -13,7 +13,6 @@ from ray.test_utils import (
 def test_cached_object(ray_start_cluster):
     config = json.dumps({
         "num_heartbeats_timeout": 10,
-        "raylet_heartbeat_timeout_milliseconds": 100,
     })
     cluster = Cluster()
     # Head node with no resources.
@@ -54,26 +53,23 @@ def test_reconstruction_cached_dependency(ray_start_cluster,
                                           reconstruction_enabled):
     config = json.dumps({
         "num_heartbeats_timeout": 10,
-        "raylet_heartbeat_timeout_milliseconds": 100,
-        "lineage_pinning_enabled": 1 if reconstruction_enabled else 0,
-        "free_objects_period_milliseconds": -1,
     })
     cluster = Cluster()
     # Head node with no resources.
-    cluster.add_node(num_cpus=0, _internal_config=config)
+    cluster.add_node(num_cpus=0, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     # Node to place the initial object.
     node_to_kill = cluster.add_node(
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.add_node(
         num_cpus=1,
         resources={"node2": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.wait_for_nodes()
-    ray.init(address=cluster.address, _internal_config=config)
+    ray.init(address=cluster.address, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
 
     @ray.remote(max_retries=0)
     def large_object():
@@ -96,7 +92,7 @@ def test_reconstruction_cached_dependency(ray_start_cluster,
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     assert wait_for_condition(
         lambda: not all(node["Alive"] for node in ray.nodes()), timeout=10)
 
@@ -112,30 +108,28 @@ def test_reconstruction_cached_dependency(ray_start_cluster,
                 raise e.as_instanceof_cause()
 
 
-@pytest.mark.parametrize("reconstruction_enabled", [False, True])
+@pytest.mark.parametrize("reconstruction_enabled", [True, False])
 def test_basic_reconstruction(ray_start_cluster, reconstruction_enabled):
     config = json.dumps({
         "num_heartbeats_timeout": 10,
-        "raylet_heartbeat_timeout_milliseconds": 100,
-        "lineage_pinning_enabled": 1 if reconstruction_enabled else 0,
-        "free_objects_period_milliseconds": -1,
     })
     cluster = Cluster()
     # Head node with no resources.
-    cluster.add_node(num_cpus=0, _internal_config=config)
+    cluster.add_node(num_cpus=0, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     # Node to place the initial object.
     node_to_kill = cluster.add_node(
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.add_node(
         num_cpus=1,
         resources={"node2": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.wait_for_nodes()
-    ray.init(address=cluster.address, _internal_config=config)
+    ray.init(address=cluster.address, _internal_config=config,
+            reconstruction_enabled=reconstruction_enabled)
 
     @ray.remote(max_retries=1 if reconstruction_enabled else 0)
     def large_object():
@@ -153,7 +147,7 @@ def test_basic_reconstruction(ray_start_cluster, reconstruction_enabled):
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
 
     if reconstruction_enabled:
         ray.get(dependent_task.remote(obj))
@@ -168,26 +162,24 @@ def test_basic_reconstruction(ray_start_cluster, reconstruction_enabled):
 def test_basic_reconstruction_put(ray_start_cluster, reconstruction_enabled):
     config = json.dumps({
         "num_heartbeats_timeout": 10,
-        "raylet_heartbeat_timeout_milliseconds": 100,
-        "lineage_pinning_enabled": 1 if reconstruction_enabled else 0,
-        "free_objects_period_milliseconds": -1,
     })
     cluster = Cluster()
     # Head node with no resources.
-    cluster.add_node(num_cpus=0, _internal_config=config)
+    cluster.add_node(num_cpus=0, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     # Node to place the initial object.
     node_to_kill = cluster.add_node(
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.add_node(
         num_cpus=1,
         resources={"node2": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.wait_for_nodes()
-    ray.init(address=cluster.address, _internal_config=config)
+    ray.init(address=cluster.address, _internal_config=config,
+            reconstruction_enabled=reconstruction_enabled)
 
     @ray.remote(max_retries=1 if reconstruction_enabled else 0)
     def large_object():
@@ -207,7 +199,7 @@ def test_basic_reconstruction_put(ray_start_cluster, reconstruction_enabled):
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
 
     for _ in range(20):
         ray.put(np.zeros(10**7, dtype=np.uint8))
@@ -223,26 +215,23 @@ def test_basic_reconstruction_put(ray_start_cluster, reconstruction_enabled):
 def test_multiple_downstream_tasks(ray_start_cluster, reconstruction_enabled):
     config = json.dumps({
         "num_heartbeats_timeout": 10,
-        "raylet_heartbeat_timeout_milliseconds": 100,
-        "lineage_pinning_enabled": 1 if reconstruction_enabled else 0,
-        "free_objects_period_milliseconds": -1,
     })
     cluster = Cluster()
     # Head node with no resources.
-    cluster.add_node(num_cpus=0, _internal_config=config)
+    cluster.add_node(num_cpus=0, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     # Node to place the initial object.
     node_to_kill = cluster.add_node(
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.add_node(
         num_cpus=1,
         resources={"node2": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.wait_for_nodes()
-    ray.init(address=cluster.address, _internal_config=config)
+    ray.init(address=cluster.address, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
 
     @ray.remote(max_retries=1 if reconstruction_enabled else 0)
     def large_object():
@@ -266,7 +255,7 @@ def test_multiple_downstream_tasks(ray_start_cluster, reconstruction_enabled):
         num_cpus=1,
         resources={"node1": 1},
         object_store_memory=10**8,
-        _internal_config=config)
+        _internal_config=config, reconstruction_enabled=reconstruction_enabled)
 
     if reconstruction_enabled:
         for obj in downstream:
@@ -286,18 +275,16 @@ def test_multiple_downstream_tasks(ray_start_cluster, reconstruction_enabled):
 def test_reconstruction_chain(ray_start_cluster, reconstruction_enabled):
     config = json.dumps({
         "num_heartbeats_timeout": 10,
-        "raylet_heartbeat_timeout_milliseconds": 100,
-        "lineage_pinning_enabled": 1 if reconstruction_enabled else 0,
-        "free_objects_period_milliseconds": -1,
     })
     cluster = Cluster()
     # Head node with no resources.
     cluster.add_node(
-        num_cpus=0, _internal_config=config, object_store_memory=10**8)
+        num_cpus=0, _internal_config=config, object_store_memory=10**8, reconstruction_enabled=reconstruction_enabled)
     node_to_kill = cluster.add_node(
-        num_cpus=1, object_store_memory=10**8, _internal_config=config)
+        num_cpus=1, object_store_memory=10**8, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
     cluster.wait_for_nodes()
-    ray.init(address=cluster.address, _internal_config=config)
+    ray.init(address=cluster.address, _internal_config=config,
+            reconstruction_enabled=reconstruction_enabled)
 
     @ray.remote(max_retries=1 if reconstruction_enabled else 0)
     def large_object():
@@ -318,7 +305,7 @@ def test_reconstruction_chain(ray_start_cluster, reconstruction_enabled):
 
     cluster.remove_node(node_to_kill, allow_graceful=False)
     cluster.add_node(
-        num_cpus=1, object_store_memory=10**8, _internal_config=config)
+        num_cpus=1, object_store_memory=10**8, _internal_config=config, reconstruction_enabled=reconstruction_enabled)
 
     if reconstruction_enabled:
         ray.get(dependent_task.remote(obj))

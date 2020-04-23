@@ -275,6 +275,11 @@ def dashboard(cluster_config_file, cluster_name, port):
     is_flag=True,
     default=False,
     help="Specify whether load code from local file or GCS serialization.")
+@click.option(
+    "--reconstruction-enabled",
+    is_flag=True,
+    default=False,
+    help="Whether plasma reconstruction is enabled")
 def start(node_ip_address, redis_address, address, redis_port,
           num_redis_shards, redis_max_clients, redis_password,
           redis_shard_ports, object_manager_port, node_manager_port, memory,
@@ -282,7 +287,8 @@ def start(node_ip_address, redis_address, address, redis_port,
           head, include_webui, webui_host, block, plasma_directory, huge_pages,
           autoscaling_config, no_redirect_worker_output, no_redirect_output,
           plasma_store_socket_name, raylet_socket_name, temp_dir, include_java,
-          java_worker_options, load_code_from_local, internal_config):
+          java_worker_options, load_code_from_local, internal_config,
+          reconstruction_enabled):
     if redis_address is not None:
         raise DeprecationWarning("The --redis-address argument is "
                                  "deprecated. Please use --address instead.")
@@ -328,7 +334,8 @@ def start(node_ip_address, redis_address, address, redis_port,
         webui_host=webui_host,
         java_worker_options=java_worker_options,
         load_code_from_local=load_code_from_local,
-        _internal_config=internal_config)
+        _internal_config=internal_config,
+        reconstruction_enabled=reconstruction_enabled)
     if head:
         # Start Ray on the head node.
         if redis_shard_ports is not None:

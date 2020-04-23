@@ -544,7 +544,8 @@ def init(address=None,
          load_code_from_local=False,
          use_pickle=True,
          _internal_config=None,
-         lru_evict=False):
+         lru_evict=False,
+         reconstruction_enabled=False):
     """
     Connect to an existing Ray cluster or start one and connect to it.
 
@@ -656,6 +657,14 @@ def init(address=None,
             reference counting will be used to decide which objects are safe
             to evict and when under memory pressure, ray.ObjectStoreFullError
             may be thrown.
+        reconstruction_enabled (bool): If True, upon a node failure, the system
+            will attempt to recover any objects that were in the lost plasma
+            store by re-executing the original tasks. This is not currently
+            supported for objects created by actor tasks or objects that depend
+            on actor tasks. This will also turn off eager eviction, so copies
+            of objects may be kept around even after their references have gone
+            out of scope. If False, ray.UnreconstructableError will be thrown
+            if ray.get is called on a lost object.
 
     Returns:
         Address information about the started processes.
@@ -713,6 +722,10 @@ def init(address=None,
         _internal_config["object_store_full_max_retries"] = -1
         _internal_config["free_objects_period_milliseconds"] = 1000
 
+    if reconstruction_enabled:
+        if lru_evict:
+            raise ValueError("Plasma reconstruction cannot be used with LRU eviction.")
+
     global _global_node
     if redis_address is None:
         # In this case, we need to start a new cluster.
@@ -744,6 +757,7 @@ def init(address=None,
             temp_dir=temp_dir,
             load_code_from_local=load_code_from_local,
             _internal_config=_internal_config,
+            reconstruction_enabled=reconstruction_enabled,
         )
         # Start the Ray processes. We set shutdown_at_exit=False because we
         # shutdown the node in the ray.shutdown call that happens in the atexit
@@ -807,7 +821,8 @@ def init(address=None,
             object_id_seed=object_id_seed,
             temp_dir=temp_dir,
             load_code_from_local=load_code_from_local,
-            _internal_config=_internal_config)
+            _internal_config=_internal_config,
+            reconstruction_enabled=reconstruction_enabled)
         _global_node = ray.node.Node(
             ray_params,
             head=False,
@@ -822,7 +837,7 @@ def init(address=None,
         worker=global_worker,
         driver_object_store_memory=driver_object_store_memory,
         job_id=job_id,
-        internal_config=_internal_config)
+        internal_config=ray_params._internal_config)
 
     for hook in _post_init_hooks:
         hook()

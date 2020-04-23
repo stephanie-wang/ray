@@ -120,7 +120,8 @@ class RayParams:
                  include_java=False,
                  java_worker_options=None,
                  load_code_from_local=False,
-                 _internal_config=None):
+                 _internal_config=None,
+                 reconstruction_enabled=False):
         self.object_id_seed = object_id_seed
         self.redis_address = redis_address
         self.num_cpus = num_cpus
@@ -154,7 +155,8 @@ class RayParams:
         self.include_java = include_java
         self.java_worker_options = java_worker_options
         self.load_code_from_local = load_code_from_local
-        self._internal_config = _internal_config
+        self._internal_config = _internal_config if _internal_config else {}
+        self.reconstruction_enabled = reconstruction_enabled
         self._check_usage()
 
     def update(self, **kwargs):
@@ -213,3 +215,9 @@ class RayParams:
         if numpy_major <= 1 and numpy_minor < 16:
             logger.warning("Using ray with numpy < 1.16.0 will result in slow "
                            "serialization. Upgrade numpy if using with ray.")
+
+        if self.reconstruction_enabled:
+            self._internal_config["initial_reconstruction_timeout_milliseconds"] = -1
+            self._internal_config["lineage_pinning_enabled"] = 1
+            self._internal_config["free_objects_period_milliseconds"] = -1
+            self._internal_config["object_manager_repeated_push_delay_ms"] = 1000
