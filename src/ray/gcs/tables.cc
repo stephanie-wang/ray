@@ -292,6 +292,18 @@ Status Table<ID, Data>::Add(const JobID &job_id, const ID &id,
 }
 
 template <typename ID, typename Data>
+Status Table<ID, Data>::SyncAdd(const JobID &job_id, const ID &id,
+                                const std::shared_ptr<Data> &data) {
+  num_adds_++;
+  std::string str = data->SerializeAsString();
+  auto reply =
+      GetRedisContext(id)->RunSync(GetTableAddCommand(command_type_), id, str.data(),
+                                   str.length(), prefix_, pubsub_channel_);
+  Status status = reply ? reply->ReadAsStatus() : Status::RedisError("Redis error");
+  return status;
+}
+
+template <typename ID, typename Data>
 Status Table<ID, Data>::Lookup(const JobID &job_id, const ID &id, const Callback &lookup,
                                const FailureCallback &failure) {
   num_lookups_++;

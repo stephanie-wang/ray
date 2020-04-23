@@ -57,11 +57,16 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   TaskManager(std::shared_ptr<CoreWorkerMemoryStore> in_memory_store,
               std::shared_ptr<ReferenceCounter> reference_counter,
               std::shared_ptr<ActorManagerInterface> actor_manager,
-              RetryTaskCallback retry_task_callback)
+              RetryTaskCallback retry_task_callback,
+              std::shared_ptr<gcs::GcsClient> gcs_client = nullptr)
       : in_memory_store_(in_memory_store),
         reference_counter_(reference_counter),
         actor_manager_(actor_manager),
-        retry_task_callback_(retry_task_callback) {
+        retry_task_callback_(retry_task_callback),
+        gcs_client_(std::dynamic_pointer_cast<gcs::RedisGcsClient>(gcs_client)) {
+    if (gcs_client_) {
+      RAY_LOG(INFO) << "** Using centralized owner!";
+    }
     reference_counter_->SetReleaseLineageCallback(
         [this](const ObjectID &object_id, std::vector<ObjectID> *ids_to_release) {
           RemoveLineageReference(object_id, ids_to_release);
@@ -150,6 +155,18 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   size_t NumPendingTasks() const;
 
  private:
+  /// XXX: Centralized.
+  void MaybeWriteTaskSpecToGcs(const TaskSpecification &spec)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
+  /// XXX: Centralized.
+  void MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object_ids)
+      EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
+  /// XXX: Centralized.
+  void MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object_ids)
+      LOCKS_EXCLUDED(mu_);
+
   struct TaskEntry {
     TaskEntry(const TaskSpecification &spec_arg, int num_retries_left_arg,
               size_t num_returns)
@@ -248,6 +265,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
 
   /// Optional shutdown hook to call when pending tasks all finish.
   std::function<void()> shutdown_hook_ GUARDED_BY(mu_) = nullptr;
+
+  std::shared_ptr<gcs::RedisGcsClient> gcs_client_ GUARDED_BY(mu_);
 };
 
 }  // namespace ray

@@ -373,11 +373,14 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
           RAY_LOG(ERROR) << "Will resubmit task after a " << delay
                          << "ms delay: " << spec.DebugString();
           absl::MutexLock lock(&mutex_);
+          // XXX: Centralized.
           to_resubmit_.push_back(std::make_pair(current_time_ms() + delay, spec));
         } else {
           RAY_CHECK_OK(direct_task_submitter_->SubmitTask(spec));
         }
-      }));
+      },
+      RayConfig::instance().centralized_owner() ? gcs_client_ : nullptr
+      ));
 
   // Create an entry for the driver task in the task table. This task is
   // added immediately with status RUNNING. This allows us to push errors

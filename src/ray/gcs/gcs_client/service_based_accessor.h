@@ -205,6 +205,10 @@ class ServiceBasedTaskInfoAccessor : public TaskInfoAccessor {
   Status AsyncAdd(const std::shared_ptr<rpc::TaskTableData> &data_ptr,
                   const StatusCallback &callback) override;
 
+  Status SyncAdd(const std::shared_ptr<rpc::TaskTableData> &data_ptr) {
+    return Status::NotImplemented("");
+  }
+
   Status AsyncGet(const TaskID &task_id,
                   const OptionalItemCallback<rpc::TaskTableData> &callback) override;
 

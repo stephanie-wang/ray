@@ -24,6 +24,34 @@ const int64_t kTaskFailureThrottlingThreshold = 50;
 // Throttle task failure logs to once this interval.
 const int64_t kTaskFailureLoggingFrequencyMillis = 5000;
 
+void TaskManager::MaybeWriteTaskSpecToGcs(const TaskSpecification &spec) {
+  // Use gcs_client_ as feature flag.
+  if (gcs_client_) {
+    std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
+    data->mutable_task()->mutable_task_spec()->CopyFrom(spec.GetMessage());
+    RAY_CHECK_OK(gcs_client_->Tasks().SyncAdd(data));
+  }
+}
+
+void TaskManager::MaybeIncrementGcsRefcounts(const std::vector<ObjectID> &object_ids) {
+  // Use gcs_client_ as feature flag.
+  if (gcs_client_) {
+    std::vector<int64_t> new_vals =
+        gcs_client_->primary_context()->IncrPipelineSync(object_ids);
+  }
+}
+
+void TaskManager::MaybeDecrementGcsRefcounts(const std::vector<ObjectID> &object_ids) {
+  {
+    absl::MutexLock lock(&mu_);
+    // Use gcs_client_ as feature flag.
+    if (gcs_client_) {
+      std::vector<int64_t> new_vals =
+          gcs_client_->primary_context()->DecrPipelineSync(object_ids);
+    }
+  }
+}
+
 void TaskManager::AddPendingTask(const TaskID &caller_id,
                                  const rpc::Address &caller_address,
                                  const TaskSpecification &spec,
@@ -75,6 +103,13 @@ void TaskManager::AddPendingTask(const TaskID &caller_id,
                   .emplace(spec.TaskId(), TaskEntry(spec, max_retries, num_returns))
                   .second);
     num_pending_tasks_++;
+  }
+
+  {
+    absl::MutexLock lock(&mu_);
+    // XXX: Centralized.
+    MaybeWriteTaskSpecToGcs(spec);
+    MaybeIncrementGcsRefcounts(task_deps);
   }
 }
 
@@ -249,6 +284,11 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
     }
   }
 
+  // XXX: Centralized.
+  {
+    absl::MutexLock lock(&mu_);
+    MaybeWriteTaskSpecToGcs(spec);
+  }
   RemoveFinishedTaskReferences(spec, release_lineage, worker_addr, reply.borrowed_refs());
 
   ShutdownIfNeeded();
@@ -280,6 +320,9 @@ void TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
       it->second.num_retries_left--;
       release_lineage = false;
     }
+
+    // XXX: Centralized.
+    MaybeWriteTaskSpecToGcs(spec);
   }
 
   // We should not hold the lock during these calls because they may trigger
@@ -370,6 +413,9 @@ void TaskManager::RemoveFinishedTaskReferences(
   reference_counter_->UpdateFinishedTaskReferences(
       plasma_dependencies, release_lineage, borrower_addr, borrowed_refs, &deleted);
   in_memory_store_->Delete(deleted);
+
+  // XXX: Centralized.
+  MaybeDecrementGcsRefcounts(plasma_dependencies);
 }
 
 void TaskManager::RemoveLineageReference(const ObjectID &object_id,
