@@ -9,15 +9,14 @@ from ray import profiling
 import ray
 import ray.cluster_utils
 
-TEST_VIDEO = "/home/swang/data/test.mp4"
-YOLO_PATH = "/home/swang/darknet"
+YOLO_PATH = "/home/ubuntu/darknet"
 
 NUM_FRAMES_PER_CHUNK = 300
 MAX_FRAMES = 1200.0
 
 CLEANUP = False
 
-MSE_THRESHOLD = 70
+MSE_THRESHOLD = 100
 
 
 def load_model():
@@ -144,16 +143,17 @@ def process_video(video_pathname, num_total_frames):
         results += ray.get(f)
 
 
-def main(video_path, local, test_failure, timeline):
+def main(num_nodes, video_path, local, test_failure, timeline):
+    internal_config = json.dumps({
+        "initial_reconstruction_timeout_milliseconds": 100000,
+        "num_heartbeats_timeout": 10,
+        "lineage_pinning_enabled": 1,
+        "free_objects_period_milliseconds": -1,
+        "object_manager_repeated_push_delay_ms": 1000,
+        "task_retry_delay_ms": 100,
+        "centralized_owner": 1,
+    })
     if local:
-        internal_config = json.dumps({
-            "initial_reconstruction_timeout_milliseconds": 100000,
-            "num_heartbeats_timeout": 10,
-            "lineage_pinning_enabled": 1,
-            "free_objects_period_milliseconds": -1,
-            "object_manager_repeated_push_delay_ms": 1000,
-            "task_retry_delay_ms": 100,
-        })
         cluster = ray.cluster_utils.Cluster()
         cluster.add_node(
             num_cpus=0, _internal_config=internal_config, include_webui=False)
@@ -172,12 +172,28 @@ def main(video_path, local, test_failure, timeline):
     else:
         address = "auto"
 
-    ray.init(address=address, _internal_config=internal_config)
+    ray.init(address=address, _internal_config=internal_config, redis_password='5241590000000000')
 
     nodes = ray.nodes()
+    while len(nodes) < num_nodes + 1:
+        time.sleep(1)
+        print("{} nodes found, waiting for nodes to join".format(len(nodes)))
+        nodes = ray.nodes()
+
+    print("All nodes joined")
     for node in nodes:
-        if "GPU" not in node["Resources"] and "CPU" in node["Resources"]:
+        print("{}:{}".format(node["NodeManagerAddress"], node["NodeManagerPort"]))
+
+    num_gpu_nodes = 2
+    nodes = ray.nodes()[-num_nodes:]
+    for node in nodes:
+        if num_gpu_nodes > 0:
+            ray.experimental.set_resource("GPU", 4, node["NodeID"])
+            num_gpu_nodes -= 1
+        elif "CPU" in node["Resources"]:
             ray.experimental.set_resource("preprocess", 100, node["NodeID"])
+        #if "GPU" not in node["Resources"] and "CPU" in node["Resources"]:
+        #    ray.experimental.set_resource("preprocess", 100, node["NodeID"])
 
     v = cv2.VideoCapture(video_path)
     num_total_frames = min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES)
@@ -217,9 +233,10 @@ if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Run the video benchmark.")
 
+    parser.add_argument("--num-nodes", required=True, type=int)
     parser.add_argument("--video-path", required=True, type=str)
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--failure", action="store_true")
     parser.add_argument("--timeline", default=None, type=str)
     args = parser.parse_args()
-    main(args.video_path, args.local, args.failure, args.timeline)
+    main(args.num_nodes, args.video_path, args.local, args.failure, args.timeline)
