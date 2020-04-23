@@ -148,7 +148,7 @@ def process_video(video_pathname, num_total_frames):
         print("Processing chunk at index", start_frame)
         num_frames = min(NUM_FRAMES_PER_CHUNK, num_total_frames - start_frame)
         futures.append(
-            process_chunk_single_thread.remote(video_pathname, start_frame, num_frames))
+            process_chunk.remote(video_pathname, start_frame, num_frames))
         start_frame += num_frames
 
     for f in futures:
@@ -176,7 +176,7 @@ def main(test_failure, timeline):
             object_store_memory=10**9,
             num_cpus=2,
             resources={"preprocess": 100},
-            _internal_config=internal_config) for _ in range(1)
+            _internal_config=internal_config) for _ in range(2)
     ]
     query_nodes = [
         cluster.add_node(
