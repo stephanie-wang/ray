@@ -13,8 +13,7 @@ import ray.cluster_utils
 
 YOLO_PATH = "/home/swang/darknet"
 
-NUM_FRAMES_PER_CHUNK = 600
-MAX_FRAMES = 600.0
+MAX_FRAMES = 300.0
 
 
 @ray.remote(max_reconstructions=1)
@@ -146,10 +145,12 @@ class Sink:
     def send(self, frame_index, transform, timestamp):
         with ray.profiling.profile("Sink.send"):
             assert frame_index == len(self.latencies), frame_index
-            print(frame_index)
 
             self.latencies.append(time.time() - timestamp)
+            if len(self.latencies) % 100 == 0:
+                print("Received", len(self.latencies))
             if len(self.latencies) == self.num_frames:
+                print("DONE")
                 self.signal.send.remote()
             if self.viewer is not None:
                 self.viewer.send.remote(transform)
@@ -160,61 +161,55 @@ class Sink:
 
 @ray.remote(num_cpus=0)
 def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
-    last_frame = None
-    last_frame_index = 0
+    radius = fps
 
-    frame_timestamps = [0] * num_frames
-    result_timestamps = [0] * num_frames
-    results = [None] * num_frames
+    frame_timestamps = []
+    trajectory = []
+    transforms = []
 
-    frames = {}
     features = None
-    trajectory = [None] * (num_frames - 1)
-    transforms = [None] * (num_frames - 1)
+    next_to_send = 0
 
     frame_timestamp = start_timestamp + start_frame / fps
     diff = frame_timestamp - time.time()
     if diff > 0:
         time.sleep(diff)
-    frame_timestamps[0] = frame_timestamp
-
+    frame_timestamps.append(frame_timestamp)
     prev_frame = decoder.decode.remote(start_frame)
-    next_to_send = 0
+
     for i in range(num_frames - 1):
         frame_timestamp = start_timestamp + (start_frame + i + 1) / fps
         diff = frame_timestamp - time.time()
         if diff > 0:
             time.sleep(diff)
-        frame_timestamps[i + 1] = frame_timestamp
+        frame_timestamps.append(frame_timestamp)
 
         frame = decoder.decode.remote(start_frame + i + 1)
         transform, features = flow.remote(prev_frame, frame, features)
         prev_frame = frame
-        transforms[i] = transform
+        transforms.append(transform)
         if i > 0:
-            trajectory[i] = cumsum.remote(trajectory[i-1], transform)
+            trajectory.append(cumsum.remote(trajectory[-1], transform))
         else:
-            trajectory[i] = transform
+            for _ in range(radius + 1):
+                trajectory.append(transform)
 
-        radius = fps
-        midpoint = i - radius
-        if midpoint >= next_to_send:
-            left = max(0, midpoint - radius)
-            right = min(len(trajectory), midpoint + radius)
-            final_transform = smooth.remote(transforms[midpoint], trajectory[midpoint], *trajectory[left:right])
+        if len(trajectory) == 2 * radius + 1:
+            midpoint = radius
+            final_transform = smooth.remote(transforms.pop(0), trajectory[midpoint], *trajectory)
+            trajectory.pop(0)
 
-            sink.send.remote(midpoint, final_transform, frame_timestamps[midpoint])
+            sink.send.remote(next_to_send, final_transform, frame_timestamps.pop(0))
             next_to_send += 1
 
-    while next_to_send < len(trajectory):
-        midpoint = next_to_send
-        left = max(0, midpoint - radius)
-        right = min(len(trajectory), midpoint + radius)
-        final_transform = smooth.remote(transforms[midpoint], trajectory[midpoint], *trajectory[left:right])
+    while next_to_send < num_frames - 1:
+        trajectory.append(trajectory[-1])
+        midpoint = radius
+        final_transform = smooth.remote(transforms.pop(0), trajectory[midpoint], *trajectory)
+        trajectory.pop(0)
 
-        sink.send.remote(midpoint, final_transform, frame_timestamps[midpoint])
+        sink.send.remote(next_to_send, final_transform, frame_timestamps.pop(0))
         next_to_send += 1
-
 
 
 def process_video(video_pathname, num_total_frames, output_file, view):
@@ -223,7 +218,7 @@ def process_video(video_pathname, num_total_frames, output_file, view):
     v = cv2.VideoCapture(video_pathname)
     fps = v.get(cv2.CAP_PROP_FPS)
 
-    start_timestamp = time.time()
+    start_timestamp = time.time() + 1
     decoder = Decoder.remote(video_pathname, start_frame, start_timestamp)
     signal = SignalActor.remote()
     if view:
@@ -232,20 +227,10 @@ def process_video(video_pathname, num_total_frames, output_file, view):
         viewer = None
     sink = Sink.remote(signal, num_total_frames - 1, viewer)
 
-    while start_frame < num_total_frames:
-        print("Processing chunk at index", start_frame)
-        num_frames = min(NUM_FRAMES_PER_CHUNK, num_total_frames - start_frame)
-        num_frames = int(num_frames)
-        futures.append(
-            process_chunk.remote(decoder, sink, start_frame, num_frames, start_timestamp, int(fps)))
-
-        start_frame += num_frames
-        # Sleep until the next chunk of frames, if necessary.
-        next_timestamp = start_timestamp + start_frame / fps
-        diff = next_timestamp - time.time()
-        if diff > 0:
-            print("Sleeping", diff, "seconds")
-            time.sleep(diff)
+    diff = start_timestamp - time.time()
+    if diff > 0:
+        time.sleep(diff)
+    process_chunk.remote(decoder, sink, start_frame, int(num_total_frames), start_timestamp, int(fps))
 
     ray.get(signal.wait.remote())
     latencies = ray.get(sink.latencies.remote())
@@ -302,18 +287,6 @@ def main(args):
     print("All nodes joined")
     for node in nodes:
         print("{}:{}".format(node["NodeManagerAddress"], node["NodeManagerPort"]))
-
-    num_gpu_nodes = 2
-    assert args.num_nodes > num_gpu_nodes
-    nodes = ray.nodes()[-args.num_nodes:]
-    for node in nodes:
-        if num_gpu_nodes > 0:
-            ray.experimental.set_resource("GPU", 4, node["NodeID"])
-            num_gpu_nodes -= 1
-        elif "CPU" in node["Resources"]:
-            ray.experimental.set_resource("preprocess", 100, node["NodeID"])
-        #if "GPU" not in node["Resources"] and "CPU" in node["Resources"]:
-        #    ray.experimental.set_resource("preprocess", 100, node["NodeID"])
 
     v = cv2.VideoCapture(args.video_path)
     num_total_frames = min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES)
