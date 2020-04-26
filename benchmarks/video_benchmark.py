@@ -63,14 +63,17 @@ def load_frames(filename, start_frame, num_frames):
     return frames
 
 
-@ray.remote(resources={"preprocess": 1}, num_cpus=0)
+@ray.remote(resources={"preprocess": 1}, num_cpus=0, max_reconstructions=1)
 class Decoder:
     def __init__(self, filename, start_frame, start_timestamp):
         self.v = cv2.VideoCapture(filename)
         self.v.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
         self.start_timestamp = start_timestamp
 
-    def decode(self):
+    def decode(self, frame):
+        if frame != self.v.get(cv2.CAP_PROP_POS_FRAMES):
+            print("DECODE", self.v.get(cv2.CAP_PROP_POS_FRAMES), frame)
+            self.v.set(cv2.CAP_PROP_POS_FRAMES, frame)
         grabbed, frame = self.v.read()
         assert grabbed
         # Use uint8_t to reduce image size.
@@ -85,7 +88,7 @@ def compute_mse(frame1, frame2):
 
 
 @ray.remote(resources={"preprocess": 1})
-def process_chunk(decoder, start_frame, num_frames, start_timestamp, fps):
+def process_chunk(decoder, start_frame, num_frames, start_timestamp, fps, last_chunk):
     last_frame = None
     last_frame_index = 0
 
@@ -100,7 +103,7 @@ def process_chunk(decoder, start_frame, num_frames, start_timestamp, fps):
             time.sleep(diff)
         frame_timestamps[i] = frame_timestamp
 
-        frame = decoder.decode.remote()
+        frame = decoder.decode.remote(start_frame + i)
         mse = MSE_THRESHOLD
         if last_frame is not None:
             mse = ray.get(compute_mse.remote(frame, last_frame))
@@ -195,7 +198,7 @@ def process_video(video_pathname, num_total_frames, output_file, all_frames):
                 process_all_frames.remote(video_pathname, start_frame, num_frames, start_timestamp, fps))
         else:
             futures.append(
-                process_chunk.remote(decoder, start_frame, num_frames, start_timestamp, fps))
+                process_chunk.remote(decoder, start_frame, num_frames, start_timestamp, fps, None if not futures else futures[-1]))
 
         start_frame += num_frames
         # Sleep until the next chunk of frames, if necessary.
@@ -218,12 +221,12 @@ def process_video(video_pathname, num_total_frames, output_file, all_frames):
 
 def main(args):
     config = {
-        "initial_reconstruction_timeout_milliseconds": 100000,
+        "initial_reconstruction_timeout_milliseconds": 100,
         "num_heartbeats_timeout": 10,
         "lineage_pinning_enabled": 1,
         "free_objects_period_milliseconds": -1,
         "object_manager_repeated_push_delay_ms": 1000,
-        "task_retry_delay_ms": 100,
+        "task_retry_delay_ms": 1000,
     }
     if args.centralized:
         config["centralized_owner"] = 1
@@ -233,7 +236,10 @@ def main(args):
         cluster = ray.cluster_utils.Cluster()
         cluster.add_node(
             num_cpus=0, _internal_config=internal_config, include_webui=False)
-        for _ in range(args.num_nodes):
+        num_nodes = args.num_nodes
+        if args.failure:
+            num_nodes += 1
+        for _ in range(num_nodes):
             cluster.add_node(
                 object_store_memory=10**9,
                 num_cpus=2,
@@ -279,14 +285,22 @@ def main(args):
         t.start()
 
         if args.failure:
-            time.sleep(3)
-            cluster.remove_node(preprocess_nodes[-1], allow_graceful=False)
-            time.sleep(1)
-            cluster.add_node(
-                object_store_memory=10**9,
-                num_cpus=2,
-                resources={"preprocess": 100},
-                _internal_config=internal_config)
+            time.sleep(5)
+            node_to_kill = None
+            for node in ray.nodes():
+                if "preprocess" in node["Resources"]:
+                    port = node["NodeManagerPort"]
+                    for node in cluster.list_all_nodes():
+                        if node.node_manager_port == port:
+                            node_to_kill = node
+            assert node_to_kill is not None
+            cluster.remove_node(node_to_kill, allow_graceful=False)
+
+            nodes = ray.nodes()
+            for node in nodes:
+                if "CPU" in node["Resources"] and "GPU" not in node["Resources"]:
+                    ray.experimental.set_resource("preprocess", 100, node["NodeID"])
+
 
         t.join()
     else:
