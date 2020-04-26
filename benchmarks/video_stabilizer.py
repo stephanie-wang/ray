@@ -13,7 +13,7 @@ import ray.cluster_utils
 
 YOLO_PATH = "/home/swang/darknet"
 
-MAX_FRAMES = 300.0
+MAX_FRAMES = 600.0
 
 
 @ray.remote(max_reconstructions=1)
@@ -208,8 +208,9 @@ def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
         final_transform = smooth.remote(transforms.pop(0), trajectory[midpoint], *trajectory)
         trajectory.pop(0)
 
-        sink.send.remote(next_to_send, final_transform, frame_timestamps.pop(0))
+        final = sink.send.remote(next_to_send, final_transform, frame_timestamps.pop(0))
         next_to_send += 1
+    return final
 
 
 def process_video(video_pathname, num_total_frames, output_file, view):
@@ -230,7 +231,8 @@ def process_video(video_pathname, num_total_frames, output_file, view):
     diff = start_timestamp - time.time()
     if diff > 0:
         time.sleep(diff)
-    process_chunk.remote(decoder, sink, start_frame, int(num_total_frames), start_timestamp, int(fps))
+    final = process_chunk.remote(decoder, sink, start_frame, int(num_total_frames), start_timestamp, int(fps))
+    ray.get(ray.get(final))
 
     ray.get(signal.wait.remote())
     latencies = ray.get(sink.latencies.remote())
@@ -264,8 +266,6 @@ def main(args):
         cluster.add_node(
             num_cpus=0, _internal_config=internal_config, include_webui=False)
         num_nodes = args.num_nodes
-        if args.failure:
-            num_nodes += 1
         for _ in range(num_nodes):
             cluster.add_node(
                 object_store_memory=10**9,
@@ -296,25 +296,17 @@ def main(args):
 
     if args.local and args.failure:
         t = threading.Thread(
-            target=process_video, args=(args.video_path, num_total_frames, args.output, args.all_frames))
+            target=process_video, args=(args.video_path, num_total_frames, args.output, args.view))
         t.start()
 
         if args.failure:
             time.sleep(5)
-            node_to_kill = None
-            for node in ray.nodes():
-                if "preprocess" in node["Resources"]:
-                    port = node["NodeManagerPort"]
-                    for node in cluster.list_all_nodes():
-                        if node.node_manager_port == port:
-                            node_to_kill = node
-            assert node_to_kill is not None
-            cluster.remove_node(node_to_kill, allow_graceful=False)
+            cluster.remove_node(cluster.list_all_nodes()[-1], allow_graceful=False)
 
-            nodes = ray.nodes()
-            for node in nodes:
-                if "CPU" in node["Resources"] and "GPU" not in node["Resources"]:
-                    ray.experimental.set_resource("preprocess", 100, node["NodeID"])
+            cluster.add_node(
+                object_store_memory=10**9,
+                num_cpus=2,
+                _internal_config=internal_config)
 
 
         t.join()
