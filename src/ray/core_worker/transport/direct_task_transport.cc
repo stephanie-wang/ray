@@ -57,7 +57,18 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
       it = task_queues_.emplace(scheduling_key, std::deque<TaskSpecification>()).first;
     }
     it->second.push_back(task_spec);
-    RequestNewWorkerIfNeeded(scheduling_key);
+    auto cached_worker = cached_workers_.find(scheduling_key);
+    if (cached_worker != cached_workers_.end()) {
+      RAY_LOG(DEBUG) << "Reusing cached worker";
+      auto addr = std::move(cached_worker->second.first);
+      auto resources = std::move(cached_worker->second.second);
+      cached_workers_.erase(cached_worker);
+      OnWorkerIdle(
+          addr, scheduling_key, false,
+          resources);
+    } else {
+      RequestNewWorkerIfNeeded(scheduling_key);
+    }
   });
   return Status::OK();
 }
@@ -251,17 +262,11 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
       std::move(request),
       [this, task_id, is_actor, is_actor_creation, scheduling_key, addr,
        assigned_resources](Status status, const rpc::PushTaskReply &reply) {
-        if (reply.worker_exiting()) {
-          // The worker is draining and will shutdown after it is done. Don't return
-          // it to the Raylet since that will kill it early.
+        if (status.ok() && !reply.worker_exiting() && !is_actor_creation) {
           absl::MutexLock lock(&mu_);
-          worker_to_lease_client_.erase(addr);
-        } else if (!status.ok() || !is_actor_creation) {
-          // Successful actor creation leases the worker indefinitely from the raylet.
-          absl::MutexLock lock(&mu_);
-          OnWorkerIdle(addr, scheduling_key,
-                       /*error=*/!status.ok(), assigned_resources);
+          cached_workers_.emplace(scheduling_key, std::make_pair(addr, assigned_resources));
         }
+
         if (!status.ok()) {
           // TODO: It'd be nice to differentiate here between process vs node
           // failure (e.g., by contacting the raylet). If it was a process
@@ -273,6 +278,21 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
               &status);
         } else {
           task_finisher_->CompletePendingTask(task_id, reply, addr.ToProto());
+        }
+
+        absl::MutexLock lock(&mu_);
+        bool reused = cached_workers_.count(scheduling_key) == 0;
+        if (!reused) {
+          if (reply.worker_exiting()) {
+            // The worker is draining and will shutdown after it is done. Don't return
+            // it to the Raylet since that will kill it early.
+            worker_to_lease_client_.erase(addr);
+          } else if (!status.ok() || !is_actor_creation) {
+            // Successful actor creation leases the worker indefinitely from the raylet.
+            OnWorkerIdle(addr, scheduling_key,
+                         /*error=*/!status.ok(), assigned_resources);
+          }
+          cached_workers_.erase(scheduling_key);
         }
       }));
 }

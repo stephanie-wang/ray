@@ -180,6 +180,9 @@ class CoreWorkerDirectTaskSubmitter {
   // Invariant: if a queue is in this map, it has at least one task.
   absl::flat_hash_map<SchedulingKey, std::deque<TaskSpecification>> task_queues_
       GUARDED_BY(mu_);
+
+  absl::flat_hash_map<SchedulingKey, std::pair<rpc::WorkerAddress, const google::protobuf::RepeatedPtrField<rpc::ResourceMapEntry>>> cached_workers_
+      GUARDED_BY(mu_);
 };
 
 };  // namespace ray
