@@ -186,6 +186,8 @@ def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
 
         frame = decoder.decode.remote(start_frame + i + 1)
         transform, features = flow.remote(prev_frame, frame, features)
+        if i % 200 == 0:
+            features = None
         prev_frame = frame
         transforms.append(transform)
         if i > 0:
