@@ -24,6 +24,12 @@ message ActiveObjectIDs {
 
 // Persistent state of an ActorHandle.
 message ActorHandle {
+  enum ActorRestartOption {
+    NO_RESTART = 0;
+    RESTART = 1;
+    RESTART_AND_RETRY_FAILED_TASKS = 2;
+  }
+
   // ID of the actor.
   bytes actor_id = 1;
 
@@ -50,6 +56,9 @@ message ActorHandle {
 
   // An extension field that is used for storing app-language-specific data.
   bytes extension_data = 8;
+
+  // Whether this actor may be automatically restarted after a failure.
+  ActorRestartOption restart_option = 9;
 }
 
 message AssignTaskRequest {

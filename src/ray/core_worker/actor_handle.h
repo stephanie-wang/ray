@@ -37,7 +37,8 @@ class ActorHandle {
               const rpc::Address &owner_address, const JobID &job_id,
               const ObjectID &initial_cursor, const Language actor_language,
               const ray::FunctionDescriptor &actor_creation_task_function_descriptor,
-              const std::string &extension_data);
+              const std::string &extension_data,
+              rpc::ActorHandle::ActorRestartOption restart_option);
 
   /// Constructs an ActorHandle from a serialized string.
   ActorHandle(const std::string &serialized);
@@ -63,7 +64,7 @@ class ActorHandle {
 
   void SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec);
 
-  void SetResubmittedActorTaskSpec(TaskSpecification &spec) const;
+  void SetActorCounterStartsAt(TaskSpecification &spec) const;
 
   void Serialize(std::string *output);
 
@@ -91,6 +92,14 @@ class ActorHandle {
     absl::MutexLock lock(&mutex_);
     // TODO: Skip if not restartable.
     completed_task_counter_[caller_id]++;
+  }
+
+  rpc::ActorHandle::ActorRestartOption RestartOption() const {
+    return inner_.restart_option();
+  }
+
+  int MaxMethodRetries() const {
+    return RestartOption() == rpc::ActorHandle::RESTART_AND_RETRY_FAILED_TASKS ? -1 : 0;
   }
 
  private:

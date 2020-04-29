@@ -127,8 +127,11 @@ Status TaskManager::ResubmitTask(const TaskID &task_id,
     if (!it->second.pending) {
       resubmit = true;
       it->second.pending = true;
-      RAY_CHECK(it->second.num_retries_left > 0);
-      it->second.num_retries_left--;
+      if (it->second.num_retries_left > 0) {
+        it->second.num_retries_left--;
+      } else {
+        RAY_CHECK(it->second.num_retries_left == -1);
+      }
       spec = it->second.spec;
     }
   }
@@ -274,8 +277,8 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
     // A finished task can be only be re-executed if it has some number of
     // retries left and returned at least one object that is still in use and
     // stored in plasma.
-    bool task_retryable =
-        it->second.num_retries_left > 0 && !it->second.reconstructable_return_ids.empty();
+    bool task_retryable = it->second.num_retries_left != 0 &&
+                          !it->second.reconstructable_return_ids.empty();
     if (task_retryable) {
       // Pin the task spec if it may be retried again.
       release_lineage = false;
@@ -320,8 +323,11 @@ void TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
       submissible_tasks_.erase(it);
       num_pending_tasks_--;
     } else {
-      RAY_CHECK(it->second.num_retries_left > 0);
-      it->second.num_retries_left--;
+      if (it->second.num_retries_left > 0) {
+        it->second.num_retries_left--;
+      } else {
+        RAY_CHECK(it->second.num_retries_left == -1);
+      }
       release_lineage = false;
     }
 
@@ -331,7 +337,7 @@ void TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
 
   // We should not hold the lock during these calls because they may trigger
   // callbacks in this or other classes.
-  if (num_retries_left > 0) {
+  if (num_retries_left != 0) {
     RAY_LOG(ERROR) << num_retries_left << " retries left for task " << spec.TaskId()
                    << ", attempting to resubmit.";
     retry_task_callback_(spec, /*delay=*/false);

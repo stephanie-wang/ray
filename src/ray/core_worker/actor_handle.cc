@@ -23,7 +23,8 @@ ray::rpc::ActorHandle CreateInnerActorHandle(
     const ray::rpc::Address &owner_address, const class JobID &job_id,
     const ObjectID &initial_cursor, const Language actor_language,
     const ray::FunctionDescriptor &actor_creation_task_function_descriptor,
-    const std::string &extension_data) {
+    const std::string &extension_data,
+    ray::rpc::ActorHandle::ActorRestartOption restart_option) {
   ray::rpc::ActorHandle inner;
   inner.set_actor_id(actor_id.Data(), actor_id.Size());
   inner.set_owner_id(owner_id.Binary());
@@ -34,6 +35,7 @@ ray::rpc::ActorHandle CreateInnerActorHandle(
       actor_creation_task_function_descriptor->GetMessage();
   inner.set_actor_cursor(initial_cursor.Binary());
   inner.set_extension_data(extension_data);
+  inner.set_restart_option(restart_option);
   return inner;
 }
 
@@ -52,10 +54,11 @@ ActorHandle::ActorHandle(
     const rpc::Address &owner_address, const class JobID &job_id,
     const ObjectID &initial_cursor, const Language actor_language,
     const ray::FunctionDescriptor &actor_creation_task_function_descriptor,
-    const std::string &extension_data)
+    const std::string &extension_data,
+    rpc::ActorHandle::ActorRestartOption restart_option)
     : ActorHandle(CreateInnerActorHandle(
           actor_id, owner_id, owner_address, job_id, initial_cursor, actor_language,
-          actor_creation_task_function_descriptor, extension_data)) {}
+          actor_creation_task_function_descriptor, extension_data, restart_option)) {}
 
 ActorHandle::ActorHandle(const std::string &serialized)
     : ActorHandle(CreateInnerActorHandleFromString(serialized)) {}
@@ -73,17 +76,10 @@ void ActorHandle::SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &s
       actor_creation_task_id, /*index=*/1,
       /*transport_type=*/static_cast<int>(TaskTransportType::DIRECT));
   actor_spec->set_actor_creation_dummy_object_id(actor_creation_dummy_object_id.Binary());
-
   actor_spec->set_previous_actor_task_dummy_object_id(actor_cursor_.Binary());
-
+  // NOTE(swang): The actor_counter_starts_at field is set right before the
+  // task is submitted.
   actor_spec->set_actor_counter(task_counter_++);
-  const auto caller_id = spec.CallerId();
-  auto it = callers_start_at_.find(caller_id);
-  if (it != callers_start_at_.end()) {
-    actor_spec->set_actor_counter_starts_at(it->second);
-  }
-  RAY_CHECK(actor_spec->actor_counter() >= actor_spec->actor_counter_starts_at());
-
   actor_cursor_ = spec.ReturnId(spec.NumReturns() - 1, TaskTransportType::DIRECT);
 }
 
@@ -102,7 +98,7 @@ void ActorHandle::ResetCallersStartAt() {
   }
 }
 
-void ActorHandle::SetResubmittedActorTaskSpec(TaskSpecification &spec) const {
+void ActorHandle::SetActorCounterStartsAt(TaskSpecification &spec) const {
   absl::MutexLock guard(&mutex_);
   auto &msg = spec.GetMutableMessage();
   const auto caller_id = spec.CallerId();

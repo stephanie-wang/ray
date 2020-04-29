@@ -1160,9 +1160,10 @@ Status CoreWorker::CreateActor(const RayFunction &function,
                  actor_creation_options.max_reconstructions));
     status = direct_task_submitter_->SubmitTask(task_spec);
   }
-  std::shared_ptr<ActorHandle> actor_handle(new ActorHandle(
+  auto actor_handle = std::make_shared<ActorHandle>(
       actor_id, GetCallerId(), rpc_address_, job_id, /*actor_cursor=*/return_ids[0],
-      function.GetLanguage(), function.GetFunctionDescriptor(), extension_data));
+      function.GetLanguage(), function.GetFunctionDescriptor(), extension_data,
+      rpc::ActorHandle::RESTART_AND_RETRY_FAILED_TASKS);
   RAY_CHECK(AddActorHandle(std::move(actor_handle),
                            /*is_owner_handle=*/!actor_creation_options.is_detached))
       << "Actor " << actor_id << " already exists";
@@ -1203,8 +1204,12 @@ Status CoreWorker::SubmitActorTask(const ActorID &actor_id, const RayFunction &f
   if (options_.is_local_mode) {
     ExecuteTaskLocalMode(task_spec, actor_id);
   } else {
+    int max_retries =
+        actor_handle->RestartOption() == rpc::ActorHandle::RESTART_AND_RETRY_FAILED_TASKS
+            ? -1
+            : 0;
     task_manager_->AddPendingTask(GetCallerId(), rpc_address_, task_spec,
-                                  CurrentCallSite(), 1000);
+                                  CurrentCallSite(), max_retries);
     bool submit, cancel;
     actor_manager_->SubmitTask(task_spec, &submit, &cancel);
     if (submit) {

@@ -55,7 +55,13 @@ void ActorManager::IncrementCompletedTasks(const ActorID &actor_id,
   absl::MutexLock lock(&mutex_);
   auto handle = actor_handles_.find(actor_id);
   RAY_CHECK(handle != actor_handles_.end());
-  handle->second->IncrementCompletedTasks(caller_id);
+  if (handle->second->RestartOption() ==
+      rpc::ActorHandle::RESTART_AND_RETRY_FAILED_TASKS) {
+    // Increment the number of completed tasks if failed tasks can be retried
+    // on this actor. This is to make sure that if the actor restarts, we
+    // resubmit failed tasks with the correct offset.
+    handle->second->IncrementCompletedTasks(caller_id);
+  }
 }
 
 void ActorManager::RemoveHandle(const ActorID &actor_id) {
@@ -99,7 +105,7 @@ const std::vector<TaskSpecification> ActorManager::HandleActorAlive(
 
   for (auto &task : tasks) {
     auto counter = task.ActorCounter();
-    handle->second->SetResubmittedActorTaskSpec(task);
+    handle->second->SetActorCounterStartsAt(task);
     RAY_LOG(DEBUG) << "Task counter was " << counter << " now is " << task.ActorCounter();
   }
   return tasks;
@@ -110,6 +116,11 @@ void ActorManager::HandleActorReconstructing(const ActorID &actor_id) {
   auto handle = actor_handles_.find(actor_id);
   RAY_CHECK(handle != actor_handles_.end());
   handle->second->SetState(gcs::ActorTableData::RECONSTRUCTING);
+  if (handle->second->RestartOption() == rpc::ActorHandle::RESTART) {
+    // Reset the caller state so that the next task that gets submitted will
+    // start off with count 0.
+    handle->second->ResetCallerState();
+  }
 }
 
 const std::vector<TaskSpecification> ActorManager::HandleActorDead(
@@ -140,7 +151,10 @@ void ActorManager::SubmitTask(TaskSpecification &spec, bool *submit, bool *cance
   const auto state = handle->second->GetState();
   if (state == gcs::ActorTableData::ALIVE) {
     *submit = true;
-    handle->second->SetResubmittedActorTaskSpec(spec);
+    if (handle->second->RestartOption() ==
+        rpc::ActorHandle::RESTART_AND_RETRY_FAILED_TASKS) {
+      handle->second->SetActorCounterStartsAt(spec);
+    }
   } else if (state == gcs::ActorTableData::DEAD) {
     *cancel = true;
   } else {
