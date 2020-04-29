@@ -69,19 +69,19 @@ void ActorManager::RemoveHandle(const ActorID &actor_id) {
   RAY_CHECK(actor_handles_.erase(actor_id));
 }
 
+void ActorManager::SetActorTaskSpec(const ActorID &actor_id, TaskSpecBuilder &builder, const ObjectID &new_cursor) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(actor_id);
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->SetActorTaskSpec(builder, new_cursor);
+}
+
 void ActorManager::ResetAllCallerState() {
   absl::MutexLock lock(&mutex_);
   // Reset the task counters to 0 for the next caller.
   for (const auto &handle : actor_handles_) {
     handle.second->ResetCallerState();
   }
-}
-
-void ActorManager::SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec) {
-  absl::MutexLock lock(&mutex_);
-  auto handle = actor_handles_.find(actor_id);
-  RAY_CHECK(handle != actor_handles_.end());
-  handle->second->SetActorTaskSpec(actor_id, spec);
 }
 
 const std::vector<TaskSpecification> ActorManager::HandleActorAlive(

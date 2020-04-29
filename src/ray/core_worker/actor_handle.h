@@ -62,7 +62,7 @@ class ActorHandle {
 
   std::string ExtensionData() const { return inner_.extension_data(); }
 
-  void SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec);
+  void SetActorTaskSpec(TaskSpecBuilder &builder, const ObjectID &new_cursor);
 
   void SetActorCounterStartsAt(TaskSpecification &spec) const;
 

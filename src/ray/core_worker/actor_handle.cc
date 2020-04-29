@@ -63,24 +63,16 @@ ActorHandle::ActorHandle(
 ActorHandle::ActorHandle(const std::string &serialized)
     : ActorHandle(CreateInnerActorHandleFromString(serialized)) {}
 
-void ActorHandle::SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec) {
+void ActorHandle::SetActorTaskSpec(TaskSpecBuilder &builder, const ObjectID &new_cursor) {
   absl::MutexLock guard(&mutex_);
-  auto &msg = spec.GetMutableMessage();
-
-  msg.set_type(TaskType::ACTOR_TASK);
-  auto actor_spec = msg.mutable_actor_task_spec();
-  actor_spec->set_actor_id(actor_id.Binary());
-
-  const TaskID actor_creation_task_id = TaskID::ForActorCreationTask(GetActorID());
-  const ObjectID actor_creation_dummy_object_id = ObjectID::ForTaskReturn(
-      actor_creation_task_id, /*index=*/1,
-      /*transport_type=*/static_cast<int>(TaskTransportType::DIRECT));
-  actor_spec->set_actor_creation_dummy_object_id(actor_creation_dummy_object_id.Binary());
-  actor_spec->set_previous_actor_task_dummy_object_id(actor_cursor_.Binary());
+  const auto &actor_id = GetActorID();
+  const ObjectID actor_creation_dummy_object_id = ObjectID::ForActorHandle(actor_id);
   // NOTE(swang): The actor_counter_starts_at field is set right before the
   // task is submitted.
-  actor_spec->set_actor_counter(task_counter_++);
-  actor_cursor_ = spec.ReturnId(spec.NumReturns() - 1, TaskTransportType::DIRECT);
+  builder.SetActorTaskSpec(actor_id, actor_creation_dummy_object_id,
+                           /*previous_actor_task_dummy_object_id=*/actor_cursor_,
+                           task_counter_++);
+  actor_cursor_ = new_cursor;
 }
 
 void ActorHandle::Serialize(std::string *output) { inner_.SerializeToString(output); }

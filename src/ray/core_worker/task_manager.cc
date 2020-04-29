@@ -340,7 +340,7 @@ void TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
   if (num_retries_left != 0) {
     RAY_LOG(ERROR) << num_retries_left << " retries left for task " << spec.TaskId()
                    << ", attempting to resubmit.";
-    retry_task_callback_(spec, /*delay=*/false);
+    retry_task_callback_(spec, /*delay=*/true);
   } else {
     // Throttled logging of task failure errors.
     {

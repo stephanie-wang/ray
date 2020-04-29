@@ -376,6 +376,7 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
           // XXX: Centralized.
           to_resubmit_.push_back(std::make_pair(current_time_ms() + delay, spec));
         } else {
+          RAY_CHECK(!spec.IsActorTask());
           RAY_CHECK_OK(direct_task_submitter_->SubmitTask(spec));
         }
       },
@@ -1194,13 +1195,14 @@ Status CoreWorker::SubmitActorTask(const ActorID &actor_id, const RayFunction &f
                       rpc_address_, function, args, num_returns, task_options.resources,
                       required_resources, return_ids);
 
+  const ObjectID new_cursor = return_ids->back();
+  actor_manager_->SetActorTaskSpec(actor_id, builder, new_cursor);
   // Remove cursor from return ids.
   return_ids->pop_back();
 
   // Submit task.
   Status status;
   TaskSpecification task_spec = builder.Build();
-  actor_manager_->SetActorTaskSpec(actor_id, task_spec);
   if (options_.is_local_mode) {
     ExecuteTaskLocalMode(task_spec, actor_id);
   } else {

@@ -49,13 +49,11 @@ class ActorManager : public ActorManagerInterface {
 
   void RemoveHandle(const ActorID &actor_id);
 
+  void SetActorTaskSpec(const ActorID &actor_id, TaskSpecBuilder &builder, const ObjectID &new_cursor);
+
   void IncrementCompletedTasks(const ActorID &actor_id, const TaskID &caller_id) override;
 
   void ResetAllCallerState();
-
-  void SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec);
-
-  void SetActorState(const ActorID &actor_id, gcs::ActorTableData state);
 
   const std::vector<TaskSpecification> HandleActorAlive(const ActorID &actor_id);
   void HandleActorReconstructing(const ActorID &actor_id);
