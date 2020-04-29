@@ -102,6 +102,15 @@ class ActorHandle {
     return RestartOption() == rpc::ActorHandle::RESTART_AND_RETRY_FAILED_TASKS ? -1 : 0;
   }
 
+  const std::vector<TaskSpecification> &PendingTasks() const {
+    absl::MutexLock lock(&mutex_);
+    return pending_tasks_;
+  }
+
+  void AddPendingTask(const TaskSpecification &spec);
+
+  const std::vector<TaskSpecification> ResetPendingTasks();
+
  private:
   // Protobuf-defined persistent state of the actor handle.
   const ray::rpc::ActorHandle inner_;
@@ -118,7 +127,8 @@ class ActorHandle {
   // Number of tasks that have been submitted on this handle.
   uint64_t task_counter_ GUARDED_BY(mutex_) = 0;
   absl::flat_hash_map<TaskID, uint64_t> callers_start_at_ GUARDED_BY(mutex_);
-  absl::flat_hash_map<TaskID, uint64_t> completed_task_counter_ GUARDED_BY(mu_);
+  absl::flat_hash_map<TaskID, uint64_t> completed_task_counter_ GUARDED_BY(mutex_);
+  std::vector<TaskSpecification> pending_tasks_ GUARDED_BY(mutex_);
 
   /// Mutex to protect fields in the actor handle.
   mutable absl::Mutex mutex_;

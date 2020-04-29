@@ -1331,6 +1331,8 @@ bool CoreWorker::AddActorHandle(std::shared_ptr<ActorHandle> actor_handle,
                 KillActor(actor_id, /*force_kill=*/false, /*no_reconstruction=*/false));
           }
 
+          RAY_CHECK_OK(gcs_client_->Actors().AsyncUnsubscribe(
+              actor_id, nullptr));
           actor_manager_->RemoveHandle(actor_id);
         }));
   }

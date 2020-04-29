@@ -101,4 +101,15 @@ void ActorHandle::SetActorCounterStartsAt(TaskSpecification &spec) const {
   }
 }
 
+void ActorHandle::AddPendingTask(const TaskSpecification &spec) {
+  absl::MutexLock lock(&mutex_);
+  pending_tasks_.push_back(std::move(spec));
+}
+
+const std::vector<TaskSpecification> ActorHandle::ResetPendingTasks() {
+  absl::MutexLock lock(&mutex_);
+  const auto tasks = std::move(pending_tasks_);
+  return tasks;
+}
+
 }  // namespace ray

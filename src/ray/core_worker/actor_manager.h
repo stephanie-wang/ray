@@ -72,9 +72,6 @@ class ActorManager : public ActorManagerInterface {
   /// Map from actor ID to a handle to that actor.
   absl::flat_hash_map<ActorID, std::shared_ptr<ActorHandle>> actor_handles_
       GUARDED_BY(mutex_);
-
-  std::unordered_map<ActorID, std::vector<TaskSpecification>> actor_tasks_to_resubmit_
-      GUARDED_BY(mutex_);
 };
 
 }  // namespace ray
