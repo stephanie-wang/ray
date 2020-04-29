@@ -17,6 +17,7 @@
 
 #include <gtest/gtest_prod.h>
 
+#include "absl/container/flat_hash_map.h"
 #include "ray/common/id.h"
 #include "ray/common/task/task_util.h"
 #include "ray/core_worker/common.h"
@@ -60,7 +61,9 @@ class ActorHandle {
 
   std::string ExtensionData() const { return inner_.extension_data(); }
 
-  void SetActorTaskSpec(TaskSpecBuilder &builder, const ObjectID new_cursor);
+  void SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec);
+
+  void SetResubmittedActorTaskSpec(TaskSpecification &spec) const;
 
   void Serialize(std::string *output);
 
@@ -70,18 +73,24 @@ class ActorHandle {
   /// instance of the actor does not have the previous sequence number.
   /// TODO: We should also move the other actor state (status and IP) inside
   /// ActorHandle and reset them in this method.
-  void Reset();
+  void ResetCallersStartAt();
 
-  // Mark the actor handle as dead.
-  void MarkDead() {
+  void ResetCallerState();
+
+  void SetState(rpc::ActorTableData::ActorState state) {
     absl::MutexLock lock(&mutex_);
-    state_ = rpc::ActorTableData::DEAD;
+    state_ = state;
   }
 
-  // Returns whether the actor is known to be dead.
-  bool IsDead() const {
+  rpc::ActorTableData::ActorState GetState() const {
     absl::MutexLock lock(&mutex_);
-    return state_ == rpc::ActorTableData::DEAD;
+    return state_;
+  }
+
+  void IncrementCompletedTasks(const TaskID &caller_id) {
+    absl::MutexLock lock(&mutex_);
+    // TODO: Skip if not restartable.
+    completed_task_counter_[caller_id]++;
   }
 
  private:
@@ -99,6 +108,8 @@ class ActorHandle {
   ObjectID actor_cursor_ GUARDED_BY(mutex_);
   // Number of tasks that have been submitted on this handle.
   uint64_t task_counter_ GUARDED_BY(mutex_) = 0;
+  absl::flat_hash_map<TaskID, uint64_t> callers_start_at_ GUARDED_BY(mutex_);
+  absl::flat_hash_map<TaskID, uint64_t> completed_task_counter_ GUARDED_BY(mu_);
 
   /// Mutex to protect fields in the actor handle.
   mutable absl::Mutex mutex_;

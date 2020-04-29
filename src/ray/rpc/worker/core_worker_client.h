@@ -222,7 +222,9 @@ class CoreWorkerClient : public std::enable_shared_from_this<CoreWorkerClient>,
 
   ray::Status PushActorTask(std::unique_ptr<PushTaskRequest> request,
                             const ClientCallback<PushTaskReply> &callback) override {
-    request->set_sequence_number(request->task_spec().actor_task_spec().actor_counter());
+    request->set_sequence_number(
+        request->task_spec().actor_task_spec().actor_counter() -
+        request->task_spec().actor_task_spec().actor_counter_starts_at());
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (request->task_spec().caller_id() != cur_caller_id_) {

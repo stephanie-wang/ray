@@ -33,4 +33,129 @@ void ActorManager::PublishTerminatedActor(const TaskSpecification &actor_creatio
   RAY_CHECK_OK(actor_accessor_.AsyncRegister(data, update_callback));
 }
 
+const std::shared_ptr<ActorHandle> &ActorManager::GetHandle(
+    const ActorID &actor_id) const {
+  absl::MutexLock lock(&mutex_);
+  static const std::shared_ptr<ActorHandle> empty_ptr = nullptr;
+  auto it = actor_handles_.find(actor_id);
+  if (it == actor_handles_.end()) {
+    return empty_ptr;
+  }
+  return it->second;
+}
+
+bool ActorManager::AddHandle(const ActorID &actor_id,
+                             std::shared_ptr<ActorHandle> actor_handle) {
+  absl::MutexLock lock(&mutex_);
+  return actor_handles_.emplace(actor_id, std::move(actor_handle)).second;
+}
+
+void ActorManager::IncrementCompletedTasks(const ActorID &actor_id,
+                                           const TaskID &caller_id) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(actor_id);
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->IncrementCompletedTasks(caller_id);
+}
+
+void ActorManager::RemoveHandle(const ActorID &actor_id) {
+  absl::MutexLock lock(&mutex_);
+  RAY_CHECK(actor_handles_.erase(actor_id));
+}
+
+void ActorManager::ResetAllCallerState() {
+  absl::MutexLock lock(&mutex_);
+  // Reset the task counters to 0 for the next caller.
+  for (const auto &handle : actor_handles_) {
+    handle.second->ResetCallerState();
+  }
+}
+
+void ActorManager::SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(actor_id);
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->SetActorTaskSpec(actor_id, spec);
+}
+
+const std::vector<TaskSpecification> ActorManager::HandleActorAlive(
+    const ActorID &actor_id) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(actor_id);
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->SetState(gcs::ActorTableData::ALIVE);
+  // We have to reset the actor handle since the next instance of the
+  // actor will not have the last sequence number that we sent.
+  // TODO(swang): This assumes that all task replies from the previous
+  // incarnation of the actor have been received.
+  handle->second->ResetCallersStartAt();
+
+  std::vector<TaskSpecification> tasks;
+  const auto queue = actor_tasks_to_resubmit_.find(actor_id);
+  if (queue != actor_tasks_to_resubmit_.end()) {
+    tasks = std::move(queue->second);
+    actor_tasks_to_resubmit_.erase(queue);
+  }
+
+  for (auto &task : tasks) {
+    auto counter = task.ActorCounter();
+    handle->second->SetResubmittedActorTaskSpec(task);
+    RAY_LOG(DEBUG) << "Task counter was " << counter << " now is " << task.ActorCounter();
+  }
+  return tasks;
+}
+
+void ActorManager::HandleActorReconstructing(const ActorID &actor_id) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(actor_id);
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->SetState(gcs::ActorTableData::RECONSTRUCTING);
+}
+
+const std::vector<TaskSpecification> ActorManager::HandleActorDead(
+    const ActorID &actor_id) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(actor_id);
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->SetState(gcs::ActorTableData::DEAD);
+
+  std::vector<TaskSpecification> tasks;
+  const auto queue = actor_tasks_to_resubmit_.find(actor_id);
+  if (queue != actor_tasks_to_resubmit_.end()) {
+    tasks = std::move(queue->second);
+    actor_tasks_to_resubmit_.erase(queue);
+  }
+  return tasks;
+
+  // We cannot erase the actor handle here because clients can still
+  // submit tasks to dead actors. This also means we defer unsubscription,
+  // otherwise we crash when bulk unsubscribing all actor handles.
+}
+
+void ActorManager::SubmitTask(TaskSpecification &spec, bool *submit, bool *cancel) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(spec.ActorId());
+  RAY_CHECK(handle != actor_handles_.end());
+
+  const auto state = handle->second->GetState();
+  if (state == gcs::ActorTableData::ALIVE) {
+    *submit = true;
+    handle->second->SetResubmittedActorTaskSpec(spec);
+  } else if (state == gcs::ActorTableData::DEAD) {
+    *cancel = true;
+  } else {
+    RAY_LOG(DEBUG) << "Queueing actor task for resubmission " << spec.TaskId();
+    actor_tasks_to_resubmit_[spec.ActorId()].push_back(spec);
+  }
+}
+
+std::vector<ActorID> ActorManager::ActorIds() const {
+  absl::MutexLock lock(&mutex_);
+  std::vector<ActorID> ids;
+  for (const auto &actor : actor_handles_) {
+    ids.push_back(actor.first);
+  }
+  return ids;
+}
+
 }  // namespace ray

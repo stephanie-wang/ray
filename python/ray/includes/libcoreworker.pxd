@@ -120,8 +120,7 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
         CRayStatus SerializeActorHandle(const CActorID &actor_id, c_string
                                         *bytes,
                                         CObjectID *c_actor_handle_id)
-        CRayStatus GetActorHandle(const CActorID &actor_id,
-                                  CActorHandle **actor_handle) const
+        shared_ptr[CActorHandle] GetActorHandle(const CActorID &actor_id) const
         void AddLocalReference(const CObjectID &object_id)
         void RemoveLocalReference(const CObjectID &object_id)
         void PromoteObjectToPlasma(const CObjectID &object_id)

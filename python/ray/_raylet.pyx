@@ -1004,8 +1004,12 @@ cdef class CoreWorker:
         c_actor_id = (CCoreWorkerProcess.GetCoreWorker()
                       .DeserializeAndRegisterActorHandle(
                           bytes, c_outer_object_id))
-        check_status(CCoreWorkerProcess.GetCoreWorker().GetActorHandle(
-            c_actor_id, &c_actor_handle))
+        c_actor_handle_ptr = CCoreWorkerProcess.GetCoreWorker().GetActorHandle(
+                c_actor_id)
+        c_actor_handle = c_actor_handle_ptr.get()
+        if c_actor_handle == NULL:
+            raise RayletError("Actor handle does not exist")
+
         actor_id = ActorID(c_actor_id.Binary())
         job_id = JobID(c_actor_handle.CreationJobID().Binary())
         language = Language.from_native(c_actor_handle.ActorLanguage())

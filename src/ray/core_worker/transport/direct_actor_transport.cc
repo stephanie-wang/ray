@@ -119,34 +119,31 @@ void CoreWorkerDirectActorTaskSubmitter::ConnectActor(const ActorID &actor_id,
 void CoreWorkerDirectActorTaskSubmitter::DisconnectActor(const ActorID &actor_id,
                                                          bool dead) {
   absl::MutexLock lock(&mu_);
-  if (!dead) {
-    // We're reconstructing the actor, so erase the client for now. The new client
-    // will be inserted once actor reconstruction completes. We don't erase the
-    // client when the actor is DEAD, so that all further tasks will be failed.
-    rpc_clients_.erase(actor_id);
-    worker_ids_.erase(actor_id);
-  } else {
-    RAY_LOG(INFO) << "Failing pending tasks for actor " << actor_id;
-    // If there are pending requests, treat the pending tasks as failed.
-    auto pending_it = pending_requests_.find(actor_id);
-    if (pending_it != pending_requests_.end()) {
-      auto head = pending_it->second.begin();
-      while (head != pending_it->second.end()) {
-        auto request = std::move(head->second);
-        head = pending_it->second.erase(head);
-        auto task_id = TaskID::FromBinary(request->task_spec().task_id());
-        auto status = Status::IOError("cancelling all pending tasks of dead actor");
-        task_finisher_->PendingTaskFailed(task_id, rpc::ErrorType::ACTOR_DIED, &status);
-      }
-      pending_requests_.erase(pending_it);
-    }
-    // No need to clean up tasks that have been sent and are waiting for
-    // replies. They will be treated as failed once the connection dies.
-    // We retain the sequencing information so that we can properly fail
-    // any tasks submitted after the actor death.
-
+  if (dead) {
     pending_force_kills_.erase(actor_id);
   }
+
+  RAY_LOG(INFO) << "Failing pending tasks for actor " << actor_id;
+  // If there are pending requests, treat the pending tasks as failed.
+  auto pending_it = pending_requests_.find(actor_id);
+  if (pending_it != pending_requests_.end()) {
+    auto head = pending_it->second.begin();
+    while (head != pending_it->second.end()) {
+      auto request = std::move(head->second);
+      head = pending_it->second.erase(head);
+      auto task_id = TaskID::FromBinary(request->task_spec().task_id());
+      auto status = Status::IOError("cancelling all pending tasks of dead actor");
+      task_finisher_->PendingTaskFailed(task_id, rpc::ErrorType::ACTOR_DIED, &status);
+    }
+    pending_requests_.erase(pending_it);
+  }
+  // No need to clean up tasks that have been sent and are waiting for
+  // replies. They will be treated as failed once the connection dies.
+  // We retain the sequencing information so that we can properly fail
+  // any tasks submitted after the actor death.
+
+  rpc_clients_.erase(actor_id);
+  worker_ids_.erase(actor_id);
 }
 
 void CoreWorkerDirectActorTaskSubmitter::SendPendingTasks(const ActorID &actor_id) {
@@ -178,7 +175,8 @@ void CoreWorkerDirectActorTaskSubmitter::SendPendingTasks(const ActorID &actor_i
 void CoreWorkerDirectActorTaskSubmitter::PushActorTask(
     rpc::CoreWorkerClientInterface &client, std::unique_ptr<rpc::PushTaskRequest> request,
     const ActorID &actor_id, const TaskID &task_id, int num_returns) {
-  RAY_LOG(DEBUG) << "Pushing task " << task_id << " to actor " << actor_id;
+  RAY_LOG(DEBUG) << "Pushing task " << task_id << " to actor " << actor_id << " pos "
+                 << next_send_position_[actor_id];
   next_send_position_[actor_id]++;
   auto it = worker_ids_.find(actor_id);
   RAY_CHECK(it != worker_ids_.end()) << "Actor worker id not found " << actor_id.Hex();

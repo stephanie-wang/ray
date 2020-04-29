@@ -289,6 +289,10 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
     absl::MutexLock lock(&mu_);
     MaybeWriteTaskSpecToGcs(spec);
   }
+
+  if (spec.IsActorTask()) {
+    actor_manager_->IncrementCompletedTasks(spec.ActorId(), spec.CallerId());
+  }
   RemoveFinishedTaskReferences(spec, release_lineage, worker_addr, reply.borrowed_refs());
 
   ShutdownIfNeeded();
@@ -456,6 +460,15 @@ void TaskManager::RemoveLineageReference(const ObjectID &object_id,
     // so it is safe to remove the task spec.
     submissible_tasks_.erase(it);
   }
+}
+
+bool TaskManager::MarkTaskCanceled(const TaskID &task_id) {
+  absl::MutexLock lock(&mu_);
+  auto it = submissible_tasks_.find(task_id);
+  if (it != submissible_tasks_.end()) {
+    it->second.num_retries_left = 0;
+  }
+  return it != submissible_tasks_.end();
 }
 
 void TaskManager::MarkPendingTaskFailed(const TaskID &task_id,

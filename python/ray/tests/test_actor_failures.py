@@ -147,20 +147,27 @@ def test_actor_reconstruction(ray_start_regular):
 
     actor = ReconstructableActor.remote()
     pid = ray.get(actor.get_pid.remote())
-    # Call increase 3 times
-    for _ in range(3):
-        ray.get(actor.increase.remote())
-    # Call increase again with some delay.
-    result = actor.increase.remote(delay=0.5)
-    # Sleep some time to wait for the above task to start execution.
-    time.sleep(0.2)
+    results = [actor.increase.remote() for _ in range(100)]
     # Kill actor process, while the above task is still being executed.
     os.kill(pid, signal.SIGKILL)
-    # Check that the above task didn't fail and the actor is reconstructed.
-    assert ray.get(result) == 4
+    # Check that none of the tasks failed and the actor is restarted.
+    seq = list(range(1, 101))
+    results = ray.get(results)
+    failed_task_index = None
+    # Make sure that all tasks were executed in order before and after the
+    # actor's death.
+    for i, res in enumerate(results):
+        if res != seq[0]:
+            if failed_task_index is None:
+                failed_task_index = i
+            assert res + failed_task_index == seq[0]
+        seq.pop(0)
     # Check that we can still call the actor.
-    assert ray.get(actor.increase.remote()) == 5
+    result = actor.increase.remote()
+    assert ray.get(result) == results[-1] + 1
+
     # kill actor process one more time.
+    results = [actor.increase.remote() for _ in range(100)]
     pid = ray.get(actor.get_pid.remote())
     os.kill(pid, signal.SIGKILL)
     # The actor has exceeded max reconstructions, and this task should fail.

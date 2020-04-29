@@ -25,6 +25,9 @@ class ActorManagerInterface {
  public:
   virtual void PublishTerminatedActor(const TaskSpecification &actor_creation_task) = 0;
 
+  virtual void IncrementCompletedTasks(const ActorID &actor_id,
+                                       const TaskID &caller_id) = 0;
+
   virtual ~ActorManagerInterface() {}
 };
 
@@ -40,9 +43,40 @@ class ActorManager : public ActorManagerInterface {
   /// Called when an actor that we own can no longer be restarted.
   void PublishTerminatedActor(const TaskSpecification &actor_creation_task) override;
 
+  const std::shared_ptr<ActorHandle> &GetHandle(const ActorID &actor_id) const;
+
+  bool AddHandle(const ActorID &actor_id, std::shared_ptr<ActorHandle> actor_handle);
+
+  void RemoveHandle(const ActorID &actor_id);
+
+  void IncrementCompletedTasks(const ActorID &actor_id, const TaskID &caller_id) override;
+
+  void ResetAllCallerState();
+
+  void SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec);
+
+  void SetActorState(const ActorID &actor_id, gcs::ActorTableData state);
+
+  const std::vector<TaskSpecification> HandleActorAlive(const ActorID &actor_id);
+  void HandleActorReconstructing(const ActorID &actor_id);
+  const std::vector<TaskSpecification> HandleActorDead(const ActorID &actor_id);
+
+  void SubmitTask(TaskSpecification &spec, bool *submit, bool *cancel);
+
+  std::vector<ActorID> ActorIds() const;
+
  private:
+  mutable absl::Mutex mutex_;
+
   /// Global database of actors.
   gcs::ActorInfoAccessor &actor_accessor_;
+
+  /// Map from actor ID to a handle to that actor.
+  absl::flat_hash_map<ActorID, std::shared_ptr<ActorHandle>> actor_handles_
+      GUARDED_BY(mutex_);
+
+  std::unordered_map<ActorID, std::vector<TaskSpecification>> actor_tasks_to_resubmit_
+      GUARDED_BY(mutex_);
 };
 
 }  // namespace ray

@@ -647,12 +647,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
       const std::vector<std::vector<ObjectID>> &contained_object_ids,
       std::vector<std::shared_ptr<RayObject>> *return_objects);
 
-  /// Get a handle to an actor.
-  ///
-  /// \param[in] actor_id The actor handle to get.
-  /// \param[out] actor_handle A handle to the requested actor.
-  /// \return Status::Invalid if we don't have this actor handle.
-  Status GetActorHandle(const ActorID &actor_id, ActorHandle **actor_handle) const;
+  const std::shared_ptr<ActorHandle> GetActorHandle(const ActorID &actor_id) const;
 
   ///
   /// The following methods are handlers for the core worker's gRPC server, which follow
@@ -792,7 +787,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   /// actor to disconnect once all handles are out of scope.
   /// \return True if the handle was added and False if we already had a handle
   /// to the same actor.
-  bool AddActorHandle(std::unique_ptr<ActorHandle> actor_handle, bool is_owner_handle);
+  bool AddActorHandle(std::shared_ptr<ActorHandle> actor_handle, bool is_owner_handle);
 
   ///
   /// Private methods related to task execution. Should not be used by driver processes.
@@ -967,14 +962,6 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
 
   /// Manages recovery of objects stored in remote plasma nodes.
   std::unique_ptr<ObjectRecoveryManager> object_recovery_manager_;
-
-  /// The `actor_handles_` field could be mutated concurrently due to multi-threading, we
-  /// need a mutex to protect it.
-  mutable absl::Mutex actor_handles_mutex_;
-
-  /// Map from actor ID to a handle to that actor.
-  absl::flat_hash_map<ActorID, std::unique_ptr<ActorHandle>> actor_handles_
-      GUARDED_BY(actor_handles_mutex_);
 
   ///
   /// Fields related to task execution.

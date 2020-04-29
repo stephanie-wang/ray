@@ -134,6 +134,12 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   void OnTaskDependenciesInlined(const std::vector<ObjectID> &inlined_dependency_ids,
                                  const std::vector<ObjectID> &contained_ids) override;
 
+  /// Set number of retries to zero for a task that is being canceled.
+  ///
+  /// \param[in] task_id to cancel.
+  /// \return Whether the task was pending and was marked for cancellation.
+  bool MarkTaskCanceled(const TaskID &task_id);
+
   /// Return whether this task can be submitted for execution.
   ///
   /// \param[in] task_id ID of the task to query.

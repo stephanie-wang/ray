@@ -60,25 +60,57 @@ ActorHandle::ActorHandle(
 ActorHandle::ActorHandle(const std::string &serialized)
     : ActorHandle(CreateInnerActorHandleFromString(serialized)) {}
 
-void ActorHandle::SetActorTaskSpec(TaskSpecBuilder &builder, const ObjectID new_cursor) {
+void ActorHandle::SetActorTaskSpec(const ActorID &actor_id, TaskSpecification &spec) {
   absl::MutexLock guard(&mutex_);
-  // Build actor task spec.
+  auto &msg = spec.GetMutableMessage();
+
+  msg.set_type(TaskType::ACTOR_TASK);
+  auto actor_spec = msg.mutable_actor_task_spec();
+  actor_spec->set_actor_id(actor_id.Binary());
+
   const TaskID actor_creation_task_id = TaskID::ForActorCreationTask(GetActorID());
   const ObjectID actor_creation_dummy_object_id = ObjectID::ForTaskReturn(
       actor_creation_task_id, /*index=*/1,
       /*transport_type=*/static_cast<int>(TaskTransportType::DIRECT));
-  builder.SetActorTaskSpec(GetActorID(), actor_creation_dummy_object_id,
-                           /*previous_actor_task_dummy_object_id=*/actor_cursor_,
-                           task_counter_++);
-  actor_cursor_ = new_cursor;
+  actor_spec->set_actor_creation_dummy_object_id(actor_creation_dummy_object_id.Binary());
+
+  actor_spec->set_previous_actor_task_dummy_object_id(actor_cursor_.Binary());
+
+  actor_spec->set_actor_counter(task_counter_++);
+  const auto caller_id = spec.CallerId();
+  auto it = callers_start_at_.find(caller_id);
+  if (it != callers_start_at_.end()) {
+    actor_spec->set_actor_counter_starts_at(it->second);
+  }
+  RAY_CHECK(actor_spec->actor_counter() >= actor_spec->actor_counter_starts_at());
+
+  actor_cursor_ = spec.ReturnId(spec.NumReturns() - 1, TaskTransportType::DIRECT);
 }
 
 void ActorHandle::Serialize(std::string *output) { inner_.SerializeToString(output); }
 
-void ActorHandle::Reset() {
+void ActorHandle::ResetCallerState() {
   absl::MutexLock guard(&mutex_);
   task_counter_ = 0;
   actor_cursor_ = ObjectID::FromBinary(inner_.actor_cursor());
+}
+
+void ActorHandle::ResetCallersStartAt() {
+  absl::MutexLock guard(&mutex_);
+  for (const auto &caller : completed_task_counter_) {
+    callers_start_at_[caller.first] = caller.second;
+  }
+}
+
+void ActorHandle::SetResubmittedActorTaskSpec(TaskSpecification &spec) const {
+  absl::MutexLock guard(&mutex_);
+  auto &msg = spec.GetMutableMessage();
+  const auto caller_id = spec.CallerId();
+  auto it = callers_start_at_.find(caller_id);
+  if (it != callers_start_at_.end()) {
+    RAY_CHECK(msg.actor_task_spec().actor_counter() >= it->second);
+    msg.mutable_actor_task_spec()->set_actor_counter_starts_at(it->second);
+  }
 }
 
 }  // namespace ray
