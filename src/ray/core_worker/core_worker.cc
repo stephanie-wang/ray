@@ -366,21 +366,7 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
   task_manager_.reset(new TaskManager(
       memory_store_, reference_counter_, actor_manager_,
       [this](const TaskSpecification &spec, bool delay) {
-        if (spec.IsActorTask()) {
-          io_service_.post([this, spec]() {
-            auto spec_copy(spec);
-            bool submit, cancel;
-            actor_manager_->SubmitTask(spec_copy, &submit, &cancel);
-            if (submit) {
-              RAY_CHECK_OK(direct_actor_submitter_->SubmitTask(std::move(spec_copy)));
-            } else if (cancel) {
-              auto status = Status::IOError("sent task to dead actor");
-              task_manager_->MarkTaskCanceled(spec_copy.TaskId());
-              task_manager_->PendingTaskFailed(spec_copy.TaskId(),
-                                               rpc::ErrorType::ACTOR_DIED, &status);
-            }
-          });
-        } else if (delay) {
+        if (delay) {
           // Retry after a delay to emulate the existing Raylet reconstruction
           // behaviour. TODO(ekl) backoff exponentially.
           uint32_t delay = RayConfig::instance().task_retry_delay_ms();
@@ -675,7 +661,21 @@ void CoreWorker::InternalHeartbeat(const boost::system::error_code &error) {
 
   absl::MutexLock lock(&mutex_);
   while (!to_resubmit_.empty() && current_time_ms() > to_resubmit_.front().first) {
-    RAY_CHECK_OK(direct_task_submitter_->SubmitTask(to_resubmit_.front().second));
+    auto spec = std::move(to_resubmit_.front().second);
+    if (spec.IsActorTask()) {
+      bool submit, cancel;
+      actor_manager_->SubmitTask(spec, &submit, &cancel);
+      if (submit) {
+        RAY_CHECK_OK(direct_actor_submitter_->SubmitTask(std::move(spec)));
+      } else if (cancel) {
+        auto status = Status::IOError("sent task to dead actor");
+        task_manager_->MarkTaskCanceled(spec.TaskId());
+        task_manager_->PendingTaskFailed(spec.TaskId(), rpc::ErrorType::ACTOR_DIED,
+                                         &status);
+      }
+    } else {
+      RAY_CHECK_OK(direct_task_submitter_->SubmitTask(spec));
+    }
     to_resubmit_.pop_front();
   }
   internal_timer_.expires_at(internal_timer_.expiry() +

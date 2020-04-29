@@ -127,8 +127,12 @@ def test_actor_eviction(ray_start_object_store_memory):
     assert num_success > 0
 
 
-def test_actor_reconstruction(ray_start_regular):
+def test_actor_reconstruction():
     """Test actor reconstruction when actor process is killed."""
+    ray.init(
+        _internal_config=json.dumps({
+            "task_retry_delay_ms": 100,
+        }), )
 
     @ray.remote(max_reconstructions=1)
     class ReconstructableActor:
