@@ -1407,6 +1407,8 @@ Status CoreWorker::AllocateReturnObjects(
     if (!object_already_exists) {
       return_objects->at(i) =
           std::make_shared<RayObject>(data_buffer, metadatas[i], contained_object_ids[i]);
+    } else {
+      RAY_LOG(DEBUG) << "Plasma object already exists " << object_ids[i];
     }
   }
 

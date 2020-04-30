@@ -185,7 +185,7 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(
   RAY_CHECK_OK(client.PushActorTask(
       std::move(request),
       [this, addr, task_id](Status status, const rpc::PushTaskReply &reply) {
-        if (!status.ok()) {
+        if (!status.ok() || reply.worker_exiting()) {
           task_finisher_->PendingTaskFailed(task_id, rpc::ErrorType::ACTOR_DIED, &status);
         } else {
           task_finisher_->CompletePendingTask(task_id, reply, addr);
@@ -263,20 +263,25 @@ void CoreWorkerDirectTaskReceiver::HandlePushTask(
 
         // The object is nullptr if it already existed in the object store.
         const auto &result = return_objects[i];
-        return_object->set_size(result->GetSize());
-        if (result->GetData() != nullptr && result->GetData()->IsPlasmaBuffer()) {
-          return_object->set_in_plasma(true);
+        if (result) {
+          return_object->set_size(result->GetSize());
+          if (result->GetData() != nullptr && result->GetData()->IsPlasmaBuffer()) {
+            return_object->set_in_plasma(true);
+          } else {
+            if (result->GetData() != nullptr) {
+              return_object->set_data(result->GetData()->Data(), result->GetData()->Size());
+            }
+            if (result->GetMetadata() != nullptr) {
+              return_object->set_metadata(result->GetMetadata()->Data(),
+                                          result->GetMetadata()->Size());
+            }
+            for (const auto &nested_id : result->GetNestedIds()) {
+              return_object->add_nested_inlined_ids(nested_id.Binary());
+            }
+            RAY_CHECK(!(return_object->data().empty() && return_object->metadata().empty()));
+          }
         } else {
-          if (result->GetData() != nullptr) {
-            return_object->set_data(result->GetData()->Data(), result->GetData()->Size());
-          }
-          if (result->GetMetadata() != nullptr) {
-            return_object->set_metadata(result->GetMetadata()->Data(),
-                                        result->GetMetadata()->Size());
-          }
-          for (const auto &nested_id : result->GetNestedIds()) {
-            return_object->add_nested_inlined_ids(nested_id.Binary());
-          }
+          RAY_CHECK(return_object->data().empty() && return_object->metadata().empty());
         }
       }
       if (task_spec.IsActorCreationTask()) {

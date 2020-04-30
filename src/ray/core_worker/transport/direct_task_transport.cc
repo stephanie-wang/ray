@@ -267,7 +267,7 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
           cached_workers_.emplace(scheduling_key, std::make_pair(addr, assigned_resources));
         }
 
-        if (!status.ok()) {
+        if (!status.ok() || reply.worker_exiting()) {
           // TODO: It'd be nice to differentiate here between process vs node
           // failure (e.g., by contacting the raylet). If it was a process
           // failure, it may have been an application-level error and it may

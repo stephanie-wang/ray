@@ -222,6 +222,7 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
       const auto pinned_at_raylet_id = ClientID::FromBinary(worker_addr.raylet_id());
       reference_counter_->UpdateObjectPinnedAtRaylet(object_id, pinned_at_raylet_id);
     } else {
+      RAY_CHECK(!(return_object.data().empty() && return_object.metadata().empty()));
       // NOTE(swang): If a direct object was promoted to plasma, then we do not
       // record the node ID that it was pinned at, which means that we will not
       // be able to reconstruct it if the plasma object copy is lost. However,
