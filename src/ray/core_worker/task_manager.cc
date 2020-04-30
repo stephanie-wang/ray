@@ -16,6 +16,30 @@
 
 #include "ray/util/util.h"
 
+namespace {
+
+void GetTaskDependencies(const ray::TaskSpecification &spec, std::vector<ray::ObjectID> *task_deps) {
+  for (size_t i = 0; i < spec.NumArgs(); i++) {
+    if (spec.ArgByRef(i)) {
+      for (size_t j = 0; j < spec.ArgIdCount(i); j++) {
+        task_deps->push_back(spec.ArgId(i, j));
+      }
+    } else {
+      const auto &inlined_ids = spec.ArgInlinedIds(i);
+      for (const auto &inlined_id : inlined_ids) {
+        task_deps->push_back(inlined_id);
+      }
+    }
+  }
+  if (spec.IsActorTask()) {
+    const auto actor_creation_return_id =
+        spec.ActorCreationDummyObjectId().WithTransportType(ray::TaskTransportType::DIRECT);
+    task_deps->push_back(actor_creation_return_id);
+  }
+}
+
+}
+
 namespace ray {
 
 // Start throttling task failure logs once we hit this threshold.
@@ -60,25 +84,7 @@ void TaskManager::AddPendingTask(const TaskID &caller_id,
 
   // Add references for the dependencies to the task.
   std::vector<ObjectID> task_deps;
-  for (size_t i = 0; i < spec.NumArgs(); i++) {
-    if (spec.ArgByRef(i)) {
-      for (size_t j = 0; j < spec.ArgIdCount(i); j++) {
-        task_deps.push_back(spec.ArgId(i, j));
-        RAY_LOG(DEBUG) << "Adding arg ID " << spec.ArgId(i, j);
-      }
-    } else {
-      const auto &inlined_ids = spec.ArgInlinedIds(i);
-      for (const auto &inlined_id : inlined_ids) {
-        task_deps.push_back(inlined_id);
-        RAY_LOG(DEBUG) << "Adding inlined ID " << inlined_id;
-      }
-    }
-  }
-  if (spec.IsActorTask()) {
-    const auto actor_creation_return_id =
-        spec.ActorCreationDummyObjectId().WithTransportType(TaskTransportType::DIRECT);
-    task_deps.push_back(actor_creation_return_id);
-  }
+  GetTaskDependencies(spec, &task_deps);
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
 
   // Add new owned objects for the return values of the task.
@@ -136,24 +142,18 @@ Status TaskManager::ResubmitTask(const TaskID &task_id,
     }
   }
 
-  for (size_t i = 0; i < spec.NumArgs(); i++) {
-    if (spec.ArgByRef(i)) {
-      for (size_t j = 0; j < spec.ArgIdCount(i); j++) {
-        task_deps->push_back(spec.ArgId(i, j));
-      }
-    } else {
-      const auto &inlined_ids = spec.ArgInlinedIds(i);
-      for (const auto &inlined_id : inlined_ids) {
-        task_deps->push_back(inlined_id);
+  if (resubmit) {
+    RAY_CHECK(!spec.IsActorCreationTask());
+    GetTaskDependencies(spec, task_deps);
+    if (!task_deps->empty()) {
+      reference_counter_->UpdateResubmittedTaskReferences(*task_deps);
+      if (spec.IsActorTask()) {
+        // Remove the creation task dependency for actor tasks.
+        task_deps->pop_back();
       }
     }
-  }
 
-  if (!task_deps->empty()) {
-    reference_counter_->UpdateResubmittedTaskReferences(*task_deps);
-  }
-
-  if (resubmit) {
+    RAY_LOG(DEBUG) << "Resubmitting task " << task_id;
     retry_task_callback_(spec, /*delay=*/false);
   }
 
@@ -402,23 +402,7 @@ void TaskManager::RemoveFinishedTaskReferences(
     TaskSpecification &spec, bool release_lineage, const rpc::Address &borrower_addr,
     const ReferenceCounter::ReferenceTableProto &borrowed_refs) {
   std::vector<ObjectID> plasma_dependencies;
-  for (size_t i = 0; i < spec.NumArgs(); i++) {
-    if (spec.ArgByRef(i)) {
-      for (size_t j = 0; j < spec.ArgIdCount(i); j++) {
-        plasma_dependencies.push_back(spec.ArgId(i, j));
-      }
-    } else {
-      const auto &inlined_ids = spec.ArgInlinedIds(i);
-      plasma_dependencies.insert(plasma_dependencies.end(), inlined_ids.begin(),
-                                 inlined_ids.end());
-    }
-  }
-  if (spec.IsActorTask()) {
-    const auto actor_creation_return_id =
-        spec.ActorCreationDummyObjectId().WithTransportType(TaskTransportType::DIRECT);
-    plasma_dependencies.push_back(actor_creation_return_id);
-  }
-
+  GetTaskDependencies(spec, &plasma_dependencies);
   std::vector<ObjectID> deleted;
   reference_counter_->UpdateFinishedTaskReferences(
       plasma_dependencies, release_lineage, borrower_addr, borrowed_refs, &deleted);

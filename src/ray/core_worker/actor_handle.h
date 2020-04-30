@@ -64,6 +64,8 @@ class ActorHandle {
 
   void SetActorTaskSpec(TaskSpecBuilder &builder, const ObjectID &new_cursor);
 
+  void ResetActorTaskSpecCounter(TaskSpecification &spec);
+
   void SetActorCounterStartsAt(TaskSpecification &spec) const;
 
   void Serialize(std::string *output);

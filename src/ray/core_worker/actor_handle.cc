@@ -75,6 +75,14 @@ void ActorHandle::SetActorTaskSpec(TaskSpecBuilder &builder, const ObjectID &new
   actor_cursor_ = new_cursor;
 }
 
+void ActorHandle::ResetActorTaskSpecCounter(TaskSpecification &spec) {
+  absl::MutexLock guard(&mutex_);
+  auto actor_spec = spec.GetMutableMessage().mutable_actor_task_spec();
+  actor_spec->set_actor_counter(task_counter_++);
+  actor_spec->set_previous_actor_task_dummy_object_id(actor_cursor_.Binary());
+  actor_cursor_ = spec.ActorDummyObject();
+}
+
 void ActorHandle::Serialize(std::string *output) { inner_.SerializeToString(output); }
 
 void ActorHandle::ResetCallerState() {
@@ -96,8 +104,9 @@ void ActorHandle::SetActorCounterStartsAt(TaskSpecification &spec) const {
   const auto caller_id = spec.CallerId();
   auto it = callers_start_at_.find(caller_id);
   if (it != callers_start_at_.end()) {
-    RAY_CHECK(msg.actor_task_spec().actor_counter() >= it->second);
-    msg.mutable_actor_task_spec()->set_actor_counter_starts_at(it->second);
+    auto caller_starts_at = it->second;
+    RAY_CHECK(msg.actor_task_spec().actor_counter() >= caller_starts_at);
+    msg.mutable_actor_task_spec()->set_actor_counter_starts_at(caller_starts_at);
   }
 }
 

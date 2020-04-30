@@ -79,6 +79,13 @@ void ActorManager::SetActorTaskSpec(const ActorID &actor_id, TaskSpecBuilder &bu
   handle->second->SetActorTaskSpec(builder, new_cursor);
 }
 
+void ActorManager::ResetActorTaskSpecCounter(TaskSpecification &spec) {
+  absl::MutexLock lock(&mutex_);
+  auto handle = actor_handles_.find(spec.ActorId());
+  RAY_CHECK(handle != actor_handles_.end());
+  handle->second->ResetActorTaskSpecCounter(spec);
+}
+
 void ActorManager::ResetAllCallerState() {
   absl::MutexLock lock(&mutex_);
   // Reset the task counters to 0 for the next caller.

@@ -51,6 +51,8 @@ class ActorManager : public ActorManagerInterface {
 
   void SetActorTaskSpec(const ActorID &actor_id, TaskSpecBuilder &builder, const ObjectID &new_cursor);
 
+  void ResetActorTaskSpecCounter(TaskSpecification &spec);
+
   void IncrementCompletedTasks(const ActorID &actor_id, const TaskID &caller_id) override;
 
   void ResetAllCallerState();

@@ -375,8 +375,21 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
           absl::MutexLock lock(&mutex_);
           // XXX: Centralized.
           to_resubmit_.push_back(std::make_pair(current_time_ms() + delay, spec));
+        } else if (spec.IsActorTask()) {
+          TaskSpecification spec_copy(spec);
+          RAY_LOG(INFO) << "Reconstructing output of actor task " << spec_copy.TaskId();
+          actor_manager_->ResetActorTaskSpecCounter(spec_copy);
+          bool submit, cancel;
+          actor_manager_->SubmitTask(spec_copy, &submit, &cancel);
+          if (submit) {
+            RAY_CHECK_OK(direct_actor_submitter_->SubmitTask(std::move(spec_copy)));
+          } else if (cancel) {
+            auto status = Status::IOError("sent task to dead actor");
+            task_manager_->MarkTaskCanceled(spec_copy.TaskId());
+            task_manager_->PendingTaskFailed(spec_copy.TaskId(), rpc::ErrorType::ACTOR_DIED,
+                                             &status);
+          }
         } else {
-          RAY_CHECK(!spec.IsActorTask());
           RAY_CHECK_OK(direct_task_submitter_->SubmitTask(spec));
         }
       },
