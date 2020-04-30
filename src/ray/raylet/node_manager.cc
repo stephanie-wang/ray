@@ -2847,8 +2847,8 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id,
               << "by the redis LRU configuration. Consider increasing the memory "
                  "allocation via "
               << "ray.init(redis_max_memory=<max_memory_bytes>).";
-          MarkObjectsAsFailed(ErrorType::OBJECT_UNRECONSTRUCTABLE,
-                              {required_object_id.ToPlasmaId()}, JobID::Nil());
+          //MarkObjectsAsFailed(ErrorType::OBJECT_UNRECONSTRUCTABLE,
+          //                    {required_object_id.ToPlasmaId()}, JobID::Nil());
         }
       }));
 }
@@ -2871,6 +2871,9 @@ void NodeManager::ResubmitTask(const Task &task, const ObjectID &required_object
       return;
     }
   }
+
+  // Return early to prevent reconstruction.
+  return;
 
   // Driver tasks cannot be reconstructed. If this is a driver task, push an
   // error to the driver and do not resubmit it.
