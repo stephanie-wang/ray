@@ -91,7 +91,7 @@ def fixBorder(frame):
   return frame
 
 
-@ray.remote(num_cpus=0)
+@ray.remote(num_cpus=0, resources={"head": 1})
 class Viewer:
     def __init__(self, video_pathname):
         self.video_pathname = video_pathname
@@ -133,7 +133,7 @@ class Viewer:
         #out.write(frame_out)
 
 
-@ray.remote(num_cpus=0)
+@ray.remote(num_cpus=0, resources={"head": 1})
 class Sink:
     def __init__(self, signal, num_frames, viewer):
         self.signal = signal
@@ -141,6 +141,7 @@ class Sink:
         self.latencies = []
 
         self.viewer = viewer
+        self.last_view = None
 
     def send(self, frame_index, transform, timestamp):
         with ray.profiling.profile("Sink.send"):
@@ -151,15 +152,17 @@ class Sink:
                 print("Received", len(self.latencies))
             if len(self.latencies) == self.num_frames:
                 print("DONE")
+                if self.last_view is not None:
+                    ray.get(self.last_view)
                 self.signal.send.remote()
             if self.viewer is not None:
-                self.viewer.send.remote(transform)
+                self.last_view = self.viewer.send.remote(transform)
 
     def latencies(self):
         return self.latencies
 
 
-@ray.remote(num_cpus=0)
+@ray.remote(num_cpus=0, resources={"head": 1})
 def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
     radius = fps
 
@@ -223,7 +226,7 @@ def process_video(video_pathname, num_total_frames, output_file, view):
 
     start_timestamp = time.time() + 1
     decoder = Decoder.remote(video_pathname, start_frame, start_timestamp)
-    signal = SignalActor.remote()
+    signal = SignalActor.options(resources={"head": 1}).remote()
     if view:
         viewer = Viewer.remote(video_pathname)
     else:
@@ -257,7 +260,7 @@ def main(args):
         "lineage_pinning_enabled": 1,
         "free_objects_period_milliseconds": -1,
         "object_manager_repeated_push_delay_ms": 1000,
-        "task_retry_delay_ms": 1000,
+        "task_retry_delay_ms": 100,
     }
     if args.centralized:
         config["centralized_owner"] = 1
@@ -266,7 +269,8 @@ def main(args):
     if args.local:
         cluster = ray.cluster_utils.Cluster()
         cluster.add_node(
-            num_cpus=0, _internal_config=internal_config, include_webui=False)
+            num_cpus=0, _internal_config=internal_config, include_webui=False,
+            resources={"head": 100})
         num_nodes = args.num_nodes
         for _ in range(num_nodes):
             cluster.add_node(
@@ -302,7 +306,7 @@ def main(args):
         t.start()
 
         if args.failure:
-            time.sleep(5)
+            time.sleep(10)
             cluster.remove_node(cluster.list_all_nodes()[-1], allow_graceful=False)
 
             cluster.add_node(
