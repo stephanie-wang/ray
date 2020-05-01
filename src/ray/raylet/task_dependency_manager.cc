@@ -340,6 +340,10 @@ void TaskDependencyManager::TaskPending(const Task &task) {
 }
 
 void TaskDependencyManager::AcquireTaskLease(const TaskID &task_id) {
+  if (initial_lease_period_ms_ == 0) {
+    return;
+  }
+
   auto it = pending_tasks_.find(task_id);
   int64_t now_ms = current_time_ms();
   if (it == pending_tasks_.end()) {

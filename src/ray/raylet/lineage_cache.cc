@@ -155,12 +155,17 @@ const std::unordered_set<TaskID> &Lineage::GetChildren(const TaskID &task_id) co
 LineageCache::LineageCache(const ClientID &client_id,
                            gcs::TableInterface<TaskID, TaskTableData> &task_storage,
                            gcs::PubsubInterface<TaskID> &task_pubsub,
-                           uint64_t max_lineage_size)
-    : client_id_(client_id), task_storage_(task_storage), task_pubsub_(task_pubsub) {}
+                           uint64_t max_lineage_size,
+                           bool disabled)
+    : client_id_(client_id), task_storage_(task_storage), task_pubsub_(task_pubsub),
+      disabled_(disabled) {}
 
 /// A helper function to add some uncommitted lineage to the local cache.
 void LineageCache::AddUncommittedLineage(const TaskID &task_id,
                                          const Lineage &uncommitted_lineage) {
+  if (disabled_) {
+    return;
+  }
   RAY_LOG(DEBUG) << "Adding uncommitted task " << task_id << " on " << client_id_;
   // If the entry is not found in the lineage to merge, then we stop since
   // there is nothing to copy into the merged lineage.
@@ -187,6 +192,10 @@ void LineageCache::AddUncommittedLineage(const TaskID &task_id,
 }
 
 bool LineageCache::CommitTask(const Task &task) {
+  if (disabled_) {
+    return true;
+  }
+
   if (task.GetTaskSpecification().IsDirectCall()) {
     // Disable lineage logging for direct tasks.
     return true;
@@ -220,6 +229,9 @@ void LineageCache::FlushAllUncommittedTasks() {
 }
 
 void LineageCache::MarkTaskAsForwarded(const TaskID &task_id, const ClientID &node_id) {
+  if (disabled_) {
+    return;
+  }
   RAY_CHECK(!node_id.IsNil());
   auto entry = lineage_.GetEntryMutable(task_id);
   if (entry) {

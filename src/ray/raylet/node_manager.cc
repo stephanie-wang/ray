@@ -94,21 +94,25 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           [this](const TaskID &task_id, const ObjectID &required_object_id) {
             HandleTaskReconstruction(task_id, required_object_id);
           },
+          RayConfig::instance().centralized() ? 0 :
           RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->client_table().GetLocalClientId(), gcs_client_->task_lease_table(),
           object_directory_, gcs_client_->task_reconstruction_log()),
       task_dependency_manager_(
           object_manager, reconstruction_policy_, io_service,
           gcs_client_->client_table().GetLocalClientId(),
+          RayConfig::instance().centralized() ? 0 :
           RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->task_lease_table()),
       lineage_cache_(gcs_client_->client_table().GetLocalClientId(),
                      gcs_client_->raylet_task_table(), gcs_client_->raylet_task_table(),
-                     config.max_lineage_size),
+                     config.max_lineage_size,
+                     /*disabled=*/RayConfig::instance().centralized()),
       actor_registry_(),
       node_manager_server_("NodeManager", config.node_manager_port),
       node_manager_service_(io_service, *this),
       client_call_manager_(io_service) {
+  RAY_LOG(INFO) << "Centralized " << (RayConfig::instance().centralized() ? 1 : 0);
   RAY_CHECK(heartbeat_period_.count() > 0);
   // Initialize the resource map with own cluster resource configuration.
   ClientID local_client_id = gcs_client_->client_table().GetLocalClientId();
@@ -1747,6 +1751,37 @@ void NodeManager::TreatTaskAsFailedIfLost(const Task &task) {
 
 void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineage,
                              bool forwarded) {
+  const TaskID &task_id = task.GetTaskSpecification().TaskId();
+  if (RayConfig::instance().centralized()) {
+    auto callback = [this, task, forwarded](ray::gcs::RedisGcsClient *client, const TaskID &id,
+             const TaskTableData &data) {
+      _SubmitTask(task, forwarded);
+    };
+    auto task_data = std::make_shared<TaskTableData>();
+    task_data->mutable_task()->mutable_task_spec()->CopyFrom(
+        task.GetTaskSpecification().GetMessage());
+    task_data->mutable_task()->mutable_task_execution_spec()->CopyFrom(
+        task.GetTaskExecutionSpec().GetMessage());
+    RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(JobID(task.GetTaskSpecification().JobId()),
+                                   task.GetTaskSpecification().TaskId(), task_data, callback));
+
+
+  } else {
+    // Add the task and its uncommitted lineage to the lineage cache.
+    if (forwarded) {
+      lineage_cache_.AddUncommittedLineage(task_id, uncommitted_lineage);
+    } else {
+      if (!lineage_cache_.CommitTask(task)) {
+        RAY_LOG(WARNING)
+            << "Task " << task_id
+            << " already committed to the GCS. This is most likely due to reconstruction.";
+      }
+    }
+    _SubmitTask(task, forwarded);
+  }
+}
+
+void NodeManager::_SubmitTask(const Task &task, bool forwarded) {
   stats::TaskCountReceived().Record(1);
   const TaskSpecification &spec = task.GetTaskSpecification();
   const TaskID &task_id = spec.TaskId();
@@ -1757,17 +1792,6 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
                      << " is already queued and will not be reconstructed. This is most "
                         "likely due to spurious reconstruction.";
     return;
-  }
-
-  // Add the task and its uncommitted lineage to the lineage cache.
-  if (forwarded) {
-    lineage_cache_.AddUncommittedLineage(task_id, uncommitted_lineage);
-  } else {
-    if (!lineage_cache_.CommitTask(task)) {
-      RAY_LOG(WARNING)
-          << "Task " << task_id
-          << " already committed to the GCS. This is most likely due to reconstruction.";
-    }
   }
 
   if (spec.IsActorTask()) {
