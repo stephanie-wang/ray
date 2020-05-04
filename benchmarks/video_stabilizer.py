@@ -34,7 +34,7 @@ class Decoder:
 @ray.remote(num_return_vals=2)
 def flow(prev_frame, frame, p0):
     with ray.profiling.profile("flow"):
-        if p0 is None:
+        if p0 is None or p0.shape[0] < 100:
             p0 = cv2.goodFeaturesToTrack(prev_frame,
                                          maxCorners=200,
                                          qualityLevel=0.01,
@@ -189,7 +189,7 @@ def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
 
         frame = decoder.decode.remote(start_frame + i + 1)
         transform, features = flow.remote(prev_frame, frame, features)
-        if i % 200 == 0:
+        if i and i % 200 == 0:
             features = None
         prev_frame = frame
         transforms.append(transform)
