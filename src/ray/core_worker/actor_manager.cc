@@ -82,7 +82,7 @@ void ActorManager::SetActorTaskSpec(const ActorID &actor_id, TaskSpecBuilder &bu
 void ActorManager::ResetActorTaskSpecCounter(TaskSpecification &spec) {
   absl::MutexLock lock(&mutex_);
   auto handle = actor_handles_.find(spec.ActorId());
-  if (handle == actor_handles_.end()) {
+  if (handle != actor_handles_.end()) {
     handle->second->ResetActorTaskSpecCounter(spec);
   }
 }
