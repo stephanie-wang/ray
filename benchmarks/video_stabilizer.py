@@ -5,15 +5,16 @@ import numpy as np
 import time
 import json
 import threading
+from collections import defaultdict
 from ray import profiling
 from ray.test_utils import SignalActor
 
 import ray
 import ray.cluster_utils
 
-YOLO_PATH = "/home/swang/darknet"
 
-MAX_FRAMES = 600.0
+MAX_FRAMES = 1200.0
+NUM_WORKERS_PER_VIDEO = 1
 
 
 @ray.remote(max_reconstructions=1)
@@ -135,35 +136,42 @@ class Viewer:
 
 @ray.remote(num_cpus=0, resources={"head": 1})
 class Sink:
-    def __init__(self, signal, num_frames, viewer):
+    def __init__(self, signal, viewer):
         self.signal = signal
-        self.num_frames = num_frames
-        self.latencies = []
+        self.num_frames_left = {}
+        self.latencies = defaultdict(list)
 
         self.viewer = viewer
         self.last_view = None
 
-    def send(self, frame_index, transform, timestamp):
-        with ray.profiling.profile("Sink.send"):
-            assert frame_index == len(self.latencies), frame_index
+    def set_expected_frames(self, video_index, num_frames):
+        self.num_frames_left[video_index] = num_frames
 
-            self.latencies.append(time.time() - timestamp)
-            if len(self.latencies) % 100 == 0:
-                print("Received", len(self.latencies))
-            if len(self.latencies) == self.num_frames:
+    def send(self, video_index, frame_index, transform, timestamp):
+        with ray.profiling.profile("Sink.send"):
+            assert frame_index == len(self.latencies[video_index]), frame_index
+
+            self.latencies[video_index].append(time.time() - timestamp)
+
+            self.num_frames_left[video_index] -= 1
+            if self.num_frames_left[video_index] % 100 == 0:
+                print("Expecting", self.num_frames_left[video_index], "more frames from video", video_index)
+
+            if self.num_frames_left[video_index] == 0:
                 print("DONE")
                 if self.last_view is not None:
                     ray.get(self.last_view)
                 self.signal.send.remote()
-            if self.viewer is not None:
+
+            if self.viewer is not None and video_index == 0:
                 self.last_view = self.viewer.send.remote(transform)
 
     def latencies(self):
-        return self.latencies
+        return [l for latencies in self.latencies.values() for l in latencies]
 
 
 @ray.remote(num_cpus=0, resources={"head": 1})
-def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
+def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_timestamp, fps, resource):
     radius = fps
 
     frame_timestamps = []
@@ -188,61 +196,67 @@ def process_chunk(decoder, sink, start_frame, num_frames, start_timestamp, fps):
         frame_timestamps.append(frame_timestamp)
 
         frame = decoder.decode.remote(start_frame + i + 1)
-        transform, features = flow.remote(prev_frame, frame, features)
+        transform, features = flow.options(resources={resource: 1}).remote(prev_frame, frame, features)
         if i and i % 200 == 0:
             features = None
         prev_frame = frame
         transforms.append(transform)
         if i > 0:
-            trajectory.append(cumsum.remote(trajectory[-1], transform))
+            trajectory.append(cumsum.options(resources={resource: 1}).remote(trajectory[-1], transform))
         else:
             for _ in range(radius + 1):
                 trajectory.append(transform)
 
         if len(trajectory) == 2 * radius + 1:
             midpoint = radius
-            final_transform = smooth.remote(transforms.pop(0), trajectory[midpoint], *trajectory)
+            final_transform = smooth.options(resources={resource: 1}).remote(transforms.pop(0), trajectory[midpoint], *trajectory)
             trajectory.pop(0)
 
-            sink.send.remote(next_to_send, final_transform, frame_timestamps.pop(0))
+            sink.send.remote(video_index, next_to_send, final_transform, frame_timestamps.pop(0))
             next_to_send += 1
 
     while next_to_send < num_frames - 1:
         trajectory.append(trajectory[-1])
         midpoint = radius
-        final_transform = smooth.remote(transforms.pop(0), trajectory[midpoint], *trajectory)
+        final_transform = smooth.options(resources={resource: 1}).remote(transforms.pop(0), trajectory[midpoint], *trajectory)
         trajectory.pop(0)
 
-        final = sink.send.remote(next_to_send, final_transform, frame_timestamps.pop(0))
+        final = sink.send.remote(video_index, next_to_send, final_transform, frame_timestamps.pop(0))
         next_to_send += 1
-    return final
+    return ray.get(final)
 
 
-def process_video(video_pathname, num_total_frames, output_file, view):
-    futures = []
-    start_frame = 0
-    v = cv2.VideoCapture(video_pathname)
-    fps = v.get(cv2.CAP_PROP_FPS)
-
-    start_timestamp = time.time() + 1
-    decoder = Decoder.remote(video_pathname, start_frame, start_timestamp)
+def process_videos(video_pathnames, output_filename, view, resources):
     signal = SignalActor.options(resources={"head": 1}).remote()
     if view:
-        viewer = Viewer.remote(video_pathname)
+        viewer = Viewer.remote(video_pathnames[0])
     else:
         viewer = None
-    sink = Sink.remote(signal, num_total_frames - 1, viewer)
+    sink = Sink.remote(signal, viewer)
 
-    diff = start_timestamp - time.time()
-    if diff > 0:
-        time.sleep(diff)
-    final = process_chunk.remote(decoder, sink, start_frame, int(num_total_frames), start_timestamp, int(fps))
-    ray.get(ray.get(final))
+    for i, video_pathname in enumerate(video_pathnames):
+        v = cv2.VideoCapture(video_pathname)
+        num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES))
+        print(video_pathname, "FRAMES", num_total_frames)
+        ray.get(sink.set_expected_frames.remote(i, num_total_frames - 1))
 
-    ray.get(signal.wait.remote())
+    start_timestamp = time.time() + 1
+    for i, video_pathname in enumerate(video_pathnames):
+        v = cv2.VideoCapture(video_pathname)
+        num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES))
+
+        fps = v.get(cv2.CAP_PROP_FPS)
+
+        resource = resources[i % len(resources)]
+        decoder = Decoder.options(resources={resource: 1}).remote(video_pathname, 0, start_timestamp)
+        process_chunk.remote(i, decoder, sink, 0, num_total_frames, start_timestamp, int(fps), resource)
+
+    for _ in range(len(video_pathnames)):
+        ray.get(signal.wait.remote())
+
     latencies = ray.get(sink.latencies.remote())
-    if output_file:
-        with open(output_file, 'w') as f:
+    if output_filename:
+        with open(output_filename, 'w') as f:
             for l in latencies:
                 f.write(str(l))
                 f.write("\n")
@@ -251,6 +265,7 @@ def process_video(video_pathname, num_total_frames, output_file, view):
             print(latency)
     print("Mean latency:", np.mean(latencies))
     print("Max latency:", np.max(latencies))
+
 
 
 def main(args):
@@ -290,19 +305,48 @@ def main(args):
         print("{} nodes found, waiting for nodes to join".format(len(nodes)))
         nodes = ray.nodes()
 
+    if not args.local:
+        import socket
+        ip_addr = socket.gethostbyname(socket.gethostname())
+        node_resource = "node:{}".format(ip_addr)
+
+        for node in nodes:
+            if node_resource in node["Resources"]:
+                if "head" not in node["Resources"]:
+                    ray.experimental.set_resource("head", 100, node["NodeID"])
+
+    for node in nodes:
+        for resource in node["Resources"]:
+            if resource.startswith("video"):
+                ray.experimental.set_resource(resource, 0, node["NodeID"])
+
+    video_resources = ["video:{}".format(i) for i in range(len(args.video_path))]
+    resources = video_resources[:]
+    node_index = 0
+    nodes = ray.nodes()
+    while video_resources:
+        video_resource = video_resources.pop(0)
+        assigned_nodes = []
+        while True:
+            node = nodes[node_index]
+            if "head" not in node["Resources"] and "CPU" in node["Resources"]:
+                assigned_nodes.append(node)
+            node_index += 1
+            node_index %= len(nodes)
+            if len(assigned_nodes) == NUM_WORKERS_PER_VIDEO:
+                break
+        for node in assigned_nodes:
+            print("Assigning", video_resource, "to node", node["NodeID"], node["Resources"])
+            ray.experimental.set_resource(video_resource, 100, node["NodeID"])
+
+
     print("All nodes joined")
     for node in nodes:
         print("{}:{}".format(node["NodeManagerAddress"], node["NodeManagerPort"]))
 
-    v = cv2.VideoCapture(args.video_path)
-    num_total_frames = min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES)
-    print("FRAMES", num_total_frames)
-
-    start = time.time()
-
     if args.local and args.failure:
         t = threading.Thread(
-            target=process_video, args=(args.video_path, num_total_frames, args.output, args.view))
+            target=process_videos, args=(args.video_path, args.output, args.view, resources))
         t.start()
 
         if args.failure:
@@ -312,16 +356,13 @@ def main(args):
             cluster.add_node(
                 object_store_memory=10**9,
                 num_cpus=2,
+                resources={"video:0": 100},
                 _internal_config=internal_config)
 
 
         t.join()
     else:
-        process_video(args.video_path, num_total_frames, args.output, args.view)
-
-    end = time.time()
-    print("Finished in", end - start)
-    print("Throughput:", num_total_frames / (end - start))
+        process_videos(args.video_path, args.output, args.view, resources)
 
     if args.timeline:
         ray.timeline(filename=args.timeline)
@@ -332,7 +373,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Run the video benchmark.")
 
     parser.add_argument("--num-nodes", required=True, type=int)
-    parser.add_argument("--video-path", required=True, type=str)
+    parser.add_argument("--video-path", required=True, nargs='+', type=str)
     parser.add_argument("--output", type=str)
     parser.add_argument("--centralized", action="store_true")
     parser.add_argument("--local", action="store_true")
