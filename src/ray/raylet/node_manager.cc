@@ -2872,8 +2872,11 @@ void NodeManager::ResubmitTask(const Task &task, const ObjectID &required_object
     }
   }
 
-  // Return early to prevent reconstruction.
-  return;
+  // Return early to prevent reconstruction for all tasks except actor
+  // creation.
+  if (!task.GetTaskSpecification().IsActorCreationTask()) {
+    return;
+  }
 
   // Driver tasks cannot be reconstructed. If this is a driver task, push an
   // error to the driver and do not resubmit it.
