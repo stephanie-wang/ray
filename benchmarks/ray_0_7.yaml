@@ -1,5 +1,5 @@
 # An unique identifier for the head node and workers of this cluster.
-cluster_name: osdi
+cluster_name: ray_0_7_osdi
 
 # The minimum number of workers nodes to launch in addition to the head
 # node. This number should be >= 0.
@@ -68,7 +68,8 @@ worker_nodes:
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
 file_mounts:
-    /home/ubuntu/ray: /home/swang/ray
+    /home/ubuntu/ray: /home/swang/ray-0-7
+    /home/ubuntu/ray/benchmarks: /home/swang/ray/benchmarks
     /home/ubuntu/husky.mp4: /home/swang/data/husky.mp4
     /home/ubuntu/pitbull.mkv: /home/swang/data/pitbull.mkv
 
@@ -79,14 +80,13 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
+    - pip uninstall -y ray
+    - source activate tensorflow_p36 && pip uninstall -y ray
     - echo set-window-option -g mode-mouse on > ~/.tmux.conf
     - echo 'termcapinfo xterm* ti@:te@' >> ~/.screenrc
     - '[ -z "$RAY_HEAD_IP" ] && echo "On driver node" || echo "On worker node"'
-    - echo 'export RAY_GCS_SERVICE_ENABLED=false' >> ~/.bashrc
-    # XXX: Uncomment below to build ray from source.
-    - cd ray/python; [ -z "$RAY_HEAD_IP" ] && source activate tensorflow_p36 && python setup.py develop || true
-    # XXX: Uncomment below to install ray 0.7.7.
-    #- source activate tensorflow_p36 && pip install -U ray==0.7.7
+    - echo 'export RAY_0_7=1' > ~/.bash_profile
+    - source activate tensorflow_p36 && pip install -U https://custom-wheels.s3-us-west-2.amazonaws.com/ray-0.7.7-cp36-cp36m-manylinux1_x86_64.whl
 
 # Custom commands that will be run on the head node after common setup.
 head_setup_commands:
@@ -99,15 +99,13 @@ worker_setup_commands: []
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
     - source activate tensorflow_p36 && ray stop
-    - source activate tensorflow_p36 && RAY_GCS_SERVICE_ENABLED=false ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"lineage_pinning_enabled\":1, \"free_objects_period_milliseconds\":-1, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000}"
-    # - source activate tensorflow_p36 && ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"free_objects_period_milliseconds\":-1, \"object_store_full_max_retries\":0, \"object_pinning_enabled\":1, \"distributed_ref_counting_enabled\":1}"
-    # - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"max_direct_call_object_size\":10737418240}"
-    # - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"centralized_owner\":1}"
+    - pkill -9 raylet || true
+    - pkill -9 plasma || true
+    - source activate tensorflow_p36 && ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
 
 # Command to start ray on worker nodes. You don't need to change this.
 worker_start_ray_commands:
     - source activate tensorflow_p36 && ray stop
-    - source activate tensorflow_p36 && RAY_GCS_SERVICE_ENABLED=false ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"lineage_pinning_enabled\":1, \"free_objects_period_milliseconds\":-1, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000}"
-    # - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"free_objects_period_milliseconds\":-1, \"object_store_full_max_retries\":0, \"object_pinning_enabled\":1, \"distributed_ref_counting_enabled\":1}"
-    # - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"max_direct_call_object_size\":10737418240}"
-    # - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"centralized_owner\":1}"
+    - pkill -9 raylet || true
+    - pkill -9 plasma || true
+    - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
