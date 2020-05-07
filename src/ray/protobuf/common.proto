@@ -161,6 +161,7 @@ message ActorCreationTaskSpec {
   bool is_detached = 6;
   // Whether the actor use async actor calls
   bool is_asyncio = 7;
+  uint64 num_reconstructions = 8;
 }
 
 // Task spec of an actor task.

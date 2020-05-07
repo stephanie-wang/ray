@@ -194,6 +194,11 @@ uint64_t TaskSpecification::MaxActorReconstructions() const {
   return message_->actor_creation_task_spec().max_actor_reconstructions();
 }
 
+uint64_t TaskSpecification::NumReconstructions() const {
+  RAY_CHECK(IsActorCreationTask());
+  return message_->actor_creation_task_spec().num_reconstructions();
+}
+
 std::vector<std::string> TaskSpecification::DynamicWorkerOptions() const {
   RAY_CHECK(IsActorCreationTask());
   return VectorFromProtobuf(

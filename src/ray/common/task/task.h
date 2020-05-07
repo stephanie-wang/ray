@@ -96,6 +96,12 @@ class Task {
   /// Returns the cancellation task callback, or nullptr.
   const CancelTaskCallback &OnCancellation() const { return on_cancellation_; }
 
+  void IncrementNumActorCreationReconstructions() {
+    if (task_spec_.IsActorCreationTask()) {
+      task_spec_.GetMutableMessage().mutable_actor_creation_task_spec()->set_num_reconstructions(task_spec_.NumReconstructions() + 1);
+    }
+  }
+
   std::string DebugString() const;
 
  private:
