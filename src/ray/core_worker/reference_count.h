@@ -42,11 +42,13 @@ class ReferenceCounter {
   ReferenceCounter(const rpc::WorkerAddress &rpc_address,
                    bool distributed_ref_counting_enabled = true,
                    bool lineage_pinning_enabled = false,
-                   rpc::ClientFactoryFn client_factory = nullptr)
+                   rpc::ClientFactoryFn client_factory = nullptr,
+                   const ReferenceRemovedCallback &on_object_lost = nullptr)
       : rpc_address_(rpc_address),
         distributed_ref_counting_enabled_(distributed_ref_counting_enabled),
         lineage_pinning_enabled_(lineage_pinning_enabled),
-        client_factory_(client_factory) {}
+        client_factory_(client_factory),
+        on_object_lost_(on_object_lost) {}
 
   ~ReferenceCounter() {}
 
@@ -625,6 +627,9 @@ class ReferenceCounter {
   /// Optional shutdown hook to call when all references have gone
   /// out of scope.
   std::function<void()> shutdown_hook_ GUARDED_BY(mutex_) = nullptr;
+
+  std::unordered_set<ClientID> dead_raylets_ GUARDED_BY(mutex_);
+  const ReferenceRemovedCallback on_object_lost_ = nullptr;
 };
 
 }  // namespace ray

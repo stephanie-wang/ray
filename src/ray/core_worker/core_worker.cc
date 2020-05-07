@@ -337,6 +337,14 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       RayConfig::instance().lineage_pinning_enabled(), [this](const rpc::Address &addr) {
         return std::shared_ptr<rpc::CoreWorkerClient>(
             new rpc::CoreWorkerClient(addr, *client_call_manager_));
+      },
+      [this](const ObjectID &object_id) {
+        io_service_.post([this, object_id]() {
+          memory_store_->Delete({object_id});
+          RAY_LOG(WARNING) << "Object " << object_id << " lost due to node failure";
+          // The lost object must have been owned by us.
+          RAY_CHECK_OK(object_recovery_manager_->RecoverObject(object_id));
+        });
       });
 
   if (options_.worker_type == ray::WorkerType::WORKER) {

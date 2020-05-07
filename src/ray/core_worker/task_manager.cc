@@ -80,7 +80,7 @@ void TaskManager::AddPendingTask(const TaskID &caller_id,
                                  const rpc::Address &caller_address,
                                  const TaskSpecification &spec,
                                  const std::string &call_site, int max_retries) {
-  RAY_LOG(DEBUG) << "Adding pending task " << spec.TaskId();
+  RAY_LOG(DEBUG) << "Adding pending task " << spec.DebugString();
 
   // Add references for the dependencies to the task.
   std::vector<ObjectID> task_deps;
