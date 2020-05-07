@@ -2177,7 +2177,7 @@ std::shared_ptr<ActorTableData> NodeManager::CreateActorTableDataFromCreationTas
     actor_info_ptr->set_max_reconstructions(task_spec.MaxActorReconstructions());
     // This is the first time that the actor has been created, so the number
     // of remaining reconstructions is the max.
-    actor_info_ptr->set_remaining_reconstructions(task_spec.MaxActorReconstructions());
+    actor_info_ptr->set_remaining_reconstructions(task_spec.MaxActorReconstructions() - task_spec.NumReconstructions());
     actor_info_ptr->set_is_direct_call(task_spec.IsDirectActorCreationCall());
     actor_info_ptr->set_is_detached(task_spec.IsDetachedActor());
     actor_info_ptr->mutable_owner_address()->CopyFrom(
@@ -2384,7 +2384,8 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id,
                                  const TaskTableData &task_data) {
         // The task was in the GCS task table. Use the stored task spec to
         // re-execute the task.
-        ResubmitTask(Task(task_data.task()), required_object_id);
+        Task task(task_data.task());
+        ResubmitTask(task, required_object_id);
       },
       /*failure_callback=*/
       [this, required_object_id](ray::gcs::RedisGcsClient *client,
@@ -2393,7 +2394,7 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id,
         // lineage cache.
         if (lineage_cache_.ContainsTask(task_id)) {
           // Use a copy of the cached task spec to re-execute the task.
-          const Task task = lineage_cache_.GetTaskOrDie(task_id);
+          Task task = lineage_cache_.GetTaskOrDie(task_id);
           ResubmitTask(task, required_object_id);
         } else {
           RAY_LOG(WARNING)
@@ -2408,7 +2409,7 @@ void NodeManager::HandleTaskReconstruction(const TaskID &task_id,
       }));
 }
 
-void NodeManager::ResubmitTask(const Task &task, const ObjectID &required_object_id) {
+void NodeManager::ResubmitTask(Task &task, const ObjectID &required_object_id) {
   RAY_LOG(DEBUG) << "Attempting to resubmit task "
                  << task.GetTaskSpecification().TaskId();
 

@@ -268,7 +268,7 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// \param task The task being resubmitted.
   /// \param required_object_id The object id that triggered the resubmission.
   /// \return Void.
-  void ResubmitTask(const Task &task, const ObjectID &required_object_id);
+  void ResubmitTask(Task &task, const ObjectID &required_object_id);
   /// Attempt to forward a task to a remote different node manager. If this
   /// fails, the task will be resubmit locally.
   ///
