@@ -7,7 +7,6 @@ import json
 import threading
 from collections import defaultdict
 from ray import profiling
-from ray.test_utils import SignalActor
 
 import ray
 import ray.cluster_utils
@@ -17,20 +16,40 @@ MAX_FRAMES = 1200.0
 NUM_WORKERS_PER_VIDEO = 1
 
 
+@ray.remote(num_cpus=0)
+class SignalActor:
+    def __init__(self, num_events):
+        self.ready_event = asyncio.Event()
+        self.num_events = num_events
+
+    def send(self):
+        assert self.num_events > 0
+        self.num_events -= 1
+        if self.num_events == 0:
+            self.ready_event.set()
+
+    async def wait(self, should_wait=True):
+        if should_wait:
+            await self.ready_event.wait()
+
+
 @ray.remote(max_reconstructions=1)
 class Decoder:
-    def __init__(self, filename, start_frame, start_timestamp):
+    def __init__(self, filename, start_frame):
         self.v = cv2.VideoCapture(filename)
         self.v.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        self.start_timestamp = start_timestamp
 
     def decode(self, frame):
         if frame != self.v.get(cv2.CAP_PROP_POS_FRAMES):
+            print("at", frame, "next", self.v.get(cv2.CAP_PROP_POS_FRAMES))
             self.v.set(cv2.CAP_PROP_POS_FRAMES, frame)
         grabbed, frame = self.v.read()
         assert grabbed
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
         return frame
+
+    def ready(self):
+        return
 
 @ray.remote(num_return_vals=2)
 def flow(prev_frame, frame, p0):
@@ -227,7 +246,7 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
 
 
 def process_videos(video_pathnames, output_filename, view, resources):
-    signal = SignalActor.options(resources={"head": 1}).remote()
+    signal = SignalActor.options(resources={"head": 1}).remote(len(video_pathnames))
     if view:
         viewer = Viewer.remote(video_pathnames[0])
     else:
@@ -240,19 +259,22 @@ def process_videos(video_pathnames, output_filename, view, resources):
         print(video_pathname, "FRAMES", num_total_frames)
         ray.get(sink.set_expected_frames.remote(i, num_total_frames - 1))
 
+    decoders = []
+    for i, video_pathname in enumerate(video_pathnames):
+        resource = resources[i % len(resources)]
+        decoder = Decoder.options(resources={resource: 1}).remote(video_pathname, 0)
+        decoders.append(decoder)
+    ray.get([decoder.ready.remote() for decoder in decoders])
+
     start_timestamp = time.time() + 1
     for i, video_pathname in enumerate(video_pathnames):
         v = cv2.VideoCapture(video_pathname)
         num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES))
-
         fps = v.get(cv2.CAP_PROP_FPS)
-
         resource = resources[i % len(resources)]
-        decoder = Decoder.options(resources={resource: 1}).remote(video_pathname, 0, start_timestamp)
-        process_chunk.remote(i, decoder, sink, 0, num_total_frames, start_timestamp, int(fps), resource)
+        process_chunk.remote(i, decoders[i], sink, 0, num_total_frames, start_timestamp, int(fps), resource)
 
-    for _ in range(len(video_pathnames)):
-        ray.get(signal.wait.remote())
+    ray.get(signal.wait.remote())
 
     latencies = ray.get(sink.latencies.remote())
     if output_filename:
@@ -324,12 +346,17 @@ def main(args):
     resources = video_resources[:]
     node_index = 0
     nodes = ray.nodes()
+    worker_ip = None
+    head_ip = None
+    worker_resource = None
     while video_resources:
         video_resource = video_resources.pop(0)
         assigned_nodes = []
         while True:
             node = nodes[node_index]
-            if "head" not in node["Resources"] and "CPU" in node["Resources"]:
+            if "head" in node["Resources"]:
+                head_ip = node["NodeManagerAddress"]
+            elif "CPU" in node["Resources"]:
                 assigned_nodes.append(node)
             node_index += 1
             node_index %= len(nodes)
@@ -338,29 +365,51 @@ def main(args):
         for node in assigned_nodes:
             print("Assigning", video_resource, "to node", node["NodeID"], node["Resources"])
             ray.experimental.set_resource(video_resource, 100, node["NodeID"])
-
+            worker_resource = video_resource
+            worker_ip = node["NodeManagerAddress"]
 
     print("All nodes joined")
     for node in nodes:
         print("{}:{}".format(node["NodeManagerAddress"], node["NodeManagerPort"]))
 
-    if args.local and args.failure:
-        t = threading.Thread(
-            target=process_videos, args=(args.video_path, args.output, args.view, resources))
-        t.start()
+    if args.failure:
+        if args.local:
+            t = threading.Thread(
+                target=process_videos, args=(args.video_path, args.output, args.view, resources))
+            t.start()
 
-        if args.failure:
-            time.sleep(10)
-            cluster.remove_node(cluster.list_all_nodes()[-1], allow_graceful=False)
+            if args.failure:
+                time.sleep(10)
+                cluster.remove_node(cluster.list_all_nodes()[-1], allow_graceful=False)
 
-            cluster.add_node(
-                object_store_memory=10**9,
-                num_cpus=2,
-                resources={"video:0": 100},
-                _internal_config=internal_config)
+                cluster.add_node(
+                    object_store_memory=10**9,
+                    num_cpus=2,
+                    resources={"video:0": 100},
+                    _internal_config=internal_config)
 
-
-        t.join()
+            t.join()
+        else:
+            print("Killing", worker_ip, "with resource", worker_resource, "after 10s")
+            def kill():
+                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < benchmarks/restart.sh {}'.format(worker_ip, head_ip)
+                print(cmd)
+                time.sleep(10)
+                os.system(cmd)
+                recovered = False
+                while not recovered:
+                    time.sleep(1)
+                    for node in ray.nodes():
+                        if node["NodeManagerAddress"] == worker_ip and "CPU" in node["Resources"] and worker_resource not in node["Resources"]:
+                            print(node)
+                            ray.experimental.set_resource(worker_resource, 100, node["NodeID"])
+                            recovered = True
+                            break
+                print("Restarted node at IP", worker_ip)
+            t = threading.Thread(target=kill)
+            t.start()
+            process_videos(args.video_path, args.output, args.view, resources)
+            t.join()
     else:
         process_videos(args.video_path, args.output, args.view, resources)
 
