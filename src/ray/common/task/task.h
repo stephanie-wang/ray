@@ -85,6 +85,12 @@ class Task {
   /// Returns the override spillback task callback, or nullptr.
   const SpillbackTaskCallback &OnSpillback() const { return on_spillback_; }
 
+  void IncrementNumActorCreationReconstructions() {
+    if (task_spec_.IsActorCreationTask()) {
+      task_spec_.GetMutableMessage().mutable_actor_creation_task_spec()->set_num_reconstructions(task_spec_.NumReconstructions() + 1);
+    }
+  }
+
   std::string DebugString() const;
 
  private:
