@@ -159,7 +159,8 @@ class RedisContext {
   ///
   /// \param args The vector of command args to pass to Redis.
   /// \return Status.
-  Status RunArgvAsync(const std::vector<std::string> &args);
+  Status RunArgvAsync(const std::vector<std::string> &args,
+                      const RedisCallback &redis_callback = nullptr);
 
   /// Subscribe to a specific Pub-Sub channel.
   ///

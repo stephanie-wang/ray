@@ -155,9 +155,10 @@ const std::unordered_set<TaskID> &Lineage::GetChildren(const TaskID &task_id) co
 LineageCache::LineageCache(const ClientID &client_id,
                            gcs::TableInterface<TaskID, TaskTableData> &task_storage,
                            gcs::PubsubInterface<TaskID> &task_pubsub,
-                           uint64_t max_lineage_size,
-                           bool disabled)
-    : client_id_(client_id), task_storage_(task_storage), task_pubsub_(task_pubsub),
+                           uint64_t max_lineage_size, bool disabled)
+    : client_id_(client_id),
+      task_storage_(task_storage),
+      task_pubsub_(task_pubsub),
       disabled_(disabled) {}
 
 /// A helper function to add some uncommitted lineage to the local cache.

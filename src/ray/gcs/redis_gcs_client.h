@@ -42,6 +42,34 @@ class RAY_EXPORT RedisGcsClient : public GcsClientInterface {
   /// Disconnect with GCS Service. Non-thread safe.
   void Disconnect();
 
+  std::shared_ptr<RedisContext> GetRedisContext(const std::string &id) {
+    static std::hash<std::string> index;
+    return shard_contexts_[index(id) % shard_contexts_.size()];
+  }
+
+  Status IncrementReference(const ObjectID &object_id, const StatusCallback &callback) {
+    auto context = GetRedisContext(object_id.Binary());
+    return context->RunArgvAsync({"INCR", object_id.Binary()},
+                                 [callback](std::shared_ptr<CallbackReply> reply) {
+                                   RAY_CHECK(reply->ReadAsInteger() > 0);
+                                   if (callback) {
+                                     callback(Status::OK());
+                                   }
+                                 });
+  }
+
+  Status DecrementReference(const ObjectID &object_id,
+                            const StatusCallback &callback = nullptr) {
+    auto context = GetRedisContext(object_id.Binary());
+    return context->RunArgvAsync({"DECR", object_id.Binary()},
+                                 [callback](std::shared_ptr<CallbackReply> reply) {
+                                   RAY_CHECK(reply->ReadAsInteger() >= 0);
+                                   if (callback) {
+                                     callback(Status::OK());
+                                   }
+                                 });
+  }
+
   // TODO: Some API for getting the error on the driver
   ObjectTable &object_table();
   raylet::TaskTable &raylet_task_table();
@@ -96,6 +124,7 @@ class RAY_EXPORT RedisGcsClient : public GcsClientInterface {
   std::unique_ptr<DynamicResourceTable> resource_table_;
   // The following contexts write to the data shard
   std::vector<std::shared_ptr<RedisContext>> shard_contexts_;
+  std::vector<std::shared_ptr<RedisContext>> object_table_shard_contexts_;
   std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_async_clients_;
   std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_subscribe_clients_;
   // The following context writes everything to the primary shard

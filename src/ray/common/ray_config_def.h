@@ -187,3 +187,6 @@ RAY_CONFIG(uint32_t, object_store_get_warn_per_num_attempts, 50)
 RAY_CONFIG(uint32_t, object_store_get_max_ids_to_print_in_warning, 20)
 
 RAY_CONFIG(bool, centralized, getenv("RAY_CENTRALIZED") != nullptr)
+
+/// If set to 0, will share all shards with other tables.
+RAY_CONFIG(uint32_t, object_table_shards, 0)

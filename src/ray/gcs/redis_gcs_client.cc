@@ -102,10 +102,14 @@ Status RedisGcsClient::Connect(boost::asio::io_service &io_service) {
     }
 
     for (size_t i = 0; i < addresses.size(); ++i) {
-      // Populate shard_contexts.
-      shard_contexts_.push_back(std::make_shared<RedisContext>(io_service));
-      RAY_CHECK_OK(shard_contexts_[i]->Connect(addresses[i], ports[i], /*sharding=*/true,
-                                               /*password=*/options_.password_));
+      auto shard_context = std::make_shared<RedisContext>(io_service);
+      RAY_CHECK_OK(shard_context->Connect(addresses[i], ports[i], /*sharding=*/true,
+                                          /*password=*/options_.password_));
+      if (i < RayConfig::instance().object_table_shards()) {
+        object_table_shard_contexts_.push_back(shard_context);
+      } else {
+        shard_contexts_.push_back(shard_context);
+      }
     }
   } else {
     shard_contexts_.push_back(std::make_shared<RedisContext>(io_service));
@@ -126,7 +130,15 @@ Status RedisGcsClient::Connect(boost::asio::io_service &io_service) {
   job_table_.reset(new JobTable({primary_context_}, this));
   heartbeat_batch_table_.reset(new HeartbeatBatchTable({primary_context_}, this));
   // Tables below would be sharded.
-  object_table_.reset(new ObjectTable(shard_contexts_, this));
+  RAY_LOG(INFO) << shard_contexts_.size() << " shared shards";
+  if (object_table_shard_contexts_.size() > 0) {
+    RAY_LOG(INFO) << object_table_shard_contexts_.size()
+                  << " dedicated shards for object table";
+    object_table_.reset(new ObjectTable(object_table_shard_contexts_, this));
+  } else {
+    RAY_LOG(INFO) << "Using shared shards for object table";
+    object_table_.reset(new ObjectTable(shard_contexts_, this));
+  }
   raylet_task_table_.reset(
       new raylet::TaskTable(shard_contexts_, this, options_.command_type_));
   task_reconstruction_log_.reset(new TaskReconstructionLog(shard_contexts_, this));

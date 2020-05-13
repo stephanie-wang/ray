@@ -94,15 +94,17 @@ NodeManager::NodeManager(boost::asio::io_service &io_service,
           [this](const TaskID &task_id, const ObjectID &required_object_id) {
             HandleTaskReconstruction(task_id, required_object_id);
           },
-          RayConfig::instance().centralized() ? 0 :
-          RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
+          RayConfig::instance().centralized()
+              ? 0
+              : RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->client_table().GetLocalClientId(), gcs_client_->task_lease_table(),
           object_directory_, gcs_client_->task_reconstruction_log()),
       task_dependency_manager_(
           object_manager, reconstruction_policy_, io_service,
           gcs_client_->client_table().GetLocalClientId(),
-          RayConfig::instance().centralized() ? 0 :
-          RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
+          RayConfig::instance().centralized()
+              ? 0
+              : RayConfig::instance().initial_reconstruction_timeout_milliseconds(),
           gcs_client_->task_lease_table()),
       lineage_cache_(gcs_client_->client_table().GetLocalClientId(),
                      gcs_client_->raylet_task_table(), gcs_client_->raylet_task_table(),
@@ -1753,28 +1755,41 @@ void NodeManager::SubmitTask(const Task &task, const Lineage &uncommitted_lineag
                              bool forwarded) {
   const TaskID &task_id = task.GetTaskSpecification().TaskId();
   if (RayConfig::instance().centralized()) {
-    auto callback = [this, task, forwarded](ray::gcs::RedisGcsClient *client, const TaskID &id,
-             const TaskTableData &data) {
-      _SubmitTask(task, forwarded);
+    auto callback = [this, task, forwarded](ray::gcs::RedisGcsClient *client,
+                                            const TaskID &id, const TaskTableData &data) {
+      const auto dependencies = task.GetDependencies();
+      if (dependencies.size() == 0) {
+        _SubmitTask(task, forwarded);
+      } else {
+        auto num_ids_left = std::make_shared<int>(dependencies.size());
+        for (auto &dependency : dependencies) {
+          RAY_CHECK_OK(gcs_client_->IncrementReference(
+              dependency, [this, task, forwarded, num_ids_left](const Status &status) {
+                *num_ids_left -= 1;
+                if (*num_ids_left == 0) {
+                  _SubmitTask(task, forwarded);
+                }
+              }));
+        }
+      }
     };
     auto task_data = std::make_shared<TaskTableData>();
     task_data->mutable_task()->mutable_task_spec()->CopyFrom(
         task.GetTaskSpecification().GetMessage());
     task_data->mutable_task()->mutable_task_execution_spec()->CopyFrom(
         task.GetTaskExecutionSpec().GetMessage());
-    RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(JobID(task.GetTaskSpecification().JobId()),
-                                   task.GetTaskSpecification().TaskId(), task_data, callback));
-
-
+    RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+        JobID(task.GetTaskSpecification().JobId()), task.GetTaskSpecification().TaskId(),
+        task_data, callback));
   } else {
     // Add the task and its uncommitted lineage to the lineage cache.
     if (forwarded) {
       lineage_cache_.AddUncommittedLineage(task_id, uncommitted_lineage);
     } else {
       if (!lineage_cache_.CommitTask(task)) {
-        RAY_LOG(WARNING)
-            << "Task " << task_id
-            << " already committed to the GCS. This is most likely due to reconstruction.";
+        RAY_LOG(WARNING) << "Task " << task_id
+                         << " already committed to the GCS. This is most likely due to "
+                            "reconstruction.";
       }
     }
     _SubmitTask(task, forwarded);
@@ -2135,6 +2150,12 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   // (See design_docs/task_states.rst for the state transition diagram.)
   Task task;
   RAY_CHECK(local_queues_.RemoveTask(task_id, &task));
+
+  if (RayConfig::instance().centralized()) {
+    for (auto &dependency : task.GetDependencies()) {
+      RAY_CHECK_OK(gcs_client_->DecrementReference(dependency));
+    }
+  }
 
   // Release task's resources. The worker's lifetime resources are still held.
   auto const &task_resources = worker.GetTaskResourceIds();
