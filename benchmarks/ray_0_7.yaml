@@ -101,11 +101,11 @@ head_start_ray_commands:
     - source activate tensorflow_p36 && ray stop
     - pkill -9 raylet || true
     - pkill -9 plasma || true
-    - source activate tensorflow_p36 && ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
+    - source activate tensorflow_p36 && ray start --head --redis-port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
 
 # Command to start ray on worker nodes. You don't need to change this.
 worker_start_ray_commands:
     - source activate tensorflow_p36 && ray stop
     - pkill -9 raylet || true
     - pkill -9 plasma || true
-    - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
+    - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"

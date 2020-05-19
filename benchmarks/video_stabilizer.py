@@ -12,7 +12,6 @@ import ray
 import ray.cluster_utils
 
 
-MAX_FRAMES = 1200.0
 NUM_WORKERS_PER_VIDEO = 1
 
 
@@ -31,6 +30,9 @@ class SignalActor:
     async def wait(self, should_wait=True):
         if should_wait:
             await self.ready_event.wait()
+
+    def ready(self):
+        return
 
 
 @ray.remote(max_reconstructions=1)
@@ -152,6 +154,9 @@ class Viewer:
         cv2.waitKey(1)
         #out.write(frame_out)
 
+    def ready(self):
+        return
+
 
 @ray.remote(num_cpus=0, resources={"head": 1})
 class Sink:
@@ -187,6 +192,9 @@ class Sink:
 
     def latencies(self):
         return [l for latencies in self.latencies.values() for l in latencies]
+
+    def ready(self):
+        return
 
 
 @ray.remote(num_cpus=0, resources={"head": 1})
@@ -245,17 +253,20 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
     return ray.get(final)
 
 
-def process_videos(video_pathnames, output_filename, view, resources):
+def process_videos(video_pathnames, output_filename, view, resources, max_frames):
     signal = SignalActor.options(resources={"head": 1}).remote(len(video_pathnames))
     if view:
         viewer = Viewer.remote(video_pathnames[0])
+        ray.get(viewer.ready.remote())
     else:
         viewer = None
+    ray.get(signal.ready.remote())
     sink = Sink.remote(signal, viewer)
+    ray.get(sink.ready.remote())
 
     for i, video_pathname in enumerate(video_pathnames):
         v = cv2.VideoCapture(video_pathname)
-        num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES))
+        num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), max_frames))
         print(video_pathname, "FRAMES", num_total_frames)
         ray.get(sink.set_expected_frames.remote(i, num_total_frames - 1))
 
@@ -269,7 +280,7 @@ def process_videos(video_pathnames, output_filename, view, resources):
     start_timestamp = time.time() + 1
     for i, video_pathname in enumerate(video_pathnames):
         v = cv2.VideoCapture(video_pathname)
-        num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), MAX_FRAMES))
+        num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), max_frames))
         fps = v.get(cv2.CAP_PROP_FPS)
         resource = resources[i % len(resources)]
         process_chunk.remote(i, decoders[i], sink, 0, num_total_frames, start_timestamp, int(fps), resource)
@@ -375,7 +386,7 @@ def main(args):
     if args.failure:
         if args.local:
             t = threading.Thread(
-                target=process_videos, args=(args.video_path, args.output, args.view, resources))
+                target=process_videos, args=(args.video_path, args.output, args.view, resources, args.max_frames))
             t.start()
 
             if args.failure:
@@ -392,7 +403,7 @@ def main(args):
         else:
             print("Killing", worker_ip, "with resource", worker_resource, "after 10s")
             def kill():
-                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < benchmarks/restart.sh {}'.format(worker_ip, head_ip)
+                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < ray/benchmarks/restart.sh {}'.format(worker_ip, head_ip)
                 print(cmd)
                 time.sleep(10)
                 os.system(cmd)
@@ -408,10 +419,10 @@ def main(args):
                 print("Restarted node at IP", worker_ip)
             t = threading.Thread(target=kill)
             t.start()
-            process_videos(args.video_path, args.output, args.view, resources)
+            process_videos(args.video_path, args.output, args.view, resources, args.max_frames)
             t.join()
     else:
-        process_videos(args.video_path, args.output, args.view, resources)
+        process_videos(args.video_path, args.output, args.view, resources, args.max_frames)
 
     if args.timeline:
         ray.timeline(filename=args.timeline)
@@ -429,5 +440,6 @@ if __name__ == "__main__":
     parser.add_argument("--failure", action="store_true")
     parser.add_argument("--timeline", default=None, type=str)
     parser.add_argument("--view", action="store_true")
+    parser.add_argument("--max-frames", default=600, type=int)
     args = parser.parse_args()
     main(args)
