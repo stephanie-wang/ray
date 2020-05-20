@@ -176,6 +176,12 @@ Status RedisGcsClient::Attach(boost::asio::io_service &io_service) {
     shard_asio_subscribe_clients_.emplace_back(
         new RedisAsioClient(io_service, context->subscribe_context()));
   }
+  for (std::shared_ptr<RedisContext> context : object_table_shard_contexts_) {
+    shard_asio_async_clients_.emplace_back(
+        new RedisAsioClient(io_service, context->async_context()));
+    shard_asio_subscribe_clients_.emplace_back(
+        new RedisAsioClient(io_service, context->subscribe_context()));
+  }
   asio_async_auxiliary_client_.reset(
       new RedisAsioClient(io_service, primary_context_->async_context()));
   asio_subscribe_auxiliary_client_.reset(
