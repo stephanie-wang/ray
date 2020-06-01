@@ -27,7 +27,7 @@ def small_dep():
 
 @ray.remote(resources={RESOURCE: 1})
 def large_dep():
-    return np.zeros(1 * 1024 * 1024, dtype=np.uint8)  # 1 MiB
+    return np.zeros(10 * 1024 * 1024, dtype=np.uint8)  # 10 MiB
 
 def run(delay_ms, large, num_rounds):
     f = small_dep
@@ -56,6 +56,9 @@ def main(args):
             "object_manager_repeated_push_delay_ms": 1000,
             "task_retry_delay_ms": 100,
         }
+        if args.by_value:
+            config["max_direct_call_object_size"] = 10737418240
+            config["max_grpc_message_size"] = -1
 
 
     num_nodes = 2
@@ -133,6 +136,8 @@ def main(args):
             def kill():
                 if args.v07:
                     script = "benchmarks/restart_0_7.sh"
+                elif args.by_value:
+                    script = "benchmarks/restart_by_value.sh"
                 else:
                     script = "benchmarks/restart.sh"
                 cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < {} {}'.format(worker_ip, script, head_ip)
@@ -163,13 +168,18 @@ def main(args):
             pass
 
         with open(args.output, 'a+') as csvfile:
-            fieldnames = ['ownership', 'large', 'delay_ms', 'duration', 'failure']
+            fieldnames = ['system', 'large', 'delay_ms', 'duration', 'failure']
             writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+            system = "ownership"
+            if args.v07:
+                system = "leases"
+            elif args.by_value:
+                system = "by_value"
 
             if not file_exists:
                 writer.writeheader()
             writer.writerow({
-                'ownership': not args.v07,
+                'system': system,
                 'large': args.large,
                 'delay_ms': args.delay_ms,
                 'duration': duration,
@@ -189,6 +199,7 @@ if __name__ == "__main__":
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--timeline", type=str, default=None)
     parser.add_argument("--v07", action="store_true")
+    parser.add_argument("--by-value", action="store_true")
     parser.add_argument("--delay-ms", required=True, type=int)
     parser.add_argument("--output", type=str, default=None)
     args = parser.parse_args()
