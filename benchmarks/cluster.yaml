@@ -52,7 +52,7 @@ auth:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 head_node:
-    InstanceType: m5.16xlarge
+    InstanceType: m5.xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
     # Additional options in the boto docs.

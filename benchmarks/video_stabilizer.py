@@ -214,7 +214,7 @@ class Sink:
         return
 
 
-@ray.remote(num_cpus=0, resources={"head": 1})
+@ray.remote(num_cpus=0)
 def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_timestamp, fps, resource, v07):
     radius = fps
 
@@ -276,7 +276,7 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
     return ray.get(final)
 
 
-def process_videos(video_pathnames, output_filename, view, resources, max_frames, num_sinks, v07):
+def process_videos(video_pathnames, output_filename, view, resources, owner_resources, max_frames, num_sinks, v07):
     if v07:
         signal = SignalActorV07.remote()
     else:
@@ -316,8 +316,12 @@ def process_videos(video_pathnames, output_filename, view, resources, max_frames
         v = cv2.VideoCapture(video_pathname)
         num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), max_frames))
         fps = v.get(cv2.CAP_PROP_FPS)
-        resource = resources[i % len(resources)]
-        process_chunk.remote(i, decoders[i], sinks[i % len(sinks)], 0, num_total_frames, start_timestamp, int(fps), resource, v07)
+        owner_resource = owner_resources[i % len(owner_resources)]
+        worker_resource = resources[i % len(resources)]
+        print("Placing owner of video", i, "on node with resource", owner_resource)
+        process_chunk.options(resources={owner_resource: 1}).remote(i, decoders[i],
+                sinks[i % len(sinks)], 0, num_total_frames, start_timestamp,
+                int(fps), worker_resource, v07)
 
     if v07:
         ready = 0
@@ -343,6 +347,13 @@ def process_videos(video_pathnames, output_filename, view, resources, max_frames
 
 
 def main(args):
+    video_resources = ["video:{}".format(i) for i in range(len(args.video_path))]
+    num_owner_nodes = len(args.video_path) // args.num_owners_per_node
+    if len(args.video_path) % args.num_owners_per_node:
+        num_owner_nodes += 1
+    owner_resources = ["video_owner:{}".format(i) for i in range(num_owner_nodes)]
+    assert args.num_nodes >= len(args.video_path) + num_owner_nodes, ("Requested {} nodes, need {}".format(args.num_nodes, len(video_resources) + num_owner_nodes))
+
     if args.local:
         config = {
             "num_heartbeats_timeout": 10,
@@ -370,11 +381,11 @@ def main(args):
 
     ray.init(address=address)
 
-    nodes = ray.nodes()
+    nodes = [node for node in ray.nodes() if node["Alive"]]
     while len(nodes) < args.num_nodes + 1:
         time.sleep(1)
         print("{} nodes found, waiting for nodes to join".format(len(nodes)))
-        nodes = ray.nodes()
+        nodes = [node for node in ray.nodes() if node["Alive"]]
 
     if not args.local:
         import socket
@@ -391,40 +402,35 @@ def main(args):
             if resource.startswith("video"):
                 ray.experimental.set_resource(resource, 0, node["NodeID"])
 
-    video_resources = ["video:{}".format(i) for i in range(len(args.video_path))]
-    resources = video_resources[:]
-    node_index = 0
-    nodes = ray.nodes()
-    worker_ip = None
-    head_ip = None
-    worker_resource = None
-    while video_resources:
-        video_resource = video_resources.pop(0)
-        assigned_nodes = []
-        while True:
-            node = nodes[node_index]
-            if "head" in node["Resources"]:
-                head_ip = node["NodeManagerAddress"]
-            elif "CPU" in node["Resources"]:
-                assigned_nodes.append(node)
-            node_index += 1
-            node_index %= len(nodes)
-            if len(assigned_nodes) == NUM_WORKERS_PER_VIDEO:
-                break
-        for node in assigned_nodes:
-            print("Assigning", video_resource, "to node", node["NodeID"], node["Resources"])
-            ray.experimental.set_resource(video_resource, 100, node["NodeID"])
-            worker_resource = video_resource
-            worker_ip = node["NodeManagerAddress"]
-
+    nodes = [node for node in ray.nodes() if node["Alive"]]
     print("All nodes joined")
     for node in nodes:
         print("{}:{}".format(node["NodeManagerAddress"], node["NodeManagerPort"]))
 
+    head_node = [node for node in nodes if "head" in node["Resources"]]
+    assert len(head_node) == 1
+    head_ip = head_node[0]["NodeManagerAddress"]
+    nodes.remove(head_node[0])
+    assert len(nodes) >= len(video_resources) + num_owner_nodes, ("Found {} nodes, need {}".format(len(nodes), len(video_resources) + num_owner_nodes))
+
+    worker_ip = None
+    worker_resource = None
+    node_index = 0
+    for node, resource in zip(nodes, owner_resources + video_resources):
+        if "CPU" not in node["Resources"]:
+            continue
+
+        print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
+        ray.experimental.set_resource(resource, 100, node["NodeID"])
+        worker_resource = resource
+        worker_ip = node["NodeManagerAddress"]
+
     if args.failure:
         if args.local:
             t = threading.Thread(
-                target=process_videos, args=(args.video_path, args.output, args.view, resources, args.max_frames, args.num_sinks, args.v07))
+                target=process_videos, args=(args.video_path, args.output,
+                    args.view, video_resources, owner_resources,
+                    args.max_frames, args.num_sinks, args.v07))
             t.start()
 
             if args.failure:
@@ -457,10 +463,14 @@ def main(args):
                 print("Restarted node at IP", worker_ip)
             t = threading.Thread(target=kill)
             t.start()
-            process_videos(args.video_path, args.output, args.view, resources, args.max_frames, args.num_sinks, args.v07)
+            process_videos(args.video_path, args.output, args.view,
+                    video_resources, owner_resources, args.max_frames,
+                    args.num_sinks, args.v07)
             t.join()
     else:
-        process_videos(args.video_path, args.output, args.view, resources, args.max_frames, args.num_sinks, args.v07)
+        process_videos(args.video_path, args.output, args.view,
+                video_resources, owner_resources, args.max_frames,
+                args.num_sinks, args.v07)
 
     if args.timeline:
         ray.timeline(filename=args.timeline)
@@ -480,5 +490,6 @@ if __name__ == "__main__":
     parser.add_argument("--view", action="store_true")
     parser.add_argument("--max-frames", default=600, type=int)
     parser.add_argument("--num-sinks", default=1, type=int)
+    parser.add_argument("--num-owners-per-node", default=1, type=int)
     args = parser.parse_args()
     main(args)
