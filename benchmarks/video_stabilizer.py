@@ -171,7 +171,7 @@ class Viewer:
         return
 
 
-@ray.remote(num_cpus=0, resources={"head": 1})
+@ray.remote(num_cpus=0)
 class Sink:
     def __init__(self, signal, viewer):
         self.signal = signal
@@ -276,7 +276,8 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
     return ray.get(final)
 
 
-def process_videos(video_pathnames, output_filename, view, resources, owner_resources, max_frames, num_sinks, v07):
+def process_videos(video_pathnames, output_filename, view, resources,
+        owner_resources, sink_resources, max_frames, num_sinks, v07):
     if v07:
         signal = SignalActorV07.remote()
     else:
@@ -288,7 +289,10 @@ def process_videos(video_pathnames, output_filename, view, resources, owner_reso
     else:
         viewer = None
     ray.get(signal.ready.remote())
-    sinks = [Sink.remote(signal, viewer) for _ in range(num_sinks)]
+
+    sinks = [Sink.options(resources={
+        sink_resources[i % len(sink_resources)]: 1
+        }).remote(signal, viewer) for i in range(num_sinks)]
     ray.get([sink.ready.remote() for sink in sinks])
 
     for i, video_pathname in enumerate(video_pathnames):
@@ -348,11 +352,19 @@ def process_videos(video_pathnames, output_filename, view, resources, owner_reso
 
 def main(args):
     video_resources = ["video:{}".format(i) for i in range(len(args.video_path))]
+
     num_owner_nodes = len(args.video_path) // args.num_owners_per_node
     if len(args.video_path) % args.num_owners_per_node:
         num_owner_nodes += 1
     owner_resources = ["video_owner:{}".format(i) for i in range(num_owner_nodes)]
-    assert args.num_nodes >= len(args.video_path) + num_owner_nodes, ("Requested {} nodes, need {}".format(args.num_nodes, len(video_resources) + num_owner_nodes))
+
+    num_sink_nodes = len(args.video_path) // args.num_sinks_per_node
+    if len(args.video_path) % args.num_sinks_per_node:
+        num_sink_nodes += 1
+    sink_resources = ["video_sink:{}".format(i) for i in range(num_sink_nodes)]
+
+    num_required_nodes = len(args.video_path) + num_owner_nodes + num_sink_nodes
+    assert args.num_nodes >= num_required_nodes, ("Requested {} nodes, need {}".format(args.num_nodes, num_required_nodes))
 
     if args.local:
         config = {
@@ -416,7 +428,7 @@ def main(args):
     worker_ip = None
     worker_resource = None
     node_index = 0
-    for node, resource in zip(nodes, owner_resources + video_resources):
+    for node, resource in zip(nodes, sink_resources + owner_resources + video_resources):
         if "CPU" not in node["Resources"]:
             continue
 
@@ -429,7 +441,7 @@ def main(args):
         if args.local:
             t = threading.Thread(
                 target=process_videos, args=(args.video_path, args.output,
-                    args.view, video_resources, owner_resources,
+                    args.view, video_resources, owner_resources, sink_resources,
                     args.max_frames, args.num_sinks, args.v07))
             t.start()
 
@@ -464,12 +476,12 @@ def main(args):
             t = threading.Thread(target=kill)
             t.start()
             process_videos(args.video_path, args.output, args.view,
-                    video_resources, owner_resources, args.max_frames,
+                    video_resources, owner_resources, sink_resources, args.max_frames,
                     args.num_sinks, args.v07)
             t.join()
     else:
         process_videos(args.video_path, args.output, args.view,
-                video_resources, owner_resources, args.max_frames,
+                video_resources, owner_resources, sink_resources, args.max_frames,
                 args.num_sinks, args.v07)
 
     if args.timeline:
@@ -490,6 +502,7 @@ if __name__ == "__main__":
     parser.add_argument("--view", action="store_true")
     parser.add_argument("--max-frames", default=600, type=int)
     parser.add_argument("--num-sinks", default=1, type=int)
+    parser.add_argument("--num-sinks-per-node", default=1, type=int)
     parser.add_argument("--num-owners-per-node", default=1, type=int)
     args = parser.parse_args()
     main(args)
