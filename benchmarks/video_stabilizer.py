@@ -15,7 +15,7 @@ import ray.cluster_utils
 NUM_WORKERS_PER_VIDEO = 1
 
 
-@ray.remote(num_cpus=0)
+@ray.remote(num_cpus=0, resources={"head": 1})
 class SignalActor:
     def __init__(self, num_events):
         self.ready_event = asyncio.Event()
@@ -34,8 +34,21 @@ class SignalActor:
     def ready(self):
         return
 
+@ray.remote(num_cpus=0, resources={"head": 1})
+class SignalActorV07:
+    def __init__(self):
+        self.num_signals = 0
 
-@ray.remote(max_reconstructions=1)
+    def send(self):
+        self.num_signals += 1
+
+    def wait(self):
+        return self.num_signals
+
+    def ready(self):
+        return
+
+
 class Decoder:
     def __init__(self, filename, start_frame):
         self.v = cv2.VideoCapture(filename)
@@ -53,7 +66,7 @@ class Decoder:
     def ready(self):
         return
 
-@ray.remote(num_return_vals=2)
+@ray.remote
 def flow(prev_frame, frame, p0):
     with ray.profiling.profile("flow"):
         if p0 is None or p0.shape[0] < 100:
@@ -191,14 +204,18 @@ class Sink:
                 self.last_view = self.viewer.send.remote(transform)
 
     def latencies(self):
-        return [l for latencies in self.latencies.values() for l in latencies]
+        latencies = []
+        for video in self.latencies.values():
+            for i, l in enumerate(video):
+                latencies.append((i, l))
+        return latencies
 
     def ready(self):
         return
 
 
 @ray.remote(num_cpus=0, resources={"head": 1})
-def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_timestamp, fps, resource):
+def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_timestamp, fps, resource, v07):
     radius = fps
 
     frame_timestamps = []
@@ -223,7 +240,13 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
         frame_timestamps.append(frame_timestamp)
 
         frame = decoder.decode.remote(start_frame + i + 1)
-        transform, features = flow.options(resources={resource: 1}).remote(prev_frame, frame, features)
+        flow_options = {
+                "num_return_vals": 2,
+                } if v07 else {
+                "num_returns": 2,
+                }
+        flow_options["resources"] = {resource: 1}
+        transform, features = flow.options(**flow_options).remote(prev_frame, frame, features)
         if i and i % 200 == 0:
             features = None
         prev_frame = frame
@@ -253,27 +276,38 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
     return ray.get(final)
 
 
-def process_videos(video_pathnames, output_filename, view, resources, max_frames):
-    signal = SignalActor.options(resources={"head": 1}).remote(len(video_pathnames))
+def process_videos(video_pathnames, output_filename, view, resources, max_frames, num_sinks, v07):
+    if v07:
+        signal = SignalActorV07.remote()
+    else:
+        signal = SignalActor.remote(len(video_pathnames))
+
     if view:
         viewer = Viewer.remote(video_pathnames[0])
         ray.get(viewer.ready.remote())
     else:
         viewer = None
     ray.get(signal.ready.remote())
-    sink = Sink.remote(signal, viewer)
-    ray.get(sink.ready.remote())
+    sinks = [Sink.remote(signal, viewer) for _ in range(num_sinks)]
+    ray.get([sink.ready.remote() for sink in sinks])
 
     for i, video_pathname in enumerate(video_pathnames):
         v = cv2.VideoCapture(video_pathname)
         num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), max_frames))
         print(video_pathname, "FRAMES", num_total_frames)
-        ray.get(sink.set_expected_frames.remote(i, num_total_frames - 1))
+        ray.get(sinks[i % len(sinks)].set_expected_frames.remote(i, num_total_frames - 1))
 
     decoders = []
+    decoder_cls_args = {
+            "max_reconstructions": 100,
+            } if v07 else {
+            "max_restarts": -1,
+            "max_task_retries": -1,
+            }
+    decoder_cls = ray.remote(**decoder_cls_args)(Decoder)
     for i, video_pathname in enumerate(video_pathnames):
         resource = resources[i % len(resources)]
-        decoder = Decoder.options(resources={resource: 1}).remote(video_pathname, 0)
+        decoder = decoder_cls.options(resources={resource: 1}).remote(video_pathname, 0)
         decoders.append(decoder)
     ray.get([decoder.ready.remote() for decoder in decoders])
 
@@ -283,54 +317,58 @@ def process_videos(video_pathnames, output_filename, view, resources, max_frames
         num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), max_frames))
         fps = v.get(cv2.CAP_PROP_FPS)
         resource = resources[i % len(resources)]
-        process_chunk.remote(i, decoders[i], sink, 0, num_total_frames, start_timestamp, int(fps), resource)
+        process_chunk.remote(i, decoders[i], sinks[i % len(sinks)], 0, num_total_frames, start_timestamp, int(fps), resource, v07)
 
-    ray.get(signal.wait.remote())
+    if v07:
+        ready = 0
+        while ready != len(video_pathnames):
+            time.sleep(1)
+            ready = ray.get(signal.wait.remote())
+    else:
+        ray.get(signal.wait.remote())
 
-    latencies = ray.get(sink.latencies.remote())
+    latencies = []
+    for sink in sinks:
+        latencies += ray.get(sink.latencies.remote())
     if output_filename:
         with open(output_filename, 'w') as f:
-            for l in latencies:
-                f.write(str(l))
-                f.write("\n")
+            for t, l in latencies:
+                f.write("{} {}\n".format(t, l))
     else:
         for latency in latencies:
             print(latency)
+    latencies = [l for _, l in latencies]
     print("Mean latency:", np.mean(latencies))
     print("Max latency:", np.max(latencies))
 
 
-
 def main(args):
-    config = {
-        "initial_reconstruction_timeout_milliseconds": 100,
-        "num_heartbeats_timeout": 10,
-        "lineage_pinning_enabled": 1,
-        "free_objects_period_milliseconds": -1,
-        "object_manager_repeated_push_delay_ms": 1000,
-        "task_retry_delay_ms": 100,
-    }
-    if args.centralized:
-        config["centralized_owner"] = 1
-
-    internal_config = json.dumps(config)
     if args.local:
+        config = {
+            "num_heartbeats_timeout": 10,
+            "lineage_pinning_enabled": 1,
+            "free_objects_period_milliseconds": -1,
+            "object_manager_repeated_push_delay_ms": 1000,
+            "task_retry_delay_ms": 100,
+        }
+        if args.centralized:
+            config["centralized_owner"] = 1
         cluster = ray.cluster_utils.Cluster()
         cluster.add_node(
-            num_cpus=0, _internal_config=internal_config, include_webui=False,
+            num_cpus=0, _system_config=config, include_webui=False,
             resources={"head": 100})
         num_nodes = args.num_nodes
         for _ in range(num_nodes):
             cluster.add_node(
                 object_store_memory=10**9,
                 num_cpus=2,
-                _internal_config=internal_config)
+                _internal_config=system_config)
         cluster.wait_for_nodes()
         address = cluster.address
     else:
         address = "auto"
 
-    ray.init(address=address, _internal_config=internal_config, redis_password='5241590000000000')
+    ray.init(address=address)
 
     nodes = ray.nodes()
     while len(nodes) < args.num_nodes + 1:
@@ -386,7 +424,7 @@ def main(args):
     if args.failure:
         if args.local:
             t = threading.Thread(
-                target=process_videos, args=(args.video_path, args.output, args.view, resources, args.max_frames))
+                target=process_videos, args=(args.video_path, args.output, args.view, resources, args.max_frames, args.num_sinks, args.v07))
             t.start()
 
             if args.failure:
@@ -397,13 +435,13 @@ def main(args):
                     object_store_memory=10**9,
                     num_cpus=2,
                     resources={"video:0": 100},
-                    _internal_config=internal_config)
+                    _internal_config=system_config)
 
             t.join()
         else:
             print("Killing", worker_ip, "with resource", worker_resource, "after 10s")
             def kill():
-                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < ray/benchmarks/restart.sh {}'.format(worker_ip, head_ip)
+                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < /home/ubuntu/video-processing/{} {}'.format("restart_0_7.sh" if args.v07 else "restart.sh", worker_ip, head_ip)
                 print(cmd)
                 time.sleep(10)
                 os.system(cmd)
@@ -419,10 +457,10 @@ def main(args):
                 print("Restarted node at IP", worker_ip)
             t = threading.Thread(target=kill)
             t.start()
-            process_videos(args.video_path, args.output, args.view, resources, args.max_frames)
+            process_videos(args.video_path, args.output, args.view, resources, args.max_frames, args.num_sinks, args.v07)
             t.join()
     else:
-        process_videos(args.video_path, args.output, args.view, resources, args.max_frames)
+        process_videos(args.video_path, args.output, args.view, resources, args.max_frames, args.num_sinks, args.v07)
 
     if args.timeline:
         ray.timeline(filename=args.timeline)
@@ -435,11 +473,12 @@ if __name__ == "__main__":
     parser.add_argument("--num-nodes", required=True, type=int)
     parser.add_argument("--video-path", required=True, nargs='+', type=str)
     parser.add_argument("--output", type=str)
-    parser.add_argument("--centralized", action="store_true")
+    parser.add_argument("--v07", action="store_true")
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--failure", action="store_true")
     parser.add_argument("--timeline", default=None, type=str)
     parser.add_argument("--view", action="store_true")
     parser.add_argument("--max-frames", default=600, type=int)
+    parser.add_argument("--num-sinks", default=1, type=int)
     args = parser.parse_args()
     main(args)

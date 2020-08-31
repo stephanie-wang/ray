@@ -52,7 +52,7 @@ auth:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 head_node:
-    InstanceType: m4.16xlarge
+    InstanceType: m5.16xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
     # Additional options in the boto docs.
@@ -62,13 +62,13 @@ head_node:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 worker_nodes:
-    InstanceType: m4.xlarge
+    InstanceType: m5.xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
 file_mounts:
-    /home/ubuntu/ray: /home/swang/ray
+    /home/ubuntu/ray/benchmarks: /home/swang/ray/benchmarks
     /home/ubuntu/husky.mp4: /home/swang/data/husky.mp4
     /home/ubuntu/pitbull.mkv: /home/swang/data/pitbull.mkv
 
@@ -79,14 +79,8 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-    - echo set-window-option -g mode-mouse on > ~/.tmux.conf
-    - echo 'termcapinfo xterm* ti@:te@' >> ~/.screenrc
-    - '[ -z "$RAY_HEAD_IP" ] && echo "On driver node" || echo "On worker node"'
-    - echo 'export RAY_GCS_SERVICE_ENABLED=false' >> ~/.bashrc
-    # XXX: Uncomment below to build ray from source.
-    - cd ray/python; [ -z "$RAY_HEAD_IP" ] && source activate tensorflow_p36 && python setup.py develop || true
-    # XXX: Uncomment below to install ray 0.7.7.
-    #- source activate tensorflow_p36 && pip install -U ray==0.7.7
+    - echo 'export PATH="$HOME/anaconda3/envs/tensorflow_p36/bin:$PATH"' >> ~/.bashrc
+    - pip install -U https://s3-us-west-2.amazonaws.com/ray-wheels/master/8c753818abac4d0ab6205b1cb13ef7b54f752237/ray-0.9.0.dev0-cp36-cp36m-manylinux1_x86_64.whl
 
 # Custom commands that will be run on the head node after common setup.
 head_setup_commands:
@@ -98,16 +92,15 @@ worker_setup_commands: []
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-    - source activate tensorflow_p36 && ray stop
-    - source activate tensorflow_p36 && RAY_GCS_SERVICE_ENABLED=false ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"lineage_pinning_enabled\":1, \"free_objects_period_milliseconds\":-1, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000}"
-    # - source activate tensorflow_p36 && ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"free_objects_period_milliseconds\":-1, \"object_store_full_max_retries\":0, \"object_pinning_enabled\":1, \"distributed_ref_counting_enabled\":1}"
-    # - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"max_direct_call_object_size\":10737418240}"
-    # - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"centralized_owner\":1}"
+    - ray stop --force
+    - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml
+      --num-cpus=0 --enable-object-reconstruction --system-config='"{\"record_ref_creation_sites\":0,
+      \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000, \"enable_timeline\":false}"'
 
 # Command to start ray on worker nodes. You don't need to change this.
 worker_start_ray_commands:
-    - source activate tensorflow_p36 && ray stop
-    - source activate tensorflow_p36 && RAY_GCS_SERVICE_ENABLED=false ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"lineage_pinning_enabled\":1, \"free_objects_period_milliseconds\":-1, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000}"
-    # - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"free_objects_period_milliseconds\":-1, \"object_store_full_max_retries\":0, \"object_pinning_enabled\":1, \"distributed_ref_counting_enabled\":1}"
-    # - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"max_direct_call_object_size\":10737418240}"
-    # - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"centralized_owner\":1}"
+    - ray stop --force
+    - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076
+
+cluster_synced_files: []
+file_mounts_sync_continuously: false

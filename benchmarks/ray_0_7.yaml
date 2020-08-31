@@ -52,7 +52,7 @@ auth:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 head_node:
-    InstanceType: m4.16xlarge
+    InstanceType: m5.16xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
     # Additional options in the boto docs.
@@ -62,13 +62,12 @@ head_node:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 worker_nodes:
-    InstanceType: m4.xlarge
+    InstanceType: m5.xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
 file_mounts:
-    /home/ubuntu/ray: /home/swang/ray-0-7
     /home/ubuntu/ray/benchmarks: /home/swang/ray/benchmarks
     /home/ubuntu/husky.mp4: /home/swang/data/husky.mp4
     /home/ubuntu/pitbull.mkv: /home/swang/data/pitbull.mkv
@@ -80,12 +79,7 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-    - pip uninstall -y ray
-    - source activate tensorflow_p36 && pip uninstall -y ray
-    - echo set-window-option -g mode-mouse on > ~/.tmux.conf
-    - echo 'termcapinfo xterm* ti@:te@' >> ~/.screenrc
-    - '[ -z "$RAY_HEAD_IP" ] && echo "On driver node" || echo "On worker node"'
-    - echo 'export RAY_0_7=1' > ~/.bash_profile
+    - echo 'export PATH="$HOME/anaconda3/envs/tensorflow_p36/bin:$PATH"' >> ~/.bashrc
     - source activate tensorflow_p36 && pip install -U https://custom-wheels.s3-us-west-2.amazonaws.com/ray-0.7.7-cp36-cp36m-manylinux1_x86_64.whl
 
 # Custom commands that will be run on the head node after common setup.
