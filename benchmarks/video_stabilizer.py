@@ -7,6 +7,9 @@ import json
 import threading
 from collections import defaultdict
 from ray import profiling
+from ray.experimental.internal_kv import _internal_kv_put, \
+    _internal_kv_get
+import ray.cloudpickle as pickle
 
 import ray
 import ray.cluster_utils
@@ -56,7 +59,7 @@ class Decoder:
 
     def decode(self, frame):
         if frame != self.v.get(cv2.CAP_PROP_POS_FRAMES):
-            print("at", frame, "next", self.v.get(cv2.CAP_PROP_POS_FRAMES))
+            print("next frame", frame, ", at frame", self.v.get(cv2.CAP_PROP_POS_FRAMES))
             self.v.set(cv2.CAP_PROP_POS_FRAMES, frame)
         grabbed, frame = self.v.read()
         assert grabbed
@@ -65,6 +68,70 @@ class Decoder:
 
     def ready(self):
         return
+
+class DecoderV07(ray.actor.Checkpointable):
+    def __init__(self, filename, start_frame, radius, checkpoint_interval):
+        self.v = cv2.VideoCapture(filename)
+        self.v.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+
+        self.filename = filename
+        self.radius = radius
+        self.checkpoint_interval = checkpoint_interval
+        # Save the last `radius` many frames in memory so that we can reload
+        # them after a failure.
+        self.frame_buffer = []
+
+        self.checkpoint_attrs = [
+                "filename",
+                "radius",
+                "checkpoint_interval",
+                "frame_buffer",
+                ]
+
+    def decode(self, frame):
+        if frame != self.v.get(cv2.CAP_PROP_POS_FRAMES):
+            print("next frame", frame, ", at frame", self.v.get(cv2.CAP_PROP_POS_FRAMES))
+            self.v.set(cv2.CAP_PROP_POS_FRAMES, frame)
+        grabbed, frame = self.v.read()
+        assert grabbed
+        # TODO: Save object IDs.
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
+        self.frame_buffer.append(frame)
+        if len(self.frame_buffer) > self.radius + 1:
+            self.frame_buffer.pop(0)
+
+        if self.checkpoint_interval > 0 and frame % self.checkpoint_interval == 0:
+            self._should_checkpoint = True
+
+        return frame
+
+    def ready(self):
+        return
+
+    def should_checkpoint(self, checkpoint_context):
+        should_checkpoint = self._should_checkpoint
+        self._should_checkpoint = False
+        return should_checkpoint
+
+    def save_checkpoint(self, actor_id, checkpoint_id):
+        with ray.profiling.profile("save_checkpoint"):
+            checkpoint = {
+                    attr: getattr(self, attr) for attr in self.checkpoint_attrs
+                    }
+            checkpoint = pickle.dumps(checkpoint)
+            ray.experimental.internal_kv._internal_kv_put(checkpoint_id, checkpoint)
+
+    def load_checkpoint(self, actor_id, available_checkpoints):
+        if available_checkpoints:
+            c = available_checkpoints[0]
+            checkpoint = ray.experimental.internal_kv._internal_kv_get(c.checkpoint_id)
+            checkpoint = pickle.loads(checkpoint)
+            for attr, value in checkpoint.items():
+                setattr(self, attr, value)
+            self.v = cv2.VideoCapture(filename)
+            self.v.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            return c
+
 
 @ray.remote
 def flow(prev_frame, frame, p0):
@@ -105,9 +172,13 @@ def flow(prev_frame, frame, p0):
 
 
 @ray.remote
-def cumsum(prev, next):
+def cumsum(prev, next, checkpoint_key):
     with ray.profiling.profile("cumsum"):
-        return [i + j for i, j in zip(prev, next)]
+        sum = [i + j for i, j in zip(prev, next)]
+        if checkpoint_key is not None:
+            ray.experimental.internal_kv._internal_kv_put(checkpoint_key, "{} {} {}".format(*sum))
+        return sum
+
 
 
 @ray.remote
@@ -173,19 +244,22 @@ class Viewer:
 
 @ray.remote(num_cpus=0)
 class Sink:
-    def __init__(self, signal, viewer):
+    def __init__(self, signal, viewer, checkpoint_interval):
         self.signal = signal
         self.num_frames_left = {}
         self.latencies = defaultdict(list)
 
         self.viewer = viewer
         self.last_view = None
+        self.checkpoint_interval = checkpoint_interval
 
     def set_expected_frames(self, video_index, num_frames):
         self.num_frames_left[video_index] = num_frames
 
     def send(self, video_index, frame_index, transform, timestamp):
         with ray.profiling.profile("Sink.send"):
+            if frame_index < len(self.latencies[video_index]):
+                return
             assert frame_index == len(self.latencies[video_index]), frame_index
 
             self.latencies[video_index].append(time.time() - timestamp)
@@ -203,6 +277,10 @@ class Sink:
             if self.viewer is not None and video_index == 0:
                 self.last_view = self.viewer.send.remote(transform)
 
+            if self.checkpoint_interval != 0 and frame_index % self.checkpoint_interval == 0:
+                print("Checkpointing video", video_index, "frame", frame_index)
+                ray.experimental.internal_kv._internal_kv_put(video_index, frame_index, overwrite=True)
+
     def latencies(self):
         latencies = []
         for video in self.latencies.values():
@@ -215,15 +293,50 @@ class Sink:
 
 
 @ray.remote(num_cpus=0)
-def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_timestamp, fps, resource, v07):
+def process_chunk(video_index, video_pathname, sink, start_frame, num_frames, fps, resource, v07, start_timestamp, checkpoint_interval):
+    decoder_cls_args = {
+            "max_reconstructions": 100,
+            } if v07 else {
+            "max_restarts": -1,
+            "max_task_retries": -1,
+            }
+    decoder_cls = ray.remote(**decoder_cls_args)(Decoder)
+    decoder = decoder_cls.options(resources={resource: 1}).remote(video_pathname, 0)
+    ray.get(decoder.ready.remote())
+
+    # Check for a checkpoint.
     radius = fps
+    checkpoint_frame = ray.experimental.internal_kv._internal_kv_get(video_index)
+    trajectory = []
+    if checkpoint_frame is not None:
+        checkpoint_frame = int(checkpoint_frame)
+        loaded = None
+        while loaded is None and checkpoint_frame > 0:
+            checkpoint_key = "{} {}".format(video_index, checkpoint_frame)
+            print("Reloading checkpoint", checkpoint_key)
+            checkpoint = ray.experimental.internal_kv._internal_kv_get(checkpoint_key)
+            if checkpoint is not None:
+                traj = [float(d) for d in checkpoint.decode('utf-8').split(' ')]
+                print("Reloaded checkpoint", traj)
+                trajectory.append(traj)
+                break
+            checkpoint_frame -= checkpoint_interval
+            print("No checkpoint found, checking previous checkpoint at frame", video_index, checkpoint_frame)
+
+        start_frame = int(checkpoint_frame)
+        print("Restarting at frame", start_frame)
+    next_to_send = start_frame
+    start_frame -= radius
+    if start_frame < 0:
+        padding = start_frame * -1
+        start_frame = 0
+    else:
+        padding = 0
 
     frame_timestamps = []
-    trajectory = []
     transforms = []
 
     features = None
-    next_to_send = 0
 
     frame_timestamp = start_timestamp + start_frame / fps
     diff = frame_timestamp - time.time()
@@ -232,7 +345,7 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
     frame_timestamps.append(frame_timestamp)
     prev_frame = decoder.decode.remote(start_frame)
 
-    for i in range(num_frames - 1):
+    for i in range(start_frame, num_frames - 1):
         frame_timestamp = start_timestamp + (start_frame + i + 1) / fps
         diff = frame_timestamp - time.time()
         if diff > 0:
@@ -246,16 +359,22 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
                 "num_returns": 2,
                 }
         flow_options["resources"] = {resource: 1}
+
         transform, features = flow.options(**flow_options).remote(prev_frame, frame, features)
         if i and i % 200 == 0:
             features = None
         prev_frame = frame
         transforms.append(transform)
         if i > 0:
-            trajectory.append(cumsum.options(resources={resource: 1}).remote(trajectory[-1], transform))
+            if checkpoint_interval > 0 and (i + radius) % checkpoint_interval == 0:
+                checkpoint_key = "{} {}".format(video_index, i + radius)
+            else:
+                checkpoint_key = None
+            trajectory.append(cumsum.options(resources={resource: 1}).remote(trajectory[-1], transform, checkpoint_key))
         else:
-            for _ in range(radius + 1):
+            for _ in range(padding):
                 trajectory.append(transform)
+            trajectory.append(transform)
 
         if len(trajectory) == 2 * radius + 1:
             midpoint = radius
@@ -277,7 +396,8 @@ def process_chunk(video_index, decoder, sink, start_frame, num_frames, start_tim
 
 
 def process_videos(video_pathnames, output_filename, view, resources,
-        owner_resources, sink_resources, max_frames, num_sinks, v07):
+        owner_resources, sink_resources, max_frames, num_sinks, v07,
+        checkpoint_interval):
     if v07:
         signal = SignalActorV07.remote()
     else:
@@ -292,7 +412,7 @@ def process_videos(video_pathnames, output_filename, view, resources,
 
     sinks = [Sink.options(resources={
         sink_resources[i % len(sink_resources)]: 1
-        }).remote(signal, viewer) for i in range(num_sinks)]
+        }).remote(signal, viewer, checkpoint_interval) for i in range(num_sinks)]
     ray.get([sink.ready.remote() for sink in sinks])
 
     for i, video_pathname in enumerate(video_pathnames):
@@ -301,21 +421,9 @@ def process_videos(video_pathnames, output_filename, view, resources,
         print(video_pathname, "FRAMES", num_total_frames)
         ray.get(sinks[i % len(sinks)].set_expected_frames.remote(i, num_total_frames - 1))
 
-    decoders = []
-    decoder_cls_args = {
-            "max_reconstructions": 100,
-            } if v07 else {
-            "max_restarts": -1,
-            "max_task_retries": -1,
-            }
-    decoder_cls = ray.remote(**decoder_cls_args)(Decoder)
-    for i, video_pathname in enumerate(video_pathnames):
-        resource = resources[i % len(resources)]
-        decoder = decoder_cls.options(resources={resource: 1}).remote(video_pathname, 0)
-        decoders.append(decoder)
-    ray.get([decoder.ready.remote() for decoder in decoders])
+    # Give the actors some time to start up.
+    start_timestamp = time.time() + 5
 
-    start_timestamp = time.time() + 1
     for i, video_pathname in enumerate(video_pathnames):
         v = cv2.VideoCapture(video_pathname)
         num_total_frames = int(min(v.get(cv2.CAP_PROP_FRAME_COUNT), max_frames))
@@ -323,9 +431,9 @@ def process_videos(video_pathnames, output_filename, view, resources,
         owner_resource = owner_resources[i % len(owner_resources)]
         worker_resource = resources[i % len(resources)]
         print("Placing owner of video", i, "on node with resource", owner_resource)
-        process_chunk.options(resources={owner_resource: 1}).remote(i, decoders[i],
-                sinks[i % len(sinks)], 0, num_total_frames, start_timestamp,
-                int(fps), worker_resource, v07)
+        process_chunk.options(resources={owner_resource: 1}).remote(i, video_pathnames[i],
+                sinks[i % len(sinks)], 0, num_total_frames,
+                int(fps), worker_resource, v07, start_timestamp, checkpoint_interval)
 
     if v07:
         ready = 0
@@ -358,7 +466,7 @@ def main(args):
         num_owner_nodes += 1
     owner_resources = ["video_owner:{}".format(i) for i in range(num_owner_nodes)]
 
-    num_sink_nodes = len(args.video_path) // args.num_sinks_per_node
+    num_sink_nodes = args.num_sinks // args.num_sinks_per_node
     if len(args.video_path) % args.num_sinks_per_node:
         num_sink_nodes += 1
     sink_resources = ["video_sink:{}".format(i) for i in range(num_sink_nodes)]
@@ -427,6 +535,8 @@ def main(args):
 
     worker_ip = None
     worker_resource = None
+    owner_ip = None
+    owner_resource = None
     node_index = 0
     for node, resource in zip(nodes, sink_resources + owner_resources + video_resources):
         if "CPU" not in node["Resources"]:
@@ -434,15 +544,20 @@ def main(args):
 
         print("Assigning", resource, "to node", node["NodeID"], node["Resources"])
         ray.experimental.set_resource(resource, 100, node["NodeID"])
-        worker_resource = resource
-        worker_ip = node["NodeManagerAddress"]
 
-    if args.failure:
+        if "owner" in resource:
+            owner_resource = resource
+            owner_ip = node["NodeManagerAddress"]
+        elif "video:" in resource:
+            worker_resource = resource
+            worker_ip = node["NodeManagerAddress"]
+
+    if args.failure or args.owner_failure:
         if args.local:
             t = threading.Thread(
                 target=process_videos, args=(args.video_path, args.output,
                     args.view, video_resources, owner_resources, sink_resources,
-                    args.max_frames, args.num_sinks, args.v07))
+                    args.max_frames, args.num_sinks, args.v07, args.checkpoint_interval))
             t.start()
 
             if args.failure:
@@ -457,9 +572,15 @@ def main(args):
 
             t.join()
         else:
-            print("Killing", worker_ip, "with resource", worker_resource, "after 10s")
+            if args.failure:
+                ip = worker_ip
+                resource = worker_resource
+            else:
+                ip = owner_ip
+                resource = owner_resource
+            print("Killing", ip, "with resource", resource, "after 10s")
             def kill():
-                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < /home/ubuntu/video-processing/{} {}'.format("restart_0_7.sh" if args.v07 else "restart.sh", worker_ip, head_ip)
+                cmd = 'ssh -i ~/ray_bootstrap_key.pem -o StrictHostKeyChecking=no {} "bash -s" -- < /home/ubuntu/ray/benchmarks/{} {}'.format(ip, "restart_0_7.sh" if args.v07 else "restart.sh", head_ip)
                 print(cmd)
                 time.sleep(10)
                 os.system(cmd)
@@ -467,22 +588,22 @@ def main(args):
                 while not recovered:
                     time.sleep(1)
                     for node in ray.nodes():
-                        if node["NodeManagerAddress"] == worker_ip and "CPU" in node["Resources"] and worker_resource not in node["Resources"]:
+                        if node["NodeManagerAddress"] == ip and "CPU" in node["Resources"] and resource not in node["Resources"]:
                             print(node)
-                            ray.experimental.set_resource(worker_resource, 100, node["NodeID"])
+                            ray.experimental.set_resource(resource, 100, node["NodeID"])
                             recovered = True
                             break
-                print("Restarted node at IP", worker_ip)
+                print("Restarted node at IP", ip)
             t = threading.Thread(target=kill)
             t.start()
             process_videos(args.video_path, args.output, args.view,
                     video_resources, owner_resources, sink_resources, args.max_frames,
-                    args.num_sinks, args.v07)
+                    args.num_sinks, args.v07, args.checkpoint_interval)
             t.join()
     else:
         process_videos(args.video_path, args.output, args.view,
                 video_resources, owner_resources, sink_resources, args.max_frames,
-                args.num_sinks, args.v07)
+                args.num_sinks, args.v07, args.checkpoint_interval)
 
     if args.timeline:
         ray.timeline(filename=args.timeline)
@@ -498,11 +619,13 @@ if __name__ == "__main__":
     parser.add_argument("--v07", action="store_true")
     parser.add_argument("--local", action="store_true")
     parser.add_argument("--failure", action="store_true")
+    parser.add_argument("--owner-failure", action="store_true")
     parser.add_argument("--timeline", default=None, type=str)
     parser.add_argument("--view", action="store_true")
     parser.add_argument("--max-frames", default=600, type=int)
     parser.add_argument("--num-sinks", default=1, type=int)
     parser.add_argument("--num-sinks-per-node", default=1, type=int)
     parser.add_argument("--num-owners-per-node", default=1, type=int)
+    parser.add_argument("--checkpoint-interval", default=0, type=int)
     args = parser.parse_args()
     main(args)
