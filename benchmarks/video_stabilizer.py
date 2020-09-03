@@ -69,70 +69,6 @@ class Decoder:
     def ready(self):
         return
 
-class DecoderV07(ray.actor.Checkpointable):
-    def __init__(self, filename, start_frame, radius, checkpoint_interval):
-        self.v = cv2.VideoCapture(filename)
-        self.v.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-
-        self.filename = filename
-        self.radius = radius
-        self.checkpoint_interval = checkpoint_interval
-        # Save the last `radius` many frames in memory so that we can reload
-        # them after a failure.
-        self.frame_buffer = []
-
-        self.checkpoint_attrs = [
-                "filename",
-                "radius",
-                "checkpoint_interval",
-                "frame_buffer",
-                ]
-
-    def decode(self, frame):
-        if frame != self.v.get(cv2.CAP_PROP_POS_FRAMES):
-            print("next frame", frame, ", at frame", self.v.get(cv2.CAP_PROP_POS_FRAMES))
-            self.v.set(cv2.CAP_PROP_POS_FRAMES, frame)
-        grabbed, frame = self.v.read()
-        assert grabbed
-        # TODO: Save object IDs.
-        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) 
-        self.frame_buffer.append(frame)
-        if len(self.frame_buffer) > self.radius + 1:
-            self.frame_buffer.pop(0)
-
-        if self.checkpoint_interval > 0 and frame % self.checkpoint_interval == 0:
-            self._should_checkpoint = True
-
-        return frame
-
-    def ready(self):
-        return
-
-    def should_checkpoint(self, checkpoint_context):
-        should_checkpoint = self._should_checkpoint
-        self._should_checkpoint = False
-        return should_checkpoint
-
-    def save_checkpoint(self, actor_id, checkpoint_id):
-        with ray.profiling.profile("save_checkpoint"):
-            checkpoint = {
-                    attr: getattr(self, attr) for attr in self.checkpoint_attrs
-                    }
-            checkpoint = pickle.dumps(checkpoint)
-            ray.experimental.internal_kv._internal_kv_put(checkpoint_id, checkpoint)
-
-    def load_checkpoint(self, actor_id, available_checkpoints):
-        if available_checkpoints:
-            c = available_checkpoints[0]
-            checkpoint = ray.experimental.internal_kv._internal_kv_get(c.checkpoint_id)
-            checkpoint = pickle.loads(checkpoint)
-            for attr, value in checkpoint.items():
-                setattr(self, attr, value)
-            self.v = cv2.VideoCapture(filename)
-            self.v.set(cv2.CAP_PROP_POS_FRAMES, 0)
-            return c
-
-
 @ray.remote
 def flow(prev_frame, frame, p0):
     with ray.profiling.profile("flow"):
@@ -278,7 +214,6 @@ class Sink:
                 self.last_view = self.viewer.send.remote(transform)
 
             if self.checkpoint_interval != 0 and frame_index % self.checkpoint_interval == 0:
-                print("Checkpointing video", video_index, "frame", frame_index)
                 ray.experimental.internal_kv._internal_kv_put(video_index, frame_index, overwrite=True)
 
     def latencies(self):
