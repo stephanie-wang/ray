@@ -66,10 +66,12 @@ class CoreWorkerDirectActorTaskSubmitter
   CoreWorkerDirectActorTaskSubmitter(
       std::shared_ptr<rpc::CoreWorkerClientPool> core_worker_client_pool,
       std::shared_ptr<CoreWorkerMemoryStore> store,
-      std::shared_ptr<TaskFinisherInterface> task_finisher)
+      std::shared_ptr<TaskFinisherInterface> task_finisher,
+      const RetryTaskCallback &retry_task_callback)
       : core_worker_client_pool_(core_worker_client_pool),
         resolver_(store, task_finisher),
-        task_finisher_(task_finisher) {}
+        task_finisher_(task_finisher),
+        retry_task_callback_(retry_task_callback) {}
 
   /// Add an actor queue. This should be called whenever a reference to an
   /// actor is created in the language frontend.
@@ -231,6 +233,9 @@ class CoreWorkerDirectActorTaskSubmitter
 
   /// Used to complete tasks.
   std::shared_ptr<TaskFinisherInterface> task_finisher_;
+
+  /// Callback to retry a failed actor task.
+  const RetryTaskCallback retry_task_callback_;
 
   friend class CoreWorkerTest;
 };

@@ -400,30 +400,30 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       RAY_CHECK_OK(object_recovery_manager_->RecoverObject(object_id));
     });
   };
-  task_manager_.reset(new TaskManager(
-      memory_store_, reference_counter_,
-      [this](TaskSpecification &spec, bool delay) {
-        if (delay) {
-          // Retry after a delay to emulate the existing Raylet reconstruction
-          // behaviour. TODO(ekl) backoff exponentially.
-          uint32_t delay = RayConfig::instance().task_retry_delay_ms();
-          RAY_LOG(ERROR) << "Will resubmit task after a " << delay
-                         << "ms delay: " << spec.DebugString();
-          absl::MutexLock lock(&mutex_);
-          to_resubmit_.push_back(std::make_pair(current_time_ms() + delay, spec));
-        } else {
-          RAY_LOG(ERROR) << "Resubmitting task that produced lost plasma object: "
-                         << spec.DebugString();
-          if (spec.IsActorTask()) {
-            const auto &actor_handle = actor_manager_->GetActorHandle(spec.ActorId());
-            actor_handle->SetResubmittedActorTaskSpec(spec, spec.ActorDummyObject());
-            RAY_CHECK_OK(direct_actor_submitter_->SubmitTask(spec));
-          } else {
-            RAY_CHECK_OK(direct_task_submitter_->SubmitTask(spec));
-          }
-        }
-      },
-      check_node_alive_fn, reconstruct_object_callback));
+  auto retry_task_callback = [this](TaskSpecification &spec, bool delay) {
+    if (delay) {
+      // Retry after a delay to emulate the existing Raylet reconstruction
+      // behaviour. TODO(ekl) backoff exponentially.
+      uint32_t delay = RayConfig::instance().task_retry_delay_ms();
+      RAY_LOG(ERROR) << "Will resubmit task after a " << delay
+                     << "ms delay: " << spec.DebugString();
+      absl::MutexLock lock(&mutex_);
+      to_resubmit_.push_back(std::make_pair(current_time_ms() + delay, spec));
+    } else {
+      RAY_LOG(ERROR) << "Resubmitting task that produced lost plasma object: "
+                     << spec.DebugString();
+      if (spec.IsActorTask()) {
+        const auto &actor_handle = actor_manager_->GetActorHandle(spec.ActorId());
+        actor_handle->SetResubmittedActorTaskSpec(spec, spec.ActorDummyObject());
+        RAY_CHECK_OK(direct_actor_submitter_->SubmitTask(spec));
+      } else {
+        RAY_CHECK_OK(direct_task_submitter_->SubmitTask(spec));
+      }
+    }
+  };
+  task_manager_.reset(new TaskManager(memory_store_, reference_counter_,
+                                      retry_task_callback, check_node_alive_fn,
+                                      reconstruct_object_callback));
 
   // Create an entry for the driver task in the task table. This task is
   // added immediately with status RUNNING. This allows us to push errors
@@ -461,8 +461,13 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       std::make_shared<DefaultActorCreator>(gcs_client_);
 
   direct_actor_submitter_ = std::shared_ptr<CoreWorkerDirectActorTaskSubmitter>(
-      new CoreWorkerDirectActorTaskSubmitter(core_worker_client_pool_, memory_store_,
-                                             task_manager_));
+      new CoreWorkerDirectActorTaskSubmitter(
+          core_worker_client_pool_, memory_store_, task_manager_,
+          [this, retry_task_callback](TaskSpecification &spec, bool delay) {
+            io_service_.post([this, spec, delay, retry_task_callback]() mutable {
+              retry_task_callback(spec, delay);
+            });
+          }));
 
   direct_task_submitter_ =
       std::unique_ptr<CoreWorkerDirectTaskSubmitter>(new CoreWorkerDirectTaskSubmitter(

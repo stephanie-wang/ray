@@ -253,8 +253,12 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
   request->mutable_task_spec()->CopyFrom(task_spec.GetMessage());
 
   request->set_intended_worker_id(queue.worker_id);
-  RAY_CHECK(task_spec.ActorCounter() >= queue.caller_starts_at)
-      << "actor counter " << task_spec.ActorCounter() << " " << queue.caller_starts_at;
+  if (task_spec.ActorCounter() < queue.caller_starts_at) {
+    TaskSpecification mutable_spec(task_spec);
+    retry_task_callback_(mutable_spec, /*delay=*/false);
+    return;
+  }
+
   request->set_sequence_number(task_spec.ActorCounter() - queue.caller_starts_at);
 
   const auto task_id = task_spec.TaskId();
@@ -264,27 +268,30 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
                  << " actor counter " << counter << " seq no "
                  << request->sequence_number();
   rpc::Address addr(queue.rpc_client->Addr());
-  queue.rpc_client->PushActorTask(
-      std::move(request), skip_queue,
-      [this, addr, task_id, actor_id](Status status, const rpc::PushTaskReply &reply) {
-        bool increment_completed_tasks = true;
-        if (!status.ok()) {
-          bool will_retry = task_finisher_->PendingTaskFailed(
-              task_id, rpc::ErrorType::ACTOR_DIED, &status);
-          if (will_retry) {
-            increment_completed_tasks = false;
-          }
-        } else {
-          task_finisher_->CompletePendingTask(task_id, reply, addr);
-        }
+  queue.rpc_client->PushActorTask(std::move(request), skip_queue,
+                                  [this, addr, task_id, actor_id, counter](
+                                      Status status, const rpc::PushTaskReply &reply) {
+                                    bool increment_completed_tasks = true;
+                                    if (!status.ok()) {
+                                      bool will_retry = task_finisher_->PendingTaskFailed(
+                                          task_id, rpc::ErrorType::ACTOR_DIED, &status);
+                                      if (will_retry) {
+                                        increment_completed_tasks = false;
+                                      }
+                                    } else {
+                                      task_finisher_->CompletePendingTask(task_id, reply,
+                                                                          addr);
+                                    }
 
-        if (increment_completed_tasks) {
-          absl::MutexLock lock(&mu_);
-          auto queue = client_queues_.find(actor_id);
-          RAY_CHECK(queue != client_queues_.end());
-          queue->second.num_completed_tasks++;
-        }
-      });
+                                    if (increment_completed_tasks) {
+                                      absl::MutexLock lock(&mu_);
+                                      auto queue = client_queues_.find(actor_id);
+                                      RAY_CHECK(queue != client_queues_.end());
+                                      if (counter >= queue->second.num_completed_tasks) {
+                                        queue->second.num_completed_tasks = counter + 1;
+                                      }
+                                    }
+                                  });
 }
 
 bool CoreWorkerDirectActorTaskSubmitter::IsActorAlive(const ActorID &actor_id) const {
