@@ -52,7 +52,7 @@ auth:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 head_node:
-    InstanceType: m4.16xlarge
+    InstanceType: m5.16xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
     # Additional options in the boto docs.
@@ -62,14 +62,13 @@ head_node:
 # For more documentation on available fields, see:
 # http://boto3.readthedocs.io/en/latest/reference/services/ec2.html#EC2.ServiceResource.create_instances
 worker_nodes:
-    InstanceType: m4.16xlarge
+    InstanceType: m5.16xlarge
     ImageId: ami-0764eacdf56f1b2bc
 
 # Files or directories to copy to the head and worker nodes. The format is a
 # dictionary from REMOTE_PATH: LOCAL_PATH, e.g.
 file_mounts:
-    /home/ubuntu/ray: /home/swang/ray-0-7
-    /home/ubuntu/ray/benchmarks: /home/swang/ray/benchmarks
+    /home/ubuntu/ray/benchmarks: /home/swang/ray-2/benchmarks
 
 # List of commands that will be run before `setup_commands`. If docker is
 # enabled, these commands will run outside the container and before docker
@@ -78,13 +77,8 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-    - pip uninstall -y ray
-    - source activate tensorflow_p36 && pip uninstall -y ray
-    - echo set-window-option -g mode-mouse on > ~/.tmux.conf
-    - echo 'termcapinfo xterm* ti@:te@' >> ~/.screenrc
-    - '[ -z "$RAY_HEAD_IP" ] && echo "On driver node" || echo "On worker node"'
-    - echo 'export RAY_0_7=1' > ~/.bash_profile
-    - source activate tensorflow_p36 && pip install -U https://custom-wheels.s3-us-west-2.amazonaws.com/ray-0.7.7-cp36-cp36m-manylinux1_x86_64.whl
+    - echo 'export PATH="$HOME/anaconda3/envs/tensorflow_p36/bin:$PATH"' >> ~/.bashrc
+    - source activate tensorflow_p36 && pip install -U https://ray-wheel.s3-us-west-2.amazonaws.com/7d1fc81c1caf5cd41182ac79755d6b2e92dd1e99/ray-0.7.7-cp36-cp36m-manylinux1_x86_64.whl
 
 # Custom commands that will be run on the head node after common setup.
 head_setup_commands:
@@ -99,11 +93,11 @@ head_start_ray_commands:
     - source activate tensorflow_p36 && ray stop
     - pkill -9 raylet || true
     - pkill -9 plasma || true
-    - source activate tensorflow_p36 && ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
+    - source activate tensorflow_p36 && ray start --head --redis-port=6379 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"raylet_heartbeat_timeout_milliseconds\":1000, \"num_heartbeats_timeout\":3, \"object_manager_repeated_push_delay_ms\":1000, \"object_manager_pull_timeout_ms\":1000}"
 
 # Command to start ray on worker nodes. You don't need to change this.
 worker_start_ray_commands:
     - source activate tensorflow_p36 && ray stop
     - pkill -9 raylet || true
     - pkill -9 plasma || true
-    - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"object_manager_repeated_push_delay_ms\":1000}"
+    - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --internal-config="{\"initial_reconstruction_timeout_milliseconds\":100, \"raylet_heartbeat_timeout_milliseconds\":1000, \"num_heartbeats_timeout\":3, \"object_manager_repeated_push_delay_ms\":1000, \"object_manager_pull_timeout_ms\":1000}"

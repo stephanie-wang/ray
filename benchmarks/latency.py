@@ -93,45 +93,7 @@ def run_sync(num_rounds):
     return latencies
 
 def main(args):
-    configs = {
-            OWNERSHIP: {
-                "record_ref_creation_sites":0,
-                "initial_reconstruction_timeout_milliseconds": 100,
-                "num_heartbeats_timeout": 10,
-                "lineage_pinning_enabled": 1,
-                "free_objects_period_milliseconds": -1,
-                "object_manager_repeated_push_delay_ms": 1000,
-                "task_retry_delay_ms": 100,
-                },
-            LEASES: {
-                "initial_reconstruction_timeout_milliseconds": 100,
-                "num_heartbeats_timeout": 10,
-                "object_manager_repeated_push_delay_ms": 1000,
-                },
-            CENTRALIZED: {
-                "initial_reconstruction_timeout_milliseconds": 100,
-                "num_heartbeats_timeout": 10,
-                "object_manager_repeated_push_delay_ms": 1000,
-                },
-            BY_VALUE: {
-                "record_ref_creation_sites":0,
-                "initial_reconstruction_timeout_milliseconds": 100,
-                "num_heartbeats_timeout": 10,
-                "lineage_pinning_enabled": 1,
-                "free_objects_period_milliseconds": -1,
-                "object_manager_repeated_push_delay_ms": 1000,
-                "task_retry_delay_ms": 100,
-                "max_direct_call_object_size": 10737418240,
-                "max_grpc_message_size": -1,
-                },
-            }
-    config = configs[args.system]
-    internal_config = json.dumps(config)
-    address = "auto"
-    if args.system in [LEASES, CENTRALIZED]:
-        ray.init(address=address)
-    else:
-        ray.init(address=address, _internal_config=internal_config, redis_password='5241590000000000')
+    ray.init(address="auto")
 
     num_nodes = 1
     nodes = [node for node in ray.nodes() if node["Alive"]]

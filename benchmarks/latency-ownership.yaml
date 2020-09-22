@@ -77,14 +77,9 @@ initialization_commands: []
 
 # List of shell commands to run to set up nodes.
 setup_commands:
-    - echo set-window-option -g mode-mouse on > ~/.tmux.conf
-    - echo 'termcapinfo xterm* ti@:te@' >> ~/.screenrc
-    - '[ -z "$RAY_HEAD_IP" ] && echo "On driver node" || echo "On worker node"'
-    - echo 'export RAY_GCS_SERVICE_ENABLED=false' >> ~/.bashrc
-    # XXX: Uncomment below to build ray from source.
-    - cd ray/python; [ -z "$RAY_HEAD_IP" ] && source activate tensorflow_p36 && python setup.py develop || true
-    # XXX: Uncomment below to install ray 0.7.7.
-    #- source activate tensorflow_p36 && pip install -U ray==0.7.7
+    - echo 'export PATH="$HOME/anaconda3/envs/tensorflow_p36/bin:$PATH"' >> ~/.bashrc
+    - pip install -U https://ray-wheel.s3-us-west-2.amazonaws.com/2be4fd0bae3b3af561376070aeaeb69199f63cfc/ray-0.9.0.dev0-cp36-cp36m-manylinux1_x86_64.whl
+
 
 # Custom commands that will be run on the head node after common setup.
 head_setup_commands:
@@ -96,16 +91,16 @@ worker_setup_commands: []
 
 # Command to start ray on the head node. You don't need to change this.
 head_start_ray_commands:
-    - source activate tensorflow_p36 && ray stop
-    - source activate tensorflow_p36 && RAY_GCS_SERVICE_ENABLED=false ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"lineage_pinning_enabled\":1, \"free_objects_period_milliseconds\":-1, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000}"
-    # - source activate tensorflow_p36 && ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"free_objects_period_milliseconds\":-1, \"object_store_full_max_retries\":0, \"object_pinning_enabled\":1, \"distributed_ref_counting_enabled\":1}"
-    # - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"max_direct_call_object_size\":10737418240}"
-    # - ray start --head --redis-port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml --num-cpus=0 --internal-config="{\"record_ref_creation_sites\":0, \"centralized_owner\":1}"
+    - ray stop
+    - ulimit -n 65536; ray start --head --port=6379 --object-manager-port=8076 --autoscaling-config=~/ray_bootstrap_config.yaml
+      --num-cpus=0 --enable-object-reconstruction --system-config='"{\"record_ref_creation_sites\":0,
+      \"raylet_heartbeat_timeout_milliseconds\":1000, \"num_heartbeats_timeout\":3, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000, \"enable_timeline\":false, \"max_tasks_in_flight_per_worker\":100, \"ping_gcs_rpc_server_max_retries\":1}"'
+
 
 # Command to start ray on worker nodes. You don't need to change this.
 worker_start_ray_commands:
-    - source activate tensorflow_p36 && ray stop
-    - source activate tensorflow_p36 && RAY_GCS_SERVICE_ENABLED=false ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"initial_reconstruction_timeout_milliseconds\":100, \"num_heartbeats_timeout\":10, \"lineage_pinning_enabled\":1, \"free_objects_period_milliseconds\":-1, \"object_manager_repeated_push_delay_ms\":1000, \"task_retry_delay_ms\":1000}"
-    # - source activate tensorflow_p36 && ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"free_objects_period_milliseconds\":-1, \"object_store_full_max_retries\":0, \"object_pinning_enabled\":1, \"distributed_ref_counting_enabled\":1}"
-    # - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"max_direct_call_object_size\":10737418240}"
-    # - ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076 --internal-config="{\"record_ref_creation_sites\":0, \"centralized_owner\":1}"
+    - ray stop --force
+    - ulimit -n 65536; ray start --address=$RAY_HEAD_IP:6379 --object-manager-port=8076
+
+cluster_synced_files: []
+file_mounts_sync_continuously: false

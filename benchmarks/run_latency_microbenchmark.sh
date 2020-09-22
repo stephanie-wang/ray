@@ -4,7 +4,7 @@
 output="latency-`date`.csv"
 echo "Writing output to $output"
 
-for system in "leases" "centralized" "ownership" "by_value"; do
+for system in "leases" "centralized"; do
     yaml="benchmarks/latency-$system.yaml"
     ray up -y $yaml
     for placement in "--local" ""; do
