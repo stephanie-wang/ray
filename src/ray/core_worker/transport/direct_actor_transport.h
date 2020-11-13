@@ -32,6 +32,7 @@
 #include "ray/core_worker/store_provider/memory_store/memory_store.h"
 #include "ray/core_worker/task_manager.h"
 #include "ray/core_worker/transport/dependency_resolver.h"
+#include "ray/core_worker/transport/task_logger.h"
 #include "ray/gcs/redis_gcs_client.h"
 #include "ray/rpc/grpc_server.h"
 #include "ray/rpc/worker/core_worker_client.h"
@@ -240,20 +241,29 @@ class InboundRequest {
  public:
   InboundRequest(){};
   InboundRequest(std::function<void()> accept_callback,
-                 std::function<void()> reject_callback, bool has_dependencies)
+                 std::function<void()> reject_callback, bool has_dependencies,
+                 std::function<void()> log_callback = nullptr)
       : accept_callback_(accept_callback),
         reject_callback_(reject_callback),
-        has_pending_dependencies_(has_dependencies) {}
+        has_pending_dependencies_(has_dependencies),
+        log_callback_(log_callback) {}
 
   void Accept() { accept_callback_(); }
   void Cancel() { reject_callback_(); }
   bool CanExecute() const { return !has_pending_dependencies_; }
   void MarkDependenciesSatisfied() { has_pending_dependencies_ = false; }
 
+  void Log() const {
+    if (log_callback_) {
+      log_callback_();
+    }
+  }
+
  private:
   std::function<void()> accept_callback_;
   std::function<void()> reject_callback_;
   bool has_pending_dependencies_;
+  std::function<void()> log_callback_;
 };
 
 /// Waits for an object dependency to become available. Abstract for testing.
@@ -333,6 +343,7 @@ class SchedulingQueue {
   virtual void Add(int64_t seq_no, int64_t client_processed_up_to,
                    std::function<void()> accept_request,
                    std::function<void()> reject_request,
+                   const rpc::PushTaskRequest &request,
                    const std::vector<rpc::ObjectReference> &dependencies = {}) = 0;
   virtual void ScheduleRequests() = 0;
   virtual bool TaskQueueEmpty() const = 0;
@@ -344,9 +355,10 @@ class SchedulingQueue {
 class ActorSchedulingQueue : public SchedulingQueue {
  public:
   ActorSchedulingQueue(boost::asio::io_service &main_io_service, DependencyWaiter &waiter,
-                       WorkerContext &worker_context,
+                       WorkerContext &worker_context, std::shared_ptr<TaskLogger> &logger,
                        int64_t reorder_wait_seconds = kMaxReorderWaitSeconds)
       : worker_context_(worker_context),
+        logger_(logger),
         reorder_wait_seconds_(reorder_wait_seconds),
         wait_timer_(main_io_service),
         main_thread_id_(boost::this_thread::get_id()),
@@ -357,6 +369,7 @@ class ActorSchedulingQueue : public SchedulingQueue {
   /// Add a new actor task's callbacks to the worker queue.
   void Add(int64_t seq_no, int64_t client_processed_up_to,
            std::function<void()> accept_request, std::function<void()> reject_request,
+           const rpc::PushTaskRequest &request,
            const std::vector<rpc::ObjectReference> &dependencies = {}) {
     // A seq_no of -1 means no ordering constraint. Actor tasks must be executed in order.
     RAY_CHECK(seq_no != -1);
@@ -369,7 +382,8 @@ class ActorSchedulingQueue : public SchedulingQueue {
     }
     RAY_LOG(DEBUG) << "Enqueue " << seq_no << " cur seqno " << next_seq_no_;
     pending_actor_tasks_[seq_no] =
-        InboundRequest(accept_request, reject_request, dependencies.size() > 0);
+        InboundRequest(accept_request, reject_request, dependencies.size() > 0,
+                       [this, request]() { logger_->LogRequest(request); });
     if (dependencies.size() > 0) {
       waiter_.Wait(dependencies, [seq_no, this]() {
         RAY_CHECK(boost::this_thread::get_id() == main_thread_id_);
@@ -427,6 +441,8 @@ class ActorSchedulingQueue : public SchedulingQueue {
         // Process concurrent actor task.
         pool_->PostBlocking([request]() mutable { request.Accept(); });
       } else {
+        request.Log();
+
         // Process normal actor task.
         request.Accept();
       }
@@ -468,6 +484,8 @@ class ActorSchedulingQueue : public SchedulingQueue {
 
   // Worker context.
   WorkerContext &worker_context_;
+  /// Log actor requests in the order of execution.
+  std::shared_ptr<TaskLogger> logger_;
   /// Max time in seconds to wait for dependencies to show up.
   const int64_t reorder_wait_seconds_ = 0;
   /// Sorted map of (accept, rej) task callbacks keyed by their sequence number.
@@ -506,6 +524,7 @@ class NormalSchedulingQueue : public SchedulingQueue {
   /// Add a new task's callbacks to the worker queue.
   void Add(int64_t seq_no, int64_t client_processed_up_to,
            std::function<void()> accept_request, std::function<void()> reject_request,
+           const rpc::PushTaskRequest &request,
            const std::vector<rpc::ObjectReference> &dependencies = {}) {
     absl::MutexLock lock(&mu_);
     // Normal tasks should not have ordering constraints.
@@ -550,7 +569,8 @@ class CoreWorkerDirectTaskReceiver {
       : worker_context_(worker_context),
         task_handler_(task_handler),
         task_main_io_service_(main_io_service),
-        task_done_(task_done) {}
+        task_done_(task_done),
+        logger_(std::make_shared<TaskLogger>()) {}
 
   /// Initialize this receiver. This must be called prior to use.
   void Init(std::shared_ptr<rpc::CoreWorkerClientPool>, rpc::Address rpc_address,
@@ -584,6 +604,8 @@ class CoreWorkerDirectTaskReceiver {
   rpc::Address rpc_address_;
   /// Shared waiter for dependencies required by incoming tasks.
   std::shared_ptr<DependencyWaiter> waiter_;
+  /// Log actor requests in the order of execution.
+  std::shared_ptr<TaskLogger> logger_;
   /// Queue of pending requests per actor handle.
   /// TODO(ekl) GC these queues once the handle is no longer active.
   std::unordered_map<WorkerID, std::unique_ptr<SchedulingQueue>> actor_scheduling_queues_;

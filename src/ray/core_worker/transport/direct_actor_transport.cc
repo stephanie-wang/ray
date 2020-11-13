@@ -415,7 +415,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
       auto result = actor_scheduling_queues_.emplace(
           task_spec.CallerWorkerId(),
           std::unique_ptr<SchedulingQueue>(new ActorSchedulingQueue(
-              task_main_io_service_, *waiter_, worker_context_)));
+              task_main_io_service_, *waiter_, worker_context_, logger_)));
       it = result.first;
     }
 
@@ -423,12 +423,12 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     // TODO(swang): Remove this with legacy raylet code.
     dependencies.pop_back();
     it->second->Add(request.sequence_number(), request.client_processed_up_to(),
-                    accept_callback, reject_callback, dependencies);
+                    accept_callback, reject_callback, request, dependencies);
   } else {
     // Add the normal task's callbacks to the non-actor scheduling queue.
     normal_scheduling_queue_->Add(request.sequence_number(),
                                   request.client_processed_up_to(), accept_callback,
-                                  reject_callback, dependencies);
+                                  reject_callback, request, dependencies);
   }
 }
 
