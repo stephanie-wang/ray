@@ -383,7 +383,7 @@ class ActorSchedulingQueue : public SchedulingQueue {
     RAY_LOG(DEBUG) << "Enqueue " << seq_no << " cur seqno " << next_seq_no_;
     pending_actor_tasks_[seq_no] =
         InboundRequest(accept_request, reject_request, dependencies.size() > 0,
-                       [this, request, worker_context_]() { logger_->LogRequest(request, worker_context_.GetWorkerID()); });
+                       [this, request]() { logger_->LogRequest(request, worker_context_.GetWorkerID()); });
     if (dependencies.size() > 0) {
       waiter_.Wait(dependencies, [seq_no, this]() {
         RAY_CHECK(boost::this_thread::get_id() == main_thread_id_);

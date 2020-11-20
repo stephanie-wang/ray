@@ -9,9 +9,8 @@ namespace ray {
 void TaskLogger::LogRequest(const rpc::PushTaskRequest &request, const WorkerID worker_id) {
   RAY_LOG(DEBUG) << "Logging request";
   std::ofstream persistent;
-  persistent.open(std::format("~/Documents/ray-src/worker_log_{}.txt", WorkerID::FromBinary(worker_id)))
-  request.SerializeToStream(persistent);
-  // BaseEncoding.base64().encode(request.toByteArray())
+  persistent.open("~/Documents/ray-src/worker_log_" + worker_id.Binary() + ".txt");
+  request.SerializeToOstream(&persistent);
   persistent.close();
   log_.push_back(request);
 }
