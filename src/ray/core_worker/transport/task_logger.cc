@@ -9,7 +9,7 @@ namespace ray {
 void TaskLogger::LogRequest(const rpc::PushTaskRequest &request, const WorkerID worker_id) {
   RAY_LOG(DEBUG) << "Logging request";
   std::ofstream persistent;
-  persistent.open("/Users/accheng/Documents/ray_source/worker_log_" + worker_id.Hex() + ".txt",
+  persistent.open("/Users/samyu/Documents/ray-src/worker_log_" + worker_id.Hex() + ".txt",
   	std::ofstream::out | std::ofstream::app | std::ios::binary);
   RAY_CHECK(persistent.good());
   request.SerializeToOstream(&persistent);

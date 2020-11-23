@@ -350,8 +350,14 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     RAY_CHECK(num_returns >= 0);
 
     std::vector<std::shared_ptr<RayObject>> return_objects;
+    // Time task execution and print to log.
+    auto start_time = current_time_ms();
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
                                 reply->mutable_borrowed_refs());
+    auto end_time = current_time_ms();
+    RAY_LOG(DEBUG) << "accept_callback finished task";
+    TaskID task_id = task_spec.TaskId();
+    RAY_LOG(DEBUG) << "Task duration for task " << task_id << " is " << (end_time - start_time) << "ms";
 
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {
