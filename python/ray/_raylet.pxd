@@ -92,6 +92,7 @@ cdef class CoreWorker:
         object async_event_loop
         object plasma_event_handler
         c_bool is_local_mode
+        object actor_handles
 
     cdef _create_put_buffer(self, shared_ptr[CBuffer] &metadata,
                             size_t data_size, ObjectRef object_ref,

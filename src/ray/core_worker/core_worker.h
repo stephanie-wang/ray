@@ -871,8 +871,6 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   void HandleLocalGC(const rpc::LocalGCRequest &request, rpc::LocalGCReply *reply,
                      rpc::SendReplyCallback send_reply_callback) override;
 
-  void HandleActorFailure(const ActorID &actor_id);
-
   // Spill objects to external storage.
   void HandleSpillObjects(const rpc::SpillObjectsRequest &request,
                           rpc::SpillObjectsReply *reply,
