@@ -93,6 +93,7 @@ cdef class CoreWorker:
         object plasma_event_handler
         c_bool is_local_mode
         object actor_handles
+        object object_ref_failure_callbacks
 
     cdef _create_put_buffer(self, shared_ptr[CBuffer] &metadata,
                             size_t data_size, ObjectRef object_ref,

@@ -78,3 +78,9 @@ cdef class ObjectRef(BaseID):
         # A hack to keep a reference to the object ref for ref counting.
         future.object_ref = self
         return future
+
+    def on_failure(self, callback):
+        # Register this object ref's callback with the core worker.
+        core_worker = ray.worker.global_worker.core_worker
+        core_worker.register_object_ref_failure_callback(ObjectID(self.data.Binary()), callback)
+        return self

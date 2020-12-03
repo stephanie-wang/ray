@@ -90,7 +90,8 @@ struct CoreWorkerOptions {
         terminate_asyncio_thread(nullptr),
         serialized_job_config(""),
         metrics_agent_port(-1),
-        on_actor_failure(nullptr) {}
+        on_actor_failure(nullptr),
+        on_object_failure(nullptr) {}
 
   /// Type of this worker (i.e., DRIVER or WORKER).
   WorkerType worker_type;
@@ -164,6 +165,7 @@ struct CoreWorkerOptions {
   int metrics_agent_port;
 
   std::function<void(const ActorID &)> on_actor_failure;
+  std::function<void(const ObjectID &)> on_object_failure;
 };
 
 /// Lifecycle management of one or more `CoreWorker` instances in a process.

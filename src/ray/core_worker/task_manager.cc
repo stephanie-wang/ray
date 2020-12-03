@@ -333,6 +333,10 @@ bool TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
     MarkPendingTaskFailed(task_id, spec, error_type);
   }
 
+  for (size_t i = 0; i < spec.NumReturns(); i++) {
+    on_object_failure_(spec.ReturnId(i));
+  }
+
   ShutdownIfNeeded();
 
   return will_retry;

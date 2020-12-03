@@ -2,15 +2,23 @@ import ray
 
 import os
 import signal
+import sys
 
 # TODOs:
 # - try to support callbacks on actor task failure
 #   - save the callback
 #   - call the callback on actor task failure
+#   - handle case where object already failed (maybe)
 # - try to support context
+# - allow calling another task as part of the callback, and replacing the
+#   original task's future with the new one.
 # - writing some demo code
 #   - mimic the current xgboost failure handling code
 #   - show how it would work with the new API
+
+@ray.remote
+def fail_task():
+    sys.exit(-1)
 
 @ray.remote
 class Child:
@@ -32,7 +40,9 @@ class Supervisor:
 
     def send(self, num):
         self.child.inc.remote(num).on_failure(
-                lambda handle, args: handle.inc.remote(*args))
+                lambda: print("task failed"))
+
+        #self.child.inc.remote(num).on_failure(self.child.inc.remote)
 
     def kill_child(self):
         pid = ray.get(self.child.pid.remote())
@@ -60,4 +70,7 @@ class LoadBalancer:
 if __name__ == '__main__':
     ray.init()
     supervisor = Supervisor.remote()
-    ray.get(supervisor.kill_child.remote())
+    supervisor.kill_child.remote()
+    ray.get(supervisor.send.remote(1))
+
+    ray.get(fail_task.remote().on_failure(lambda: print("non-actor task died")))

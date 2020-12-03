@@ -59,12 +59,14 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
               std::shared_ptr<ReferenceCounter> reference_counter,
               RetryTaskCallback retry_task_callback,
               const std::function<bool(const NodeID &node_id)> &check_node_alive,
-              ReconstructObjectCallback reconstruct_object_callback)
+              ReconstructObjectCallback reconstruct_object_callback,
+              std::function<void(const ObjectID &)> on_object_failure)
       : in_memory_store_(in_memory_store),
         reference_counter_(reference_counter),
         retry_task_callback_(retry_task_callback),
         check_node_alive_(check_node_alive),
-        reconstruct_object_callback_(reconstruct_object_callback) {
+        reconstruct_object_callback_(reconstruct_object_callback),
+        on_object_failure_(on_object_failure) {
     reference_counter_->SetReleaseLineageCallback(
         [this](const ObjectID &object_id, std::vector<ObjectID> *ids_to_release) {
           RemoveLineageReference(object_id, ids_to_release);
@@ -247,6 +249,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// returned by the task (or store an error if the object is not
   /// recoverable).
   const ReconstructObjectCallback reconstruct_object_callback_;
+
+  std::function<void(const ObjectID &)> on_object_failure_;
 
   // The number of task failures we have logged total.
   int64_t num_failure_logs_ GUARDED_BY(mu_) = 0;

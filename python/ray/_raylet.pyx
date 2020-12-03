@@ -586,6 +586,12 @@ cdef void on_actor_failure(const CActorID &c_actor_id) nogil:
         core_worker = ray.worker.global_worker.core_worker
         core_worker.on_actor_failure(actor_id)
 
+cdef void on_object_failure(const CObjectID &c_object_id) nogil:
+    with gil:
+        object_id = ObjectID(c_object_id.Binary())
+        core_worker = ray.worker.global_worker.core_worker
+        core_worker.on_object_failure(object_id)
+
 cdef c_vector[c_string] spill_objects_handler(
         const c_vector[CObjectID]& object_ids_to_spill) nogil:
     cdef c_vector[c_string] return_urls
@@ -796,18 +802,27 @@ cdef class CoreWorker:
         options.metrics_agent_port = metrics_agent_port
 
         options.on_actor_failure = on_actor_failure
+        options.on_object_failure = on_object_failure
 
         CCoreWorkerProcess.Initialize(options)
 
         self.actor_handles = {}
+        self.object_ref_failure_callbacks = {}
 
     def register_actor_handle(self, actor_id, actor_handle):
         self.actor_handles[actor_id] = actor_handle
+
+    def register_object_ref_failure_callback(self, object_id, callback):
+        self.object_ref_failure_callbacks[object_id] = callback
 
     def on_actor_failure(self, actor_id):
         actor_handle = self.actor_handles[actor_id]
         if actor_handle.on_failure_callback is not None:
             actor_handle.on_failure_callback()
+
+    def on_object_failure(self, object_id):
+        if object_id in self.object_ref_failure_callbacks:
+            self.object_ref_failure_callbacks[object_id]()
 
     def __dealloc__(self):
         with nogil:
