@@ -265,6 +265,31 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
   ShutdownIfNeeded();
 }
 
+std::vector<std::shared_ptr<RayObject>> GetOriginalTaskArgs(const TaskSpecification &task) {
+  std::vector<std::shared_ptr<RayObject>> args;
+
+  for (size_t i = 0; i < task.NumArgs(); ++i) {
+    if (task.ArgByRef(i)) {
+      RAY_CHECK(false);
+    } else {
+      // A pass-by-value argument.
+      std::shared_ptr<LocalMemoryBuffer> data = nullptr;
+      if (task.ArgDataSize(i)) {
+        data = std::make_shared<LocalMemoryBuffer>(const_cast<uint8_t *>(task.ArgData(i)),
+                                                   task.ArgDataSize(i));
+      }
+      std::shared_ptr<LocalMemoryBuffer> metadata = nullptr;
+      if (task.ArgMetadataSize(i)) {
+        metadata = std::make_shared<LocalMemoryBuffer>(
+            const_cast<uint8_t *>(task.ArgMetadata(i)), task.ArgMetadataSize(i));
+      }
+      args.push_back(
+          std::make_shared<RayObject>(data, metadata, task.ArgInlinedIds(i), /*copy_data=*/true));
+    }
+  }
+  return args;
+}
+
 bool TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_type,
                                     Status *status) {
   // Note that this might be the __ray_terminate__ task, so we don't log
@@ -334,7 +359,7 @@ bool TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
   }
 
   for (size_t i = 0; i < spec.NumReturns(); i++) {
-    on_object_failure_(spec.ReturnId(i));
+    on_object_failure_(spec.ReturnId(i), GetOriginalTaskArgs(spec));
   }
 
   ShutdownIfNeeded();

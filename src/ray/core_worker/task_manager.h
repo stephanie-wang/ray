@@ -60,7 +60,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
               RetryTaskCallback retry_task_callback,
               const std::function<bool(const NodeID &node_id)> &check_node_alive,
               ReconstructObjectCallback reconstruct_object_callback,
-              std::function<void(const ObjectID &)> on_object_failure)
+              std::function<void(const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &)> on_object_failure)
       : in_memory_store_(in_memory_store),
         reference_counter_(reference_counter),
         retry_task_callback_(retry_task_callback),
@@ -250,7 +250,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// recoverable).
   const ReconstructObjectCallback reconstruct_object_callback_;
 
-  std::function<void(const ObjectID &)> on_object_failure_;
+  std::function<void(const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &)> on_object_failure_;
 
   // The number of task failures we have logged total.
   int64_t num_failure_logs_ GUARDED_BY(mu_) = 0;

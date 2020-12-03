@@ -37,14 +37,18 @@ def g(s):
     pass
 
 
-g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
-g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
-
-g.remote("x").on_failure(lambda arg: print(arg))
+#g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
+#g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
+#
+#g.remote("x").on_failure(lambda arg: print(arg))
 
 
 @ray.remote
 def fail_task():
+    sys.exit(-1)
+
+@ray.remote(max_retries=0)
+def fail_task_with_arg(a, b):
     sys.exit(-1)
 
 @ray.remote
@@ -96,8 +100,10 @@ class LoadBalancer:
 
 if __name__ == '__main__':
     ray.init()
-    supervisor = Supervisor.remote()
-    supervisor.kill_child.remote()
-    ray.get(supervisor.send.remote(1))
 
-    ray.get(fail_task.remote().on_failure(lambda: print("non-actor task died")))
+    #supervisor = Supervisor.remote()
+    #supervisor.kill_child.remote()
+    #ray.get(supervisor.send.remote(1))
+
+    ray.get(fail_task_with_arg.remote("x", "y").on_failure(
+        lambda a, b: print("non-actor task died. args were:", a, b)))
