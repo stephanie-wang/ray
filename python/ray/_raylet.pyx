@@ -586,11 +586,21 @@ cdef void on_actor_failure(const CActorID &c_actor_id) nogil:
         core_worker = ray.worker.global_worker.core_worker
         core_worker.on_actor_failure(actor_id)
 
-cdef void on_object_failure(const CObjectID &c_object_id) nogil:
+cdef c_bool on_object_failure(const CObjectID &c_object_id) nogil:
     with gil:
         object_id = ObjectID(c_object_id.Binary())
         core_worker = ray.worker.global_worker.core_worker
-        core_worker.on_object_failure(object_id)
+
+        val = core_worker.on_object_failure(object_id)
+        if val is None:
+            return False
+        elif isinstance(val, ObjectID):
+            # TODO: Alias object ID
+            return True
+        else:
+            serialized = ray.worker.global_worker.get_serialization_context().serialize(val)
+            core_worker.put_serialized_object(serialized, object_ref=object_id)
+            return True
 
 cdef c_vector[c_string] spill_objects_handler(
         const c_vector[CObjectID]& object_ids_to_spill) nogil:
@@ -822,7 +832,7 @@ cdef class CoreWorker:
 
     def on_object_failure(self, object_id):
         if object_id in self.object_ref_failure_callbacks:
-            self.object_ref_failure_callbacks[object_id]()
+            return self.object_ref_failure_callbacks[object_id]()
 
     def __dealloc__(self):
         with nogil:

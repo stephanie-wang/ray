@@ -28,19 +28,19 @@ import sys
 # - Handle a failure immediately instead of only receiving the exception once
 # you call ray.get.
 
-@ray.remote
-def f():
-    return "xyz"
-
-@ray.remote
-def g(s):
-    pass
-
-
-g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
-g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
-
-g.remote("x").on_failure(lambda arg: print(arg))
+# @ray.remote
+# def f():
+#     return "xyz"
+#
+# @ray.remote
+# def g(s):
+#     pass
+#
+#
+# g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
+# g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
+#
+# g.remote("x").on_failure(lambda arg: print(arg))
 
 
 @ray.remote
@@ -96,8 +96,12 @@ class LoadBalancer:
 
 if __name__ == '__main__':
     ray.init()
-    supervisor = Supervisor.remote()
-    supervisor.kill_child.remote()
-    ray.get(supervisor.send.remote(1))
+    # supervisor = Supervisor.remote()
+    # supervisor.kill_child.remote()
+    # ray.get(supervisor.send.remote(1))
 
-    ray.get(fail_task.remote().on_failure(lambda: print("non-actor task died")))
+    def handle_error():
+        print("non-actor task died")
+        return "ABC"
+
+    print("Result", ray.get(fail_task.remote().on_failure(handle_error)))

@@ -244,7 +244,7 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
         int metrics_agent_port
         c_string serialized_job_config
         (void(const CActorID &) nogil) on_actor_failure
-        (void(const CObjectID &) nogil) on_object_failure
+        (c_bool(const CObjectID &) nogil) on_object_failure
 
     cdef cppclass CCoreWorkerProcess "ray::CoreWorkerProcess":
         @staticmethod

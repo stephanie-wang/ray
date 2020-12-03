@@ -165,7 +165,7 @@ struct CoreWorkerOptions {
   int metrics_agent_port;
 
   std::function<void(const ActorID &)> on_actor_failure;
-  std::function<void(const ObjectID &)> on_object_failure;
+  std::function<bool(const ObjectID &)> on_object_failure;
 };
 
 /// Lifecycle management of one or more `CoreWorker` instances in a process.
