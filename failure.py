@@ -43,7 +43,7 @@ import sys
 # g.remote("x").on_failure(lambda arg: print(arg))
 
 
-@ray.remote
+@ray.remote(max_retries=0)
 def fail_task():
     sys.exit(-1)
 
