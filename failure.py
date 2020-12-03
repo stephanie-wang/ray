@@ -6,15 +6,42 @@ import sys
 
 # TODOs:
 # - try to support callbacks on actor task failure
-#   - save the callback
-#   - call the callback on actor task failure
 #   - handle case where object already failed (maybe)
 # - try to support context
+#   - [Stephanie] try to support passing the original args
 # - allow calling another task as part of the callback, and replacing the
 #   original task's future with the new one.
-# - writing some demo code
+#   - [Kai] replace the original future with a raw value returned by the
+#   callback.
+# - post the callbacks to the main event loop (for async and multithreaded
+#   actors)
+# - [Kai] writing some demo code
 #   - mimic the current xgboost failure handling code
 #   - show how it would work with the new API
+
+# Benefits:
+# - For actor handling, get immediate feedback when an actor has died.
+# Compared to current system, where you need to repeatedly ping or check the
+# actor's status.
+# - Easier to save the context (actor handle, arguments, etc) as part of the
+# failure handling for an object ref.
+# - Handle a failure immediately instead of only receiving the exception once
+# you call ray.get.
+
+@ray.remote
+def f():
+    return "xyz"
+
+@ray.remote
+def g(s):
+    pass
+
+
+g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
+g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
+
+g.remote("x").on_failure(lambda arg: print(arg))
+
 
 @ray.remote
 def fail_task():
