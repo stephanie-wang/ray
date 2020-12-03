@@ -133,11 +133,13 @@ void ActorManager::HandleActorStateNotification(const ActorID &actor_id,
                 << ", num_restarts: " << actor_data.num_restarts();
   if (actor_data.state() == gcs::ActorTableData::RESTARTING) {
     direct_actor_submitter_->DisconnectActor(actor_id, actor_data.num_restarts(), false);
+    on_actor_failure_(actor_id);
   } else if (actor_data.state() == gcs::ActorTableData::DEAD) {
     direct_actor_submitter_->DisconnectActor(actor_id, actor_data.num_restarts(), true);
     // We cannot erase the actor handle here because clients can still
     // submit tasks to dead actors. This also means we defer unsubscription,
     // otherwise we crash when bulk unsubscribing all actor handles.
+    on_actor_failure_(actor_id);
   } else if (actor_data.state() == gcs::ActorTableData::ALIVE) {
     direct_actor_submitter_->ConnectActor(actor_id, actor_data.address(),
                                           actor_data.num_restarts());

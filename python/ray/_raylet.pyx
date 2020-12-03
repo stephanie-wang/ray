@@ -580,6 +580,11 @@ cdef void gc_collect() nogil:
                 "gc.collect() freed {} refs in {} seconds".format(
                     num_freed, end - start))
 
+cdef void on_actor_failure(const CActorID &c_actor_id) nogil:
+    with gil:
+        actor_id = ActorID(c_actor_id.Binary())
+        core_worker = ray.worker.global_worker.core_worker
+        core_worker.on_actor_failure(actor_id)
 
 cdef c_vector[c_string] spill_objects_handler(
         const c_vector[CObjectID]& object_ids_to_spill) nogil:
@@ -790,7 +795,19 @@ cdef class CoreWorker:
         options.serialized_job_config = serialized_job_config
         options.metrics_agent_port = metrics_agent_port
 
+        options.on_actor_failure = on_actor_failure
+
         CCoreWorkerProcess.Initialize(options)
+
+        self.actor_handles = {}
+
+    def register_actor_handle(self, actor_id, actor_handle):
+        self.actor_handles[actor_id] = actor_handle
+
+    def on_actor_failure(self, actor_id):
+        actor_handle = self.actor_handles[actor_id]
+        if actor_handle.on_failure_callback is not None:
+            actor_handle.on_failure_callback()
 
     def __dealloc__(self):
         with nogil:

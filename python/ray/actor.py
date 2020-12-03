@@ -687,6 +687,8 @@ class ActorClass:
             worker.current_session_and_job,
             original_handle=True)
 
+        worker.core_worker.register_actor_handle(actor_id, actor_handle)
+
         return actor_handle
 
 
@@ -759,6 +761,11 @@ class ActorHandle:
                     self._ray_method_num_returns[method_name],
                     decorator=self._ray_method_decorators.get(method_name))
                 setattr(self, method_name, method)
+
+        self.on_failure_callback = None
+
+    def on_failure(self, callback):
+        self.on_failure_callback = callback
 
     def __del__(self):
         # Mark that this actor handle has gone out of scope. Once all actor

@@ -515,7 +515,8 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
   }
 
   actor_manager_ = std::unique_ptr<ActorManager>(
-      new ActorManager(gcs_client_, direct_actor_submitter_, reference_counter_));
+      new ActorManager(gcs_client_, direct_actor_submitter_, reference_counter_,
+        options_.on_actor_failure));
 
   auto object_lookup_fn = [this](const ObjectID &object_id,
                                  const ObjectLookupCallback &callback) {
@@ -2308,6 +2309,12 @@ void CoreWorker::HandleLocalGC(const rpc::LocalGCRequest &request,
   } else {
     send_reply_callback(Status::NotImplemented("GC callback not defined"), nullptr,
                         nullptr);
+  }
+}
+
+void CoreWorker::HandleActorFailure(const ActorID &actor_id) {
+  if (options_.on_actor_failure != nullptr) {
+    options_.on_actor_failure(actor_id);
   }
 }
 

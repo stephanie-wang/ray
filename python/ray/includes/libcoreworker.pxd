@@ -243,6 +243,7 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
         (void() nogil) terminate_asyncio_thread
         int metrics_agent_port
         c_string serialized_job_config
+        (void(const CActorID &) nogil) on_actor_failure
 
     cdef cppclass CCoreWorkerProcess "ray::CoreWorkerProcess":
         @staticmethod

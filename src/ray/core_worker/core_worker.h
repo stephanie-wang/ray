@@ -89,7 +89,8 @@ struct CoreWorkerOptions {
         num_workers(0),
         terminate_asyncio_thread(nullptr),
         serialized_job_config(""),
-        metrics_agent_port(-1) {}
+        metrics_agent_port(-1),
+        on_actor_failure(nullptr) {}
 
   /// Type of this worker (i.e., DRIVER or WORKER).
   WorkerType worker_type;
@@ -161,6 +162,8 @@ struct CoreWorkerOptions {
   /// The port number of a metrics agent that imports metrics from core workers.
   /// -1 means there's no such agent.
   int metrics_agent_port;
+
+  std::function<void(const ActorID &)> on_actor_failure;
 };
 
 /// Lifecycle management of one or more `CoreWorker` instances in a process.
@@ -867,6 +870,8 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   /// Trigger local GC on this worker.
   void HandleLocalGC(const rpc::LocalGCRequest &request, rpc::LocalGCReply *reply,
                      rpc::SendReplyCallback send_reply_callback) override;
+
+  void HandleActorFailure(const ActorID &actor_id);
 
   // Spill objects to external storage.
   void HandleSpillObjects(const rpc::SpillObjectsRequest &request,

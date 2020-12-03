@@ -78,10 +78,12 @@ class ActorManager {
   explicit ActorManager(
       std::shared_ptr<gcs::GcsClient> gcs_client,
       std::shared_ptr<CoreWorkerDirectActorTaskSubmitterInterface> direct_actor_submitter,
-      std::shared_ptr<ReferenceCounterInterface> reference_counter)
+      std::shared_ptr<ReferenceCounterInterface> reference_counter,
+      std::function<void(const ActorID &)> on_actor_failure)
       : gcs_client_(gcs_client),
         direct_actor_submitter_(direct_actor_submitter),
-        reference_counter_(reference_counter) {}
+        reference_counter_(reference_counter),
+        on_actor_failure_(on_actor_failure) {}
 
   ~ActorManager() = default;
 
@@ -188,6 +190,8 @@ class ActorManager {
   /// Used to keep track of actor handle reference counts.
   /// All actor handle related ref counting logic should be included here.
   std::shared_ptr<ReferenceCounterInterface> reference_counter_;
+
+  std::function<void(const ActorID &)> on_actor_failure_;
 
   mutable absl::Mutex mutex_;
 
