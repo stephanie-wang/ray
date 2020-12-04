@@ -60,7 +60,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
               RetryTaskCallback retry_task_callback,
               const std::function<bool(const NodeID &node_id)> &check_node_alive,
               ReconstructObjectCallback reconstruct_object_callback,
-              std::function<std::shared_ptr<RayObject>(const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &)> on_object_failure)
+              std::function<bool (const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &, std::shared_ptr<RayObject> *)> on_object_failure)
       : in_memory_store_(in_memory_store),
         reference_counter_(reference_counter),
         retry_task_callback_(retry_task_callback),
@@ -138,6 +138,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// \param[in] task_id to cancel.
   /// \return Whether the task was pending and was marked for cancellation.
   bool MarkTaskCanceled(const TaskID &task_id) override;
+
+  void AliasObjectId(const ObjectID &original, const ObjectID &alias);
 
   /// Return the spec for a pending task.
   absl::optional<TaskSpecification> GetTaskSpec(const TaskID &task_id) const;
@@ -250,7 +252,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// recoverable).
   const ReconstructObjectCallback reconstruct_object_callback_;
 
-  std::function<std::shared_ptr<RayObject>(const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &)> on_object_failure_;
+  std::function<bool (const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &, std::shared_ptr<RayObject> *)> on_object_failure_;
 
   // The number of task failures we have logged total.
   int64_t num_failure_logs_ GUARDED_BY(mu_) = 0;
@@ -274,6 +276,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
 
   /// Optional shutdown hook to call when pending tasks all finish.
   std::function<void()> shutdown_hook_ GUARDED_BY(mu_) = nullptr;
+
+  absl::flat_hash_map<ObjectID, ObjectID> object_id_aliases;
 };
 
 }  // namespace ray

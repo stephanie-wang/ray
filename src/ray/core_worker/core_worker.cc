@@ -2407,6 +2407,10 @@ void CoreWorker::GetAsync(const ObjectID &object_id, SetResultCallback success_c
   });
 }
 
+void CoreWorker::AliasObjectId(const ObjectID &original, const ObjectID &alias) {
+  task_manager_->AliasObjectId(original, alias);
+}
+
 void CoreWorker::PlasmaCallback(SetResultCallback success,
                                 std::shared_ptr<RayObject> ray_object, ObjectID object_id,
                                 void *py_future) {

@@ -586,7 +586,7 @@ cdef void on_actor_failure(const CActorID &c_actor_id) nogil:
         core_worker = ray.worker.global_worker.core_worker
         core_worker.on_actor_failure(actor_id)
 
-cdef shared_ptr[CRayObject] on_object_failure_gil(const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args):
+cdef c_bool on_object_failure_gil(const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args, shared_ptr[CRayObject] *return_val):
     cdef:
         shared_ptr[CRayObject] empty_data
         c_vector[CObjectID] empty_ids
@@ -602,11 +602,11 @@ cdef shared_ptr[CRayObject] on_object_failure_gil(const CObjectID &c_object_id, 
     core_worker = ray.worker.global_worker.core_worker
     val = core_worker.on_object_failure(object_id, args)
     if val is None:
-        return empty_data
-    elif isinstance(val, ObjectID):
-        assert False
-        # TODO: Alias object ID
-        return empty_data
+        return False
+    elif isinstance(val, ObjectRef):
+        CCoreWorkerProcess.GetCoreWorker().AliasObjectId(c_object_id,
+                (<ObjectRef>val).native())
+        return True
     else:
         context = ray.worker.global_worker.get_serialization_context()
         serialized_object = context.serialize(val)
@@ -615,14 +615,15 @@ cdef shared_ptr[CRayObject] on_object_failure_gil(const CObjectID &c_object_id, 
         if serialized_object.total_bytes > 0:
             (<SerializedObject>serialized_object).write_to(
                 Buffer.make(data))
-        return make_shared[CRayObject](
+        return_val[0] = make_shared[CRayObject](
             data, string_to_buffer(serialized_object.metadata),
             empty_ids)
+        return True
 
 
-cdef shared_ptr[CRayObject] on_object_failure(const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args) nogil:
+cdef c_bool on_object_failure(const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args, shared_ptr[CRayObject] *return_val) nogil:
     with gil:
-        return on_object_failure_gil(c_object_id, c_args)
+        return on_object_failure_gil(c_object_id, c_args, return_val)
 
 cdef c_vector[c_string] spill_objects_handler(
         const c_vector[CObjectID]& object_ids_to_spill) nogil:

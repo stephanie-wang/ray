@@ -48,7 +48,7 @@ def fail_task():
     sys.exit(-1)
 
 @ray.remote(max_retries=0)
-def fail_task_with_arg(a, b):
+def fail_task_with_args(a, b):
     sys.exit(-1)
 
 @ray.remote
@@ -105,11 +105,20 @@ if __name__ == '__main__':
     #supervisor.kill_child.remote()
     #ray.get(supervisor.send.remote(1))
 
-    #ray.get(fail_task_with_arg.remote("x", "y").on_failure(
-    #    lambda a, b: print("non-actor task died. args were:", a, b)))
+    fail_task_with_args.remote("x", "y").on_failure(
+        lambda a, b: print("non-actor task died. args were:", a, b))
 
     def handle_error():
-        print("non-actor task died")
+        print("non-actor task died, re-executing")
         return "ABC"
 
     print("Result", ray.get(fail_task.remote().on_failure(handle_error)))
+
+    @ray.remote
+    def handle_error(x, y):
+        print("non-actor task died, re-executing with args")
+        return x + y
+
+    print("Result", ray.get(
+        fail_task_with_args.remote("x", "y").on_failure(handle_error.remote)
+        ))

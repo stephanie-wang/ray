@@ -221,6 +221,15 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
       if (stored_in_direct_memory) {
         direct_return_ids.push_back(object_id);
       }
+
+      auto alias = object_id_aliases.find(object_id);
+      if (alias != object_id_aliases.end()) {
+        RAY_CHECK(in_memory_store_->Put(
+            RayObject(data_buffer, metadata_buffer,
+                      IdVectorFromProtobuf<ObjectID>(return_object.nested_inlined_ids())),
+            alias->second));
+        object_id_aliases.erase(alias);
+      }
     }
   }
 
@@ -263,6 +272,10 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
   RemoveFinishedTaskReferences(spec, release_lineage, worker_addr, reply.borrowed_refs());
 
   ShutdownIfNeeded();
+}
+
+void TaskManager::AliasObjectId(const ObjectID &original, const ObjectID &alias) {
+  object_id_aliases[alias] = original;
 }
 
 std::vector<std::shared_ptr<RayObject>> GetOriginalTaskArgs(const TaskSpecification &task) {
@@ -333,10 +346,10 @@ bool TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
   } else {
     bool got_new_result = false;
     for (size_t i = 0; i < spec.NumReturns(); i++) {
-      auto return_val = on_object_failure_(spec.ReturnId(i), GetOriginalTaskArgs(spec));
-      if (return_val != nullptr) {
+      std::shared_ptr<RayObject> return_val = nullptr;
+      got_new_result |= on_object_failure_(spec.ReturnId(i), GetOriginalTaskArgs(spec), &return_val);
+      if (got_new_result && return_val != nullptr) {
         RAY_UNUSED(in_memory_store_->Put(*return_val, spec.ReturnId(i)));
-        got_new_result = true;
       }
     }
 

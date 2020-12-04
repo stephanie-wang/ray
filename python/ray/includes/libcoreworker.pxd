@@ -197,6 +197,7 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
                                const double capacity,
                                const CNodeID &client_Id)
         CRayStatus SpillObjects(const c_vector[CObjectID] &object_ids)
+        void AliasObjectId(const CObjectID &original, const CObjectID &alias)
 
     cdef cppclass CCoreWorkerOptions "ray::CoreWorkerOptions":
         CWorkerType worker_type
@@ -244,7 +245,7 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
         int metrics_agent_port
         c_string serialized_job_config
         (void(const CActorID &) nogil) on_actor_failure
-        (shared_ptr[CRayObject](const CObjectID &, const c_vector[shared_ptr[CRayObject]] &) nogil) on_object_failure
+        (c_bool(const CObjectID &, const c_vector[shared_ptr[CRayObject]] &, shared_ptr[CRayObject] *) nogil) on_object_failure
 
     cdef cppclass CCoreWorkerProcess "ray::CoreWorkerProcess":
         @staticmethod

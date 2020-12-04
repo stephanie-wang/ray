@@ -165,7 +165,7 @@ struct CoreWorkerOptions {
   int metrics_agent_port;
 
   std::function<void(const ActorID &)> on_actor_failure;
-  std::function<std::shared_ptr<RayObject>(const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &)> on_object_failure;
+  std::function<bool (const ObjectID &, const std::vector<std::shared_ptr<RayObject>> &, std::shared_ptr<RayObject> *)> on_object_failure;
 };
 
 /// Lifecycle management of one or more `CoreWorker` instances in a process.
@@ -912,6 +912,8 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   /// \return void
   void GetAsync(const ObjectID &object_id, SetResultCallback success_callback,
                 void *python_future);
+
+  void AliasObjectId(const ObjectID &original, const ObjectID &alias);
 
  private:
   void SetCurrentTaskId(const TaskID &task_id);
