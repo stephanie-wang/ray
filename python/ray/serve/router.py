@@ -49,6 +49,8 @@ class ReplicaSet:
     """Data structure representing a set of replica actor handles"""
 
     def __init__(self):
+        self.blacklist = set()
+
         # NOTE(simon): We have to do this because max_concurrent_queries
         # and the replica handles come from different long poll keys.
         self.max_concurrent_queries: int = 8
@@ -96,6 +98,10 @@ class ReplicaSet:
                 self.in_flight_queries.keys())
             self.config_updated_event.set()
 
+    def reassign(self, handle, query):
+        self.blacklist.add(handle)
+        return self._try_assign_replica(query)
+
     def _try_assign_replica(self, query: Query) -> Optional[ray.ObjectRef]:
         """Try to assign query to a replica, return the object ref is succeeded
         or return None if it can't assign this query to any replicas.
@@ -106,7 +112,10 @@ class ReplicaSet:
                    ) >= self.max_concurrent_queries:
                 # This replica is overloaded, try next one
                 continue
+            if replica in self.blacklist:
+                continue
             logger.debug(f"Replica set assigned {query} to {replica}")
+            #ref = replica.handle_request.remote(query).on_failure(self.reassign)
             ref = replica.handle_request.remote(query)
             self.in_flight_queries[replica].add(ref)
             return ref

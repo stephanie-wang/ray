@@ -233,7 +233,7 @@ class ActorStateReconciler:
                 name=replica_name,
                 lifetime="detached" if self.detached else None,
                 max_restarts=-1,
-                max_task_retries=-1,
+                #max_task_retries=-1,
                 **backend_info.replica_config.ray_actor_options).remote(
                     backend_tag, replica_tag,
                     backend_info.replica_config.actor_init_args,
