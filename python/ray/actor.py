@@ -766,6 +766,7 @@ class ActorHandle:
 
     def on_failure(self, callback):
         self.on_failure_callback = callback
+        return self
 
     def __del__(self):
         # Mark that this actor handle has gone out of scope. Once all actor

@@ -851,11 +851,11 @@ cdef class CoreWorker:
     def on_actor_failure(self, actor_id):
         actor_handle = self.actor_handles[actor_id]
         if actor_handle.on_failure_callback is not None:
-            actor_handle.on_failure_callback()
+            actor_handle.on_failure_callback(actor_handle)
 
     def on_object_failure(self, object_id, args):
         if object_id in self.object_ref_failure_callbacks:
-            return self.object_ref_failure_callbacks[object_id](*args)
+            return self.object_ref_failure_callbacks[object_id](object_id, *args)
 
     def __dealloc__(self):
         with nogil:

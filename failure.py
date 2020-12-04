@@ -47,9 +47,11 @@ import sys
 def fail_task():
     sys.exit(-1)
 
+
 @ray.remote(max_retries=0)
 def fail_task_with_args(a, b):
     sys.exit(-1)
+
 
 @ray.remote
 class Child:
@@ -63,6 +65,7 @@ class Child:
     def pid(self):
         return os.getpid()
 
+
 @ray.remote
 class Supervisor:
     def __init__(self):
@@ -70,14 +73,14 @@ class Supervisor:
         self.child.on_failure(lambda: print("oh no"))
 
     def send(self, num):
-        self.child.inc.remote(num).on_failure(
-                lambda: print("task failed"))
+        self.child.inc.remote(num).on_failure(lambda: print("task failed"))
 
         #self.child.inc.remote(num).on_failure(self.child.inc.remote)
 
     def kill_child(self):
         pid = ray.get(self.child.pid.remote())
         os.kill(pid, signal.SIGKILL)
+
 
 @ray.remote
 class LoadBalancer:
@@ -86,8 +89,7 @@ class LoadBalancer:
 
     def submit(self):
         replica = self.replicas.pop(0)
-        replica.submit.remote().on_failure(
-                lambda handle, args: self.submit())
+        replica.submit.remote().on_failure(lambda handle, args: self.submit())
         self.replicas.append(replica)
 
 
@@ -96,7 +98,6 @@ class LoadBalancer:
 # - resubmit a task on child death - could be same as our current max task
 #   retries but more flexible.
 # - actor replicas: resubmit a task to a replica upon failure
-
 
 if __name__ == '__main__':
     ray.init()
@@ -119,6 +120,8 @@ if __name__ == '__main__':
         print("non-actor task died, re-executing with args")
         return x + y
 
-    print("Result", ray.get(
-        fail_task_with_args.remote("x", "y").on_failure(handle_error.remote)
-        ))
+    print(
+        "Result",
+        ray.get(
+            fail_task_with_args.remote("x",
+                                       "y").on_failure(handle_error.remote)))
