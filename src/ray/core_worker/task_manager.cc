@@ -333,33 +333,40 @@ bool TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
   } else {
     bool got_new_result = false;
     for (size_t i = 0; i < spec.NumReturns(); i++) {
-      got_new_result |= on_object_failure_(spec.ReturnId(i), GetOriginalTaskArgs(spec));
+      auto return_val = on_object_failure_(spec.ReturnId(i), GetOriginalTaskArgs(spec));
+      if (return_val != nullptr) {
+        RAY_UNUSED(in_memory_store_->Put(*return_val, spec.ReturnId(i)));
+        got_new_result = true;
+      }
     }
+
+    // Throttled logging of task failure errors.
     if (!got_new_result) {
-      // Throttled logging of task failure errors.
-      {
-        absl::MutexLock lock(&mu_);
-        auto debug_str = spec.DebugString();
-        if (debug_str.find("__ray_terminate__") == std::string::npos &&
-            (num_failure_logs_ < kTaskFailureThrottlingThreshold ||
-             (current_time_ms() - last_log_time_ms_) >
-                 kTaskFailureLoggingFrequencyMillis)) {
-          if (num_failure_logs_++ == kTaskFailureThrottlingThreshold) {
-            RAY_LOG(WARNING) << "Too many failure logs, throttling to once every "
-                             << kTaskFailureLoggingFrequencyMillis << " millis.";
-          }
-          last_log_time_ms_ = current_time_ms();
-          if (status != nullptr) {
-            RAY_LOG(ERROR) << "Task failed: " << *status << ": " << spec.DebugString();
-          } else {
-            RAY_LOG(ERROR) << "Task failed: " << spec.DebugString();
-          }
+      absl::MutexLock lock(&mu_);
+      auto debug_str = spec.DebugString();
+      if (debug_str.find("__ray_terminate__") == std::string::npos &&
+          (num_failure_logs_ < kTaskFailureThrottlingThreshold ||
+           (current_time_ms() - last_log_time_ms_) >
+               kTaskFailureLoggingFrequencyMillis)) {
+        if (num_failure_logs_++ == kTaskFailureThrottlingThreshold) {
+          RAY_LOG(WARNING) << "Too many failure logs, throttling to once every "
+                           << kTaskFailureLoggingFrequencyMillis << " millis.";
+        }
+        last_log_time_ms_ = current_time_ms();
+        if (status != nullptr) {
+          RAY_LOG(ERROR) << "Task failed: " << *status << ": " << spec.DebugString();
+        } else {
+          RAY_LOG(ERROR) << "Task failed: " << spec.DebugString();
         }
       }
-      // The worker failed to execute the task, so it cannot be borrowing any
-      // objects.
-      RemoveFinishedTaskReferences(spec, release_lineage, rpc::Address(),
-                                   ReferenceCounter::ReferenceTableProto());
+    }
+
+    // The worker failed to execute the task, so it cannot be borrowing any
+    // objects.
+    RemoveFinishedTaskReferences(spec, release_lineage, rpc::Address(),
+                                 ReferenceCounter::ReferenceTableProto());
+
+    if (!got_new_result) {
       MarkPendingTaskFailed(task_id, spec, error_type);
     }
   }
