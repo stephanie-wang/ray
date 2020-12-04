@@ -28,22 +28,22 @@ import sys
 # - Handle a failure immediately instead of only receiving the exception once
 # you call ray.get.
 
-@ray.remote
-def f():
-    return "xyz"
-
-@ray.remote
-def g(s):
-    pass
-
-
-#g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
-#g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
+# @ray.remote
+# def f():
+#     return "xyz"
 #
-#g.remote("x").on_failure(lambda arg: print(arg))
+# @ray.remote
+# def g(s):
+#     pass
+#
+#
+# g.remote(f.remote().on_failure(lambda: "abc"))  # g gets "abc"
+# g.remote(f.remote().on_failure(lambda: print("oh no")))  # g gets normal exception
+#
+# g.remote("x").on_failure(lambda arg: print(arg))
 
 
-@ray.remote
+@ray.remote(max_retries=0)
 def fail_task():
     sys.exit(-1)
 
@@ -105,5 +105,11 @@ if __name__ == '__main__':
     #supervisor.kill_child.remote()
     #ray.get(supervisor.send.remote(1))
 
-    ray.get(fail_task_with_arg.remote("x", "y").on_failure(
-        lambda a, b: print("non-actor task died. args were:", a, b)))
+    #ray.get(fail_task_with_arg.remote("x", "y").on_failure(
+    #    lambda a, b: print("non-actor task died. args were:", a, b)))
+
+    def handle_error():
+        print("non-actor task died")
+        return "ABC"
+
+    print("Result", ray.get(fail_task.remote().on_failure(handle_error)))
