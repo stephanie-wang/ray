@@ -345,9 +345,13 @@ bool TaskManager::PendingTaskFailed(const TaskID &task_id, rpc::ErrorType error_
     will_retry = true;
   } else {
     bool got_new_result = false;
+    ActorID actor_id;
+    if (spec.IsActorTask()) {
+      actor_id = spec.ActorId();
+    }
     for (size_t i = 0; i < spec.NumReturns(); i++) {
       std::shared_ptr<RayObject> return_val = nullptr;
-      got_new_result |= on_object_failure_(spec.ReturnId(i), GetOriginalTaskArgs(spec), &return_val);
+      got_new_result |= on_object_failure_(actor_id, spec.ReturnId(i), GetOriginalTaskArgs(spec), &return_val);
       if (got_new_result && return_val != nullptr) {
         RAY_UNUSED(in_memory_store_->Put(*return_val, spec.ReturnId(i)));
       }

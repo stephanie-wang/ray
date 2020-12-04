@@ -586,7 +586,7 @@ cdef void on_actor_failure(const CActorID &c_actor_id) nogil:
         core_worker = ray.worker.global_worker.core_worker
         core_worker.on_actor_failure(actor_id)
 
-cdef c_bool on_object_failure_gil(const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args, shared_ptr[CRayObject] *return_val):
+cdef c_bool on_object_failure_gil(const CActorID &c_actor_id, const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args, shared_ptr[CRayObject] *return_val):
     cdef:
         shared_ptr[CRayObject] empty_data
         c_vector[CObjectID] empty_ids
@@ -600,7 +600,8 @@ cdef c_bool on_object_failure_gil(const CObjectID &c_object_id, const c_vector[s
     args, kwargs = ray.signature.recover_args(args)
 
     core_worker = ray.worker.global_worker.core_worker
-    val = core_worker.on_object_failure(object_id, args)
+    actor_id = ActorID(c_actor_id.Binary())
+    val = core_worker.on_object_failure(actor_id, object_id, args)
     if val is None:
         return False
     elif isinstance(val, ObjectRef):
@@ -621,9 +622,9 @@ cdef c_bool on_object_failure_gil(const CObjectID &c_object_id, const c_vector[s
         return True
 
 
-cdef c_bool on_object_failure(const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args, shared_ptr[CRayObject] *return_val) nogil:
+cdef c_bool on_object_failure(const CActorID &c_actor_id, const CObjectID &c_object_id, const c_vector[shared_ptr[CRayObject]] &c_args, shared_ptr[CRayObject] *return_val) nogil:
     with gil:
-        return on_object_failure_gil(c_object_id, c_args, return_val)
+        return on_object_failure_gil(c_actor_id, c_object_id, c_args, return_val)
 
 cdef c_vector[c_string] spill_objects_handler(
         const c_vector[CObjectID]& object_ids_to_spill) nogil:
@@ -849,13 +850,18 @@ cdef class CoreWorker:
         self.object_ref_failure_callbacks[object_id] = callback
 
     def on_actor_failure(self, actor_id):
-        actor_handle = self.actor_handles[actor_id]
-        if actor_handle.on_failure_callback is not None:
-            actor_handle.on_failure_callback(actor_handle)
+        if actor_id in self.actor_handles:
+            actor_handle = self.actor_handles[actor_id]
+            if actor_handle.on_failure_callback is not None:
+                actor_handle.on_failure_callback(actor_handle)
 
-    def on_object_failure(self, object_id, args):
+    def on_object_failure(self, actor_id, object_id, args):
         if object_id in self.object_ref_failure_callbacks:
-            return self.object_ref_failure_callbacks[object_id](object_id, *args)
+            actor_handle = self.actor_handles.get(actor_id, None)
+            if actor_handle is None:
+                return self.object_ref_failure_callbacks[object_id](*args)
+            else:
+                return self.object_ref_failure_callbacks[object_id](actor_handle, *args)
 
     def __dealloc__(self):
         with nogil:
@@ -1373,11 +1379,15 @@ cdef class CoreWorker:
                       .GetCoreWorker()
                       .DeserializeAndRegisterActorHandle(
                           bytes, c_outer_object_id))
+
         cdef:
             # NOTE: This handle should not be stored anywhere.
             const CActorHandle* c_actor_handle = (
                 CCoreWorkerProcess.GetCoreWorker().GetActorHandle(c_actor_id))
-        return self.make_actor_handle(c_actor_handle)
+        handle = self.make_actor_handle(c_actor_handle)
+        actor_id = ActorID(c_actor_id.Binary())
+        self.register_actor_handle(actor_id, handle)
+        return handle
 
     def get_named_actor_handle(self, const c_string &name):
         cdef:
