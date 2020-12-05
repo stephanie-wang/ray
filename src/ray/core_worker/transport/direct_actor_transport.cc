@@ -15,7 +15,9 @@
 #include "ray/core_worker/transport/direct_actor_transport.h"
 
 #include <thread>
-
+#include <fstream>
+#include <thread>
+#include <chrono>
 #include "ray/common/task/task.h"
 
 using ray::rpc::ActorTableData;
@@ -161,6 +163,7 @@ void CoreWorkerDirectActorTaskSubmitter::ConnectActor(const ActorID &actor_id,
   queue->second.rpc_client = core_worker_client_pool_->GetOrConnect(address);
   // TODO(swang): This assumes that all replies from the previous incarnation
   // of the actor have been received. Fix this by setting an epoch for each
+
   // actor task, so we can ignore completed tasks from old epochs.
   RAY_LOG(INFO) << "Resetting caller starts at for actor " << actor_id << " from "
                 << queue->second.caller_starts_at << " to "
@@ -387,12 +390,32 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
       if (task_spec.IsActorCreationTask()) {
         RAY_LOG(INFO) << "Actor creation task finished, task_id: " << task_spec.TaskId()
                       << ", actor_id: " << task_spec.ActorCreationId();
-        // Tell raylet that an actor creation task has finished execution, so that
+        
+	// Simulated replay: sleep for length of time to replay all tasks. TODO.
+	std::ifstream infile("actor_durations_" + task_spec.ActorCreationId().Hex() + ".txt");
+        if (infile.is_open()) {
+	  int replay_time = 0;
+	  for(std::string line; std::getline(infile, line); ) {
+	    // Note: Reading durations from file has not-always-negligible overhead.
+            RAY_LOG(DEBUG) << "Reading line with duration: " << line;
+	    replay_time += std::stoi(line);
+	    infile.close();
+	  }
+	  std::this_thread::sleep_for(std::chrono::milliseconds(replay_time));
+	  RAY_LOG(DEBUG) << "Actor creation replay duration: " << replay_time;
+	}
+	// Tell raylet that an actor creation task has finished execution, so that
         // raylet can publish actor creation event to GCS, and mark this worker as
         // actor, thus if this worker dies later raylet will restart the actor.
         RAY_CHECK_OK(task_done_());
       }
     }
+
+    // Log task duration to enable replay. Do this here so that actor creation
+    // task time is not replayed as part of actor creation.
+    int duration = end_time - start_time; // Duration in ms (see L361)
+    logger_->LogDuration(duration, worker_context_.GetCurrentActorID());
+
     if (status.IsSystemExit()) {
       // Don't allow the worker to be reused, even though the reply status is OK.
       // The worker will be shutting down shortly.

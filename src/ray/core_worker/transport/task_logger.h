@@ -10,7 +10,9 @@ class TaskLogger {
  public:
   TaskLogger() {}
 
-  void LogRequest(const rpc::PushTaskRequest &request, const WorkerID worker_id);
+  void LogRequest(const rpc::PushTaskRequest &request, const ActorID actor_id);
+
+  void LogDuration(const int duration, const ActorID actor_id);
 
  private:
   std::list<const rpc::PushTaskRequest> log_;

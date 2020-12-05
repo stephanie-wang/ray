@@ -6,10 +6,10 @@
 
 namespace ray {
 
-void TaskLogger::LogRequest(const rpc::PushTaskRequest &request, const WorkerID worker_id) {
+void TaskLogger::LogRequest(const rpc::PushTaskRequest &request, const ActorID actor_id) {
   RAY_LOG(DEBUG) << "Logging request";
   std::ofstream persistent;
-  persistent.open("/Users/samyu/Documents/ray-src/worker_log_" + worker_id.Hex() + ".txt",
+  persistent.open("/Users/samyu/Documents/ray-src/actor_log_" + actor_id.Hex() + ".txt",
   	std::ofstream::out | std::ofstream::app | std::ios::binary);
   RAY_CHECK(persistent.good());
   request.SerializeToOstream(&persistent);
@@ -17,5 +17,18 @@ void TaskLogger::LogRequest(const rpc::PushTaskRequest &request, const WorkerID 
   persistent.close();
   log_.push_back(request);
 }
+
+void TaskLogger::LogDuration(const int duration, const ActorID actor_id) {
+  RAY_LOG(DEBUG) << "Logging duration";
+  std::ofstream persistent;
+  persistent.open("/Users/samyu/Documents/ray-src/actor_durations_" + actor_id.Hex() + ".txt",
+	std::ofstream::out | std::ofstream::app);
+  RAY_CHECK(persistent.good());
+  persistent << duration;
+  persistent << "\n";
+  RAY_CHECK(persistent.good());
+  persistent.close();
+}
+
 
 }  // namespace ray
