@@ -16,7 +16,7 @@
 
 #include <thread>
 #include <fstream>
-#include <thread>
+#include <string>
 #include <chrono>
 #include "ray/common/task/task.h"
 
@@ -359,9 +359,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
                                 reply->mutable_borrowed_refs());
     auto end_time = current_time_ms();
     RAY_LOG(DEBUG) << "accept_callback finished task";
-    TaskID task_id = task_spec.TaskId();
-    RAY_LOG(DEBUG) << "Task duration for task " << task_id << " is " << (end_time - start_time) << "ms";
-
+    
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {
       for (size_t i = 0; i < return_objects.size(); i++) {
@@ -395,12 +393,13 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
 	std::ifstream infile("actor_durations_" + task_spec.ActorCreationId().Hex() + ".txt");
         if (infile.is_open()) {
 	  int replay_time = 0;
-	  for(std::string line; std::getline(infile, line); ) {
+	  std::string line;
+	  while(std::getline(infile, line)) {
 	    // Note: Reading durations from file has not-always-negligible overhead.
             RAY_LOG(DEBUG) << "Reading line with duration: " << line;
 	    replay_time += std::stoi(line);
-	    infile.close();
 	  }
+	  infile.close();
 	  std::this_thread::sleep_for(std::chrono::milliseconds(replay_time));
 	  RAY_LOG(DEBUG) << "Actor creation replay duration: " << replay_time;
 	}
@@ -415,6 +414,8 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     // task time is not replayed as part of actor creation.
     int duration = end_time - start_time; // Duration in ms (see L361)
     logger_->LogDuration(duration, worker_context_.GetCurrentActorID());
+    TaskID task_id = task_spec.TaskId();
+    RAY_LOG(DEBUG) << "Task duration for task " << task_id << " is " << (end_time - start_time) << "ms";
 
     if (status.IsSystemExit()) {
       // Don't allow the worker to be reused, even though the reply status is OK.
