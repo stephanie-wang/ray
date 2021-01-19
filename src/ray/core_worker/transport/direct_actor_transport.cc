@@ -14,10 +14,12 @@
 
 #include "ray/core_worker/transport/direct_actor_transport.h"
 
-#include <thread>
-#include <fstream>
-#include <string>
 #include <chrono>
+#include <iostream>
+#include <fstream>
+#include <stdio.h>
+#include <thread>
+
 #include "ray/common/task/task.h"
 
 using ray::rpc::ActorTableData;
@@ -163,12 +165,13 @@ void CoreWorkerDirectActorTaskSubmitter::ConnectActor(const ActorID &actor_id,
   queue->second.rpc_client = core_worker_client_pool_->GetOrConnect(address);
   // TODO(swang): This assumes that all replies from the previous incarnation
   // of the actor have been received. Fix this by setting an epoch for each
-
   // actor task, so we can ignore completed tasks from old epochs.
-  RAY_LOG(INFO) << "Resetting caller starts at for actor " << actor_id << " from "
-                << queue->second.caller_starts_at << " to "
-                << queue->second.num_completed_tasks;
-  queue->second.caller_starts_at = queue->second.num_completed_tasks;
+  RAY_LOG(DEBUG) << "Resetting caller starts at for actor " << actor_id << " from "
+                 << queue->second.caller_starts_at << " to "
+                 << queue->second.next_task_reply_position;
+  queue->second.caller_starts_at = queue->second.next_task_reply_position;
+
+  ResendOutOfOrderTasks(actor_id);
   SendPendingTasks(actor_id);
 }
 
@@ -226,31 +229,52 @@ void CoreWorkerDirectActorTaskSubmitter::SendPendingTasks(const ActorID &actor_i
   if (!it->second.rpc_client) {
     return;
   }
+  auto &client_queue = it->second;
 
   // Check if there is a pending force kill. If there is, send it and disconnect the
   // client.
-  if (it->second.pending_force_kill) {
+  if (client_queue.pending_force_kill) {
     RAY_LOG(INFO) << "Sending KillActor request to actor " << actor_id;
     // It's okay if this fails because this means the worker is already dead.
-    it->second.rpc_client->KillActor(*it->second.pending_force_kill, nullptr);
-    it->second.pending_force_kill.reset();
+    client_queue.rpc_client->KillActor(*client_queue.pending_force_kill, nullptr);
+    client_queue.pending_force_kill.reset();
   }
 
   // Submit all pending requests.
-  auto &requests = it->second.requests;
+  auto &requests = client_queue.requests;
   auto head = requests.begin();
-  while (head != requests.end() && head->first <= it->second.next_send_position &&
-         head->second.second) {
+  while (head != requests.end() &&
+         (/*seqno*/ head->first <= client_queue.next_send_position) &&
+         (/*dependencies_resolved*/ head->second.second)) {
     // If the task has been sent before, skip the other tasks in the send
     // queue.
-    bool skip_queue = head->first < it->second.next_send_position;
+    bool skip_queue = head->first < client_queue.next_send_position;
     auto task_spec = std::move(head->second.first);
     head = requests.erase(head);
 
-    RAY_CHECK(!it->second.worker_id.empty());
-    PushActorTask(it->second, task_spec, skip_queue);
-    it->second.next_send_position++;
+    RAY_CHECK(!client_queue.worker_id.empty());
+    PushActorTask(client_queue, task_spec, skip_queue);
+    client_queue.next_send_position++;
   }
+}
+
+void CoreWorkerDirectActorTaskSubmitter::ResendOutOfOrderTasks(const ActorID &actor_id) {
+  auto it = client_queues_.find(actor_id);
+  RAY_CHECK(it != client_queues_.end());
+  if (!it->second.rpc_client) {
+    return;
+  }
+  auto &client_queue = it->second;
+  RAY_CHECK(!client_queue.worker_id.empty());
+
+  for (const auto &completed_task : client_queue.out_of_order_completed_tasks) {
+    // Making a copy here because we are flipping a flag and the original value is
+    // const.
+    auto task_spec = completed_task.second;
+    task_spec.GetMutableMessage().set_skip_execution(true);
+    PushActorTask(client_queue, task_spec, /*skip_queue=*/true);
+  }
+  client_queue.out_of_order_completed_tasks.clear();
 }
 
 void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
@@ -269,30 +293,61 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
 
   const auto task_id = task_spec.TaskId();
   const auto actor_id = task_spec.ActorId();
-  const auto counter = task_spec.ActorCounter();
+  const auto actor_counter = task_spec.ActorCounter();
+  const auto task_skipped = task_spec.GetMessage().skip_execution();
   RAY_LOG(DEBUG) << "Pushing task " << task_id << " to actor " << actor_id
-                 << " actor counter " << counter << " seq no "
+                 << " actor counter " << actor_counter << " seq no "
                  << request->sequence_number();
   rpc::Address addr(queue.rpc_client->Addr());
   queue.rpc_client->PushActorTask(
       std::move(request), skip_queue,
-      [this, addr, task_id, actor_id](Status status, const rpc::PushTaskReply &reply) {
+      [this, addr, task_id, actor_id, actor_counter, task_spec, task_skipped](
+          Status status, const rpc::PushTaskReply &reply) {
         bool increment_completed_tasks = true;
-        if (!status.ok()) {
+
+        if (task_skipped) {
+          // NOTE(simon):Increment the task counter regardless of the status because the
+          // reply for a previously completed task. We are not calling CompletePendingTask
+          // because the tasks are pushed directly to the actor, not placed on any queues
+          // in task_finisher_.
+        } else if (status.ok()) {
+          task_finisher_->CompletePendingTask(task_id, reply, addr);
+        } else {
           bool will_retry = task_finisher_->PendingTaskFailed(
               task_id, rpc::ErrorType::ACTOR_DIED, &status);
           if (will_retry) {
             increment_completed_tasks = false;
           }
-        } else {
-          task_finisher_->CompletePendingTask(task_id, reply, addr);
         }
 
         if (increment_completed_tasks) {
           absl::MutexLock lock(&mu_);
-          auto queue = client_queues_.find(actor_id);
-          RAY_CHECK(queue != client_queues_.end());
-          queue->second.num_completed_tasks++;
+          auto queue_pair = client_queues_.find(actor_id);
+          RAY_CHECK(queue_pair != client_queues_.end());
+          auto &queue = queue_pair->second;
+
+          // Try to increment queue.next_task_reply_position consecutively until we
+          // cannot. In the case of tasks not received in order, the following block
+          // ensure queue.next_task_reply_position are incremented to the max possible
+          // value.
+          queue.out_of_order_completed_tasks.insert({actor_counter, task_spec});
+          auto min_completed_task = queue.out_of_order_completed_tasks.begin();
+          while (min_completed_task != queue.out_of_order_completed_tasks.end()) {
+            if (min_completed_task->first == queue.next_task_reply_position) {
+              queue.next_task_reply_position++;
+              // increment the iterator and erase the old value
+              queue.out_of_order_completed_tasks.erase(min_completed_task++);
+            } else {
+              break;
+            }
+          }
+
+          RAY_LOG(DEBUG) << "Got PushTaskReply for actor " << actor_id
+                         << " with actor_counter " << actor_counter
+                         << " new queue.next_task_reply_position is "
+                         << queue.next_task_reply_position
+                         << " and size of out_of_order_tasks set is "
+                         << queue.out_of_order_completed_tasks.size();
         }
       });
 }
@@ -312,12 +367,25 @@ void CoreWorkerDirectTaskReceiver::Init(
   client_pool_ = client_pool;
 }
 
+// void CoreWorkerDirectTaskReceiver::CheckpointTask() {
+//   std::string filename = "/home/ubuntu/ray_source/checkpoint_time.txt";
+//   // std::string filename = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
+//   std::ofstream persistent;
+//   // Only write current time to file, erase other times
+//   persistent.open(filename, std::ofstream::out | std::ofstream::trunc | std::ios::binary);
+//   auto checkpoint_time = current_time_ms();
+//   persistent << checkpoint_time << '\n';
+//   persistent.close();
+
+//   RAY_LOG(DEBUG) << "checkpoint time " << checkpoint_time << "\n";
+// }
+
 void CoreWorkerDirectTaskReceiver::HandleTask(
     const rpc::PushTaskRequest &request, rpc::PushTaskReply *reply,
     rpc::SendReplyCallback send_reply_callback) {
+  RAY_LOG(DEBUG) << "Hello";
   RAY_CHECK(waiter_ != nullptr) << "Must call init() prior to use";
   const TaskSpecification task_spec(request.task_spec());
-
   // If GCS server is restarted after sending an actor creation task to this core worker,
   // the restarted GCS server will send the same actor creation task to the core worker
   // again. We just need to ignore it and reply ok.
@@ -345,6 +413,11 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
   }
 
   auto accept_callback = [this, reply, send_reply_callback, task_spec, resource_ids]() {
+    if (task_spec.GetMessage().skip_execution()) {
+      send_reply_callback(Status::OK(), nullptr, nullptr);
+      return;
+    }
+
     auto num_returns = task_spec.NumReturns();
     if (task_spec.IsActorCreationTask() || task_spec.IsActorTask()) {
       // Decrease to account for the dummy object id.
@@ -355,11 +428,21 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     std::vector<std::shared_ptr<RayObject>> return_objects;
     // Time task execution and print to log.
     auto start_time = current_time_ms();
+    auto time_now = std::chrono::system_clock::now();
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
                                 reply->mutable_borrowed_refs());
     auto end_time = current_time_ms();
-    RAY_LOG(DEBUG) << "accept_callback finished task";
+    auto actor_id = worker_context_.GetCurrentActorID();
+    RAY_LOG(DEBUG) << "Task duration is alpha " << (end_time - start_time);
+    std::ofstream persistent;
     
+    // persistent.open("/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
+    persistent.open("/home/ubuntu/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
+        std::ofstream::out | std::ofstream::app | std::ios::binary);
+    persistent << std::chrono::duration_cast<std::chrono::seconds>(time_now.time_since_epoch()).count() 
+      << " " << std::to_string(end_time - start_time) << '\n';
+    persistent.close();
+
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {
       for (size_t i = 0; i < return_objects.size(); i++) {
@@ -386,37 +469,54 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
         }
       }
       if (task_spec.IsActorCreationTask()) {
+        int32_t checkpoint_time = 0;
+        std::string checkpoint_file = "/home/ubuntu/ray_source/checkpoint_time.txt";
+        // std::string checkpoint_file = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
+        std::ifstream checkpoint_infile(checkpoint_file.c_str());
+        if (checkpoint_infile.good()) {
+          std::string line;
+          while (getline(checkpoint_infile, line)) {
+            checkpoint_time = std::stoi(line);
+          }
+        }
+        checkpoint_infile.close();
+
+        auto actor_id = task_spec.ActorCreationId();
+        RAY_LOG(DEBUG) << "restarting actor_id" << actor_id;
+        std::string filename = "/home/ubuntu/ray_source/actor_time_log_" + actor_id.Hex() + ".txt";
+        // std::string filename = "/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt";
+        // remove(filename.c_str());
+        std::ifstream infile(filename.c_str());
+        // If log file exists for this worker, wait for total time specified in file
+        if (infile.good()) {
+          int total_time = 0;
+          std::string line;
+          // while (getline(infile,line)) {
+          //   total_time += std::stoi(line);
+          // }
+          while (getline(infile, line)) {
+            RAY_LOG(DEBUG) << "line-time " << line;
+            auto start_time = std::stoi(line.substr(0, line.find(" ")));
+            if (start_time > checkpoint_time) {
+              std::string time = line.substr(line.find(" ") + 1, line.length());
+              total_time += std::stoi(time);
+            }
+            RAY_LOG(DEBUG) << "start_time " << start_time << " checkpoint_time " 
+              << checkpoint_time << " total_time " << total_time;
+          }
+          infile.close();
+          RAY_LOG(DEBUG) << "sleeping " << actor_id << " for " << total_time;
+          std::this_thread::sleep_for(std::chrono::milliseconds(total_time));
+        }
+
         RAY_LOG(INFO) << "Actor creation task finished, task_id: " << task_spec.TaskId()
                       << ", actor_id: " << task_spec.ActorCreationId();
-        
-	// Simulated replay: sleep for length of time to replay all tasks. TODO.
-	std::ifstream infile("actor_durations_" + task_spec.ActorCreationId().Hex() + ".txt");
-        if (infile.is_open()) {
-	  int replay_time = 0;
-	  std::string line;
-	  while(std::getline(infile, line)) {
-	    // Note: Reading durations from file has not-always-negligible overhead.
-            RAY_LOG(DEBUG) << "Reading line with duration: " << line;
-	    replay_time += std::stoi(line);
-	  }
-	  infile.close();
-	  std::this_thread::sleep_for(std::chrono::milliseconds(replay_time));
-	  RAY_LOG(DEBUG) << "Actor creation replay duration: " << replay_time;
-	}
-	// Tell raylet that an actor creation task has finished execution, so that
+        // Tell raylet that an actor creation task has finished execution, so that
         // raylet can publish actor creation event to GCS, and mark this worker as
         // actor, thus if this worker dies later raylet will restart the actor.
         RAY_CHECK_OK(task_done_());
       }
     }
-
-    // Log task duration to enable replay. Do this here so that actor creation
-    // task time is not replayed as part of actor creation.
-    int duration = end_time - start_time; // Duration in ms (see L361)
-    logger_->LogDuration(duration, worker_context_.GetCurrentActorID());
-    TaskID task_id = task_spec.TaskId();
-    RAY_LOG(DEBUG) << "Task duration for task " << task_id << " is " << (end_time - start_time) << "ms";
-
     if (status.IsSystemExit()) {
       // Don't allow the worker to be reused, even though the reply status is OK.
       // The worker will be shutting down shortly.
