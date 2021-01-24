@@ -469,44 +469,46 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
         }
       }
       if (task_spec.IsActorCreationTask()) {
-        int32_t checkpoint_time = 0;
-        std::string checkpoint_file = "/home/ubuntu/ray_source/checkpoint_time.txt";
-        // std::string checkpoint_file = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
-        std::ifstream checkpoint_infile(checkpoint_file.c_str());
-        if (checkpoint_infile.good()) {
-          std::string line;
-          while (getline(checkpoint_infile, line)) {
-            checkpoint_time = std::stoi(line);
-          }
-        }
-        checkpoint_infile.close();
-
-        auto actor_id = task_spec.ActorCreationId();
-        RAY_LOG(DEBUG) << "restarting actor_id" << actor_id;
-        std::string filename = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id.Hex() + ".txt";
-        // std::string filename = "/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt";
-        // remove(filename.c_str());
-        std::ifstream infile(filename.c_str());
-        // If log file exists for this worker, wait for total time specified in file
-        if (infile.good()) {
-          int total_time = 0;
-          std::string line;
-          // while (getline(infile,line)) {
-          //   total_time += std::stoi(line);
-          // }
-          while (getline(infile, line)) {
-            RAY_LOG(DEBUG) << "line-time " << line;
-            auto start_time = std::stoi(line.substr(0, line.find(" ")));
-            if (start_time > checkpoint_time) {
-              std::string time = line.substr(line.find(" ") + 1, line.length());
-              total_time += std::stoi(time);
+        if (RayConfig::instance().logging_enabled()) {
+          int32_t checkpoint_time = 0;
+          std::string checkpoint_file = "/tmp/ray/session_latest/logs/checkpoint_time.txt";
+          // std::string checkpoint_file = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
+          std::ifstream checkpoint_infile(checkpoint_file.c_str());
+          if (checkpoint_infile.good()) {
+            std::string line;
+            while (getline(checkpoint_infile, line)) {
+              checkpoint_time = std::stoi(line);
             }
-            RAY_LOG(DEBUG) << "start_time " << start_time << " checkpoint_time " 
-              << checkpoint_time << " total_time " << total_time;
           }
-          infile.close();
-          RAY_LOG(DEBUG) << "sleeping " << actor_id << " for " << total_time;
-          std::this_thread::sleep_for(std::chrono::milliseconds(total_time));
+          checkpoint_infile.close();
+
+          auto actor_id = task_spec.ActorCreationId();
+          RAY_LOG(DEBUG) << "restarting actor_id" << actor_id;
+          std::string filename = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id.Hex() + ".txt";
+          // std::string filename = "/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt";
+          // remove(filename.c_str());
+          std::ifstream infile(filename.c_str());
+          // If log file exists for this worker, wait for total time specified in file
+          if (infile.good()) {
+            int total_time = 0;
+            std::string line;
+            // while (getline(infile,line)) {
+            //   total_time += std::stoi(line);
+            // }
+            while (getline(infile, line)) {
+              RAY_LOG(DEBUG) << "line-time " << line;
+              auto start_time = std::stoi(line.substr(0, line.find(" ")));
+              if (start_time > checkpoint_time) {
+                std::string time = line.substr(line.find(" ") + 1, line.length());
+                total_time += std::stoi(time);
+              }
+              RAY_LOG(DEBUG) << "start_time " << start_time << " checkpoint_time " 
+                << checkpoint_time << " total_time " << total_time;
+            }
+            infile.close();
+            RAY_LOG(DEBUG) << "sleeping " << actor_id << " for " << total_time;
+            std::this_thread::sleep_for(std::chrono::milliseconds(total_time));
+          }
         }
 
         RAY_LOG(INFO) << "Actor creation task finished, task_id: " << task_spec.TaskId()
