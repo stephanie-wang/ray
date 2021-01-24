@@ -427,21 +427,21 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
 
     std::vector<std::shared_ptr<RayObject>> return_objects;
     // Time task execution and print to log.
-    auto start_time = current_time_ms();
-    auto time_now = std::chrono::system_clock::now();
+    // auto start_time = current_time_ms();
+    // auto time_now = std::chrono::system_clock::now();
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
                                 reply->mutable_borrowed_refs());
     auto end_time = current_time_ms();
-    auto actor_id = worker_context_.GetCurrentActorID();
-    RAY_LOG(DEBUG) << "Task duration is alpha " << (end_time - start_time);
-    std::ofstream persistent;
+    // auto actor_id = worker_context_.GetCurrentActorID();
+    // RAY_LOG(DEBUG) << "Task duration is alpha " << (end_time - start_time);
+    // std::ofstream persistent;
     
-    // persistent.open("/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
-    persistent.open("/home/ubuntu/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
-        std::ofstream::out | std::ofstream::app | std::ios::binary);
-    persistent << std::chrono::duration_cast<std::chrono::seconds>(time_now.time_since_epoch()).count() 
-      << " " << std::to_string(end_time - start_time) << '\n';
-    persistent.close();
+    // // persistent.open("/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
+    // persistent.open("/home/ubuntu/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
+    //     std::ofstream::out | std::ofstream::app | std::ios::binary);
+    // persistent << std::chrono::duration_cast<std::chrono::seconds>(time_now.time_since_epoch()).count() 
+    //   << " " << std::to_string(end_time - start_time) << '\n';
+    // persistent.close();
 
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {
