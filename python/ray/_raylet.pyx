@@ -460,7 +460,15 @@ cdef execute_task(
                 task_exception = True
                 try:
                     with ray.worker._changeproctitle(title, next_title):
+                        # Log start time and duration of task to file based on actor id
+                        start_time = time.time()
                         outputs = function_executor(*args, **kwargs)
+                        end_time = time.time()
+                        actor_id = core_worker.get_actor_id().hex()
+                        actor_log_file = "/home/ubuntu/ray_source/actor_time_log_" + actor_id + ".txt"
+                        with open(actor_log_file, "a") as f:
+                            f.write(str(int(start_time)) + " " + str(int((end_time - start_time) * 1000)) + "\n")
+
                     task_exception = False
                 except KeyboardInterrupt as e:
                     raise TaskCancelledError(
