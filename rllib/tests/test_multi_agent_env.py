@@ -12,8 +12,8 @@ from ray.rllib.evaluation.rollout_worker import get_global_worker
 from ray.rllib.examples.policy.random_policy import RandomPolicy
 from ray.rllib.examples.env.multi_agent import MultiAgentCartPole, \
     BasicMultiAgent, EarlyDoneMultiAgent, RoundRobinMultiAgent
-from ray.rllib.tests.test_rollout_worker import MockPolicy
 from ray.rllib.evaluation.rollout_worker import RolloutWorker
+from ray.rllib.evaluation.tests.test_rollout_worker import MockPolicy
 from ray.rllib.env.base_env import _MultiAgentEnvToBaseEnv
 from ray.rllib.utils.numpy import one_hot
 from ray.rllib.utils.test_utils import check
@@ -311,13 +311,13 @@ class TestMultiAgentEnv(unittest.TestCase):
 
     def test_returning_model_based_rollouts_data(self):
         class ModelBasedPolicy(DQNTFPolicy):
-            def compute_actions(self,
-                                obs_batch,
-                                state_batches,
-                                prev_action_batch=None,
-                                prev_reward_batch=None,
-                                episodes=None,
-                                **kwargs):
+            def compute_actions_from_input_dict(self,
+                                                input_dict,
+                                                explore=None,
+                                                timestep=None,
+                                                episodes=None,
+                                                **kwargs):
+                obs_batch = input_dict["obs"]
                 # In policy loss initialization phase, no episodes are passed
                 # in.
                 if episodes is not None:

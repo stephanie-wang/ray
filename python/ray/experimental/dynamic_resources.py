@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 import ray
 
 
@@ -33,3 +34,11 @@ def set_resource(resource_name, capacity, node_id=None):
             "Capacity {} must be a non-negative integer.".format(capacity))
     return ray.worker.global_worker.core_worker.set_resource(
         resource_name, capacity, node_id_obj)
+=======
+def set_resource(resource_name, capacity, node_id=None):
+    raise DeprecationWarning(
+        "Dynamic custom resources are deprecated. Consider using placement "
+        "groups instead (docs.ray.io/en/master/placement-group.html). You "
+        "can also specify resources at Ray start time with the 'resources' "
+        "field in the cluster autoscaler.")
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627

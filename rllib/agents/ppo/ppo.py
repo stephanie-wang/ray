@@ -21,6 +21,8 @@ from ray.rllib.execution.rollout_ops import ParallelRollouts, ConcatBatches, \
 from ray.rllib.execution.train_ops import TrainOneStep, TrainTFMultiGPU
 from ray.rllib.execution.metric_ops import StandardMetricsReporting
 from ray.rllib.policy.policy import Policy
+from ray.rllib.policy.sample_batch import DEFAULT_POLICY_ID
+from ray.rllib.utils.deprecation import DEPRECATED_VALUE
 from ray.rllib.utils.typing import TrainerConfigDict
 from ray.util.iter import LocalIterator
 
@@ -59,12 +61,14 @@ DEFAULT_CONFIG = with_common_config({
     "lr": 5e-5,
     # Learning rate schedule.
     "lr_schedule": None,
-    # Share layers for value function. If you set this to True, it's important
-    # to tune vf_loss_coeff.
-    "vf_share_layers": False,
     # Coefficient of the value function loss. IMPORTANT: you must tune this if
-    # you set vf_share_layers: True.
+    # you set vf_share_layers=True inside your model's config.
     "vf_loss_coeff": 1.0,
+    "model": {
+        # Share layers for value function. If you set this to True, it's
+        # important to tune vf_loss_coeff.
+        "vf_share_layers": False,
+    },
     # Coefficient of the entropy regularizer.
     "entropy_coeff": 0.0,
     # Decay schedule for the entropy regularizer.
@@ -89,6 +93,15 @@ DEFAULT_CONFIG = with_common_config({
     # Whether to fake GPUs (using CPUs).
     # Set this to True for debugging on non-GPU machines (set `num_gpus` > 0).
     "_fake_gpus": False,
+<<<<<<< HEAD
+=======
+
+    # Deprecated keys:
+    # Share layers for value function. If you set this to True, it's important
+    # to tune vf_loss_coeff.
+    # Use config.model.vf_share_layers instead.
+    "vf_share_layers": DEPRECATED_VALUE,
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
 })
 
 # __sphinx_doc_end__
@@ -194,11 +207,12 @@ def warn_about_bad_reward_scales(config, result):
 
     # Warn about excessively high VF loss.
     learner_stats = result["info"]["learner"]
-    if "default_policy" in learner_stats:
+    if DEFAULT_POLICY_ID in learner_stats:
         scaled_vf_loss = (config["vf_loss_coeff"] *
-                          learner_stats["default_policy"]["vf_loss"])
-        policy_loss = learner_stats["default_policy"]["policy_loss"]
-        if config["vf_share_layers"] and scaled_vf_loss > 100:
+                          learner_stats[DEFAULT_POLICY_ID]["vf_loss"])
+        policy_loss = learner_stats[DEFAULT_POLICY_ID]["policy_loss"]
+        if config.get("model", {}).get("vf_share_layers") and \
+                scaled_vf_loss > 100:
             logger.warning(
                 "The magnitude of your value function loss is extremely large "
                 "({}) compared to the policy loss ({}). This can prevent the "
@@ -244,7 +258,10 @@ def execution_plan(workers: WorkerSet,
         SelectExperiences(workers.trainable_policies()))
     # Concatenate the SampleBatches into one.
     rollouts = rollouts.combine(
-        ConcatBatches(min_batch_size=config["train_batch_size"]))
+        ConcatBatches(
+            min_batch_size=config["train_batch_size"],
+            count_steps_by=config["multiagent"]["count_steps_by"],
+        ))
     # Standardize advantages.
     rollouts = rollouts.for_each(StandardizeFields(["advantages"]))
 

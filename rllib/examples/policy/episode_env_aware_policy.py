@@ -21,7 +21,7 @@ class EpisodeEnvAwareLSTMPolicy(RandomPolicy):
 
         self.model = _fake_model()
         self.model.time_major = True
-        self.model.inference_view_requirements = {
+        self.model.view_requirements = {
             SampleBatch.AGENT_INDEX: ViewRequirement(),
             SampleBatch.EPS_ID: ViewRequirement(),
             "env_id": ViewRequirement(),
@@ -33,12 +33,16 @@ class EpisodeEnvAwareLSTMPolicy(RandomPolicy):
                 SampleBatch.REWARDS, shift=-1),
         }
         for i in range(2):
-            self.model.inference_view_requirements["state_in_{}".format(i)] = \
+            self.model.view_requirements["state_in_{}".format(i)] = \
                 ViewRequirement(
                     "state_out_{}".format(i),
                     shift=-1,
                     space=self.state_space)
+<<<<<<< HEAD
             self.model.inference_view_requirements[
+=======
+            self.model.view_requirements[
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
                 "state_out_{}".format(i)] = \
                 ViewRequirement(space=self.state_space)
 
@@ -50,7 +54,7 @@ class EpisodeEnvAwareLSTMPolicy(RandomPolicy):
                 SampleBatch.REWARDS: ViewRequirement(),
                 SampleBatch.DONES: ViewRequirement(),
             },
-            **self.model.inference_view_requirements)
+            **self.model.view_requirements)
 
     @override(Policy)
     def is_recurrent(self):
@@ -97,7 +101,11 @@ class EpisodeEnvAwareAttentionPolicy(RandomPolicy):
             pass
 
         self.model = _fake_model()
+<<<<<<< HEAD
         self.model.inference_view_requirements = {
+=======
+        self.model.view_requirements = {
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
             SampleBatch.AGENT_INDEX: ViewRequirement(),
             SampleBatch.EPS_ID: ViewRequirement(),
             "env_id": ViewRequirement(),
@@ -114,7 +122,11 @@ class EpisodeEnvAwareAttentionPolicy(RandomPolicy):
         }
 
         self.view_requirements = dict(super()._get_default_view_requirements(),
+<<<<<<< HEAD
                                       **self.model.inference_view_requirements)
+=======
+                                      **self.model.view_requirements)
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
 
     @override(Policy)
     def is_recurrent(self):

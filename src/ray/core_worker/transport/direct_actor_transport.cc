@@ -255,7 +255,29 @@ void CoreWorkerDirectActorTaskSubmitter::SendPendingTasks(const ActorID &actor_i
     RAY_CHECK(!client_queue.worker_id.empty());
     PushActorTask(client_queue, task_spec, skip_queue);
     client_queue.next_send_position++;
+<<<<<<< HEAD
+=======
   }
+}
+
+void CoreWorkerDirectActorTaskSubmitter::ResendOutOfOrderTasks(const ActorID &actor_id) {
+  auto it = client_queues_.find(actor_id);
+  RAY_CHECK(it != client_queues_.end());
+  if (!it->second.rpc_client) {
+    return;
+  }
+  auto &client_queue = it->second;
+  RAY_CHECK(!client_queue.worker_id.empty());
+
+  for (const auto &completed_task : client_queue.out_of_order_completed_tasks) {
+    // Making a copy here because we are flipping a flag and the original value is
+    // const.
+    auto task_spec = completed_task.second;
+    task_spec.GetMutableMessage().set_skip_execution(true);
+    PushActorTask(client_queue, task_spec, /*skip_queue=*/true);
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
+  }
+  client_queue.out_of_order_completed_tasks.clear();
 }
 
 void CoreWorkerDirectActorTaskSubmitter::ResendOutOfOrderTasks(const ActorID &actor_id) {

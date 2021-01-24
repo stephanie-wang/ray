@@ -4,7 +4,7 @@ Profiling for Ray Developers
 This document details, for Ray developers, how to analyze Ray performance.
 
 Getting a stack trace of Ray C++ processes
-----------------------------------------
+------------------------------------------
 
 You can use the following GDB command to view the current stack trace of any
 running Ray process (e.g., raylet). This can be useful for debugging 100% CPU
@@ -14,7 +14,7 @@ the process is stuck on).
 .. code-block:: shell
 
  sudo gdb -batch -ex "thread apply all bt" -p <pid>
- 
+
 Note that you can find the pid of the raylet with ``pgrep raylet``.
 
 Installation
@@ -74,7 +74,7 @@ To run a set of single-node Ray microbenchmarks, use:
 
   ray microbenchmark
 
-You can find the microbenchmark results for Ray releases in the `GitHub release logs <https://github.com/ray-project/ray/tree/master/doc/dev/release_logs>`__.
+You can find the microbenchmark results for Ray releases in the `GitHub release logs <https://github.com/ray-project/ray/tree/master/release/release_logs>`__.
 
 References
 ----------

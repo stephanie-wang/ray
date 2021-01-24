@@ -1,17 +1,16 @@
 import gym
 from typing import Any, Callable, Dict, List, Optional, Tuple, Type, Union
 
-from ray.rllib.models.catalog import ModelCatalog
+from ray.util import log_once
 from ray.rllib.models.modelv2 import ModelV2
 from ray.rllib.models.torch.torch_action_dist import TorchDistributionWrapper
-from ray.rllib.models.torch.torch_modelv2 import TorchModelV2
-from ray.rllib.policy.policy import Policy, LEARNER_STATS_KEY
+from ray.rllib.policy.policy import Policy
+from ray.rllib.policy.policy_template import build_policy_class
 from ray.rllib.policy.sample_batch import SampleBatch
 from ray.rllib.policy.torch_policy import TorchPolicy
-from ray.rllib.utils import add_mixins, force_list
-from ray.rllib.utils.annotations import override, DeveloperAPI
+from ray.rllib.utils.annotations import DeveloperAPI
+from ray.rllib.utils.deprecation import deprecation_warning
 from ray.rllib.utils.framework import try_import_torch
-from ray.rllib.utils.torch_ops import convert_to_non_torch_type
 from ray.rllib.utils.typing import TensorType, TrainerConfigDict
 
 torch, _ = try_import_torch()
@@ -38,7 +37,6 @@ def build_torch_policy(
         extra_grad_process_fn: Optional[Callable[[
             Policy, "torch.optim.Optimizer", TensorType
         ], Dict[str, TensorType]]] = None,
-        # TODO: (sven) Replace "fetches" with "process".
         extra_learn_fetches_fn: Optional[Callable[[Policy], Dict[
             str, TensorType]]] = None,
         optimizer_fn: Optional[Callable[[Policy, TrainerConfigDict],
@@ -71,8 +69,8 @@ def build_torch_policy(
         mixins: Optional[List[type]] = None,
         get_batch_divisibility_req: Optional[Callable[[Policy], int]] = None
 ) -> Type[TorchPolicy]:
-    """Helper function for creating a torch policy class at runtime.
 
+<<<<<<< HEAD
     Args:
         name (str): name of the policy (e.g., "PPOTorchPolicy")
         loss_fn (Optional[Callable[[Policy, ModelV2,
@@ -359,3 +357,14 @@ def build_torch_policy(
     policy_cls.__name__ = name
     policy_cls.__qualname__ = name
     return policy_cls
+=======
+    if log_once("deprecation_warning_build_torch_policy"):
+        deprecation_warning(
+            old="build_torch_policy",
+            new="build_policy_class(framework='torch')",
+            error=False)
+    kwargs = locals().copy()
+    # Set to torch and call new function.
+    kwargs["framework"] = "torch"
+    return build_policy_class(**kwargs)
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627

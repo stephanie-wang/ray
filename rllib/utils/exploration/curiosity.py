@@ -4,15 +4,25 @@ from typing import Optional, Tuple, Union
 
 from ray.rllib.models.action_dist import ActionDistribution
 from ray.rllib.models.catalog import ModelCatalog
+<<<<<<< HEAD
 from ray.rllib.models.modelv2 import ModelV2, NullContextManager
+=======
+from ray.rllib.models.modelv2 import ModelV2
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
 from ray.rllib.models.tf.tf_action_dist import Categorical, MultiCategorical
 from ray.rllib.models.torch.misc import SlimFC
 from ray.rllib.models.torch.torch_action_dist import TorchCategorical, \
     TorchMultiCategorical
+from ray.rllib.models.utils import get_activation_fn
 from ray.rllib.policy.sample_batch import SampleBatch
+from ray.rllib.utils import NullContextManager
 from ray.rllib.utils.annotations import override
 from ray.rllib.utils.exploration.exploration import Exploration
+<<<<<<< HEAD
 from ray.rllib.utils.framework import get_activation_fn, try_import_tf, \
+=======
+from ray.rllib.utils.framework import try_import_tf, \
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
     try_import_torch
 from ray.rllib.utils.from_config import from_config
 from ray.rllib.utils.tf_ops import get_placeholder, one_hot as tf_one_hot
@@ -206,7 +216,10 @@ class Curiosity(Exploration):
                 self._curiosity_feature_net.base_model.variables + \
                 self._curiosity_inverse_fcnet.variables + \
                 self._curiosity_forward_fcnet.variables
+<<<<<<< HEAD
             self.model.register_variables(self._optimizer_var_list)
+=======
+>>>>>>> b7dd7ddb5231bc4bc83ae1e385edc761d5476627
             self._optimizer = tf1.train.AdamOptimizer(learning_rate=self.lr)
             # Create placeholders and initialize the loss.
             if self.framework == "tf":
