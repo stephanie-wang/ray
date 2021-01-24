@@ -14,6 +14,10 @@
 
 #include "ray/core_worker/transport/direct_actor_transport.h"
 
+#include <chrono>
+#include <iostream>
+#include <fstream>
+#include <stdio.h>
 #include <thread>
 
 #include "ray/common/task/task.h"
@@ -363,12 +367,25 @@ void CoreWorkerDirectTaskReceiver::Init(
   client_pool_ = client_pool;
 }
 
+// void CoreWorkerDirectTaskReceiver::CheckpointTask() {
+//   std::string filename = "/home/ubuntu/ray_source/checkpoint_time.txt";
+//   // std::string filename = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
+//   std::ofstream persistent;
+//   // Only write current time to file, erase other times
+//   persistent.open(filename, std::ofstream::out | std::ofstream::trunc | std::ios::binary);
+//   auto checkpoint_time = current_time_ms();
+//   persistent << checkpoint_time << '\n';
+//   persistent.close();
+
+//   RAY_LOG(DEBUG) << "checkpoint time " << checkpoint_time << "\n";
+// }
+
 void CoreWorkerDirectTaskReceiver::HandleTask(
     const rpc::PushTaskRequest &request, rpc::PushTaskReply *reply,
     rpc::SendReplyCallback send_reply_callback) {
+  RAY_LOG(DEBUG) << "Hello";
   RAY_CHECK(waiter_ != nullptr) << "Must call init() prior to use";
   const TaskSpecification task_spec(request.task_spec());
-
   // If GCS server is restarted after sending an actor creation task to this core worker,
   // the restarted GCS server will send the same actor creation task to the core worker
   // again. We just need to ignore it and reply ok.
@@ -409,8 +426,22 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     RAY_CHECK(num_returns >= 0);
 
     std::vector<std::shared_ptr<RayObject>> return_objects;
+    // Time task execution and print to log.
+    // auto start_time = current_time_ms();
+    // auto time_now = std::chrono::system_clock::now();
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
                                 reply->mutable_borrowed_refs());
+    // auto end_time = current_time_ms();
+    // auto actor_id = worker_context_.GetCurrentActorID();
+    // RAY_LOG(DEBUG) << "Task duration is alpha " << (end_time - start_time);
+    // std::ofstream persistent;
+    
+    // // persistent.open("/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
+    // persistent.open("/home/ubuntu/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
+    //     std::ofstream::out | std::ofstream::app | std::ios::binary);
+    // persistent << std::chrono::duration_cast<std::chrono::seconds>(time_now.time_since_epoch()).count() 
+    //   << " " << std::to_string(end_time - start_time).count() << '\n';
+    // persistent.close();
 
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {
@@ -438,6 +469,46 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
         }
       }
       if (task_spec.IsActorCreationTask()) {
+        int32_t checkpoint_time = 0;
+        std::string checkpoint_file = "/home/ubuntu/ray_source/checkpoint_time.txt";
+        // std::string checkpoint_file = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
+        std::ifstream checkpoint_infile(checkpoint_file.c_str());
+        if (checkpoint_infile.good()) {
+          std::string line;
+          while (getline(checkpoint_infile, line)) {
+            checkpoint_time = std::stoi(line);
+          }
+        }
+        checkpoint_infile.close();
+
+        auto actor_id = task_spec.ActorCreationId();
+        RAY_LOG(DEBUG) << "restarting actor_id" << actor_id;
+        std::string filename = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id.Hex() + ".txt";
+        // std::string filename = "/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt";
+        // remove(filename.c_str());
+        std::ifstream infile(filename.c_str());
+        // If log file exists for this worker, wait for total time specified in file
+        if (infile.good()) {
+          int total_time = 0;
+          std::string line;
+          // while (getline(infile,line)) {
+          //   total_time += std::stoi(line);
+          // }
+          while (getline(infile, line)) {
+            RAY_LOG(DEBUG) << "line-time " << line;
+            auto start_time = std::stoi(line.substr(0, line.find(" ")));
+            if (start_time > checkpoint_time) {
+              std::string time = line.substr(line.find(" ") + 1, line.length());
+              total_time += std::stoi(time);
+            }
+            RAY_LOG(DEBUG) << "start_time " << start_time << " checkpoint_time " 
+              << checkpoint_time << " total_time " << total_time;
+          }
+          infile.close();
+          RAY_LOG(DEBUG) << "sleeping " << actor_id << " for " << total_time;
+          std::this_thread::sleep_for(std::chrono::milliseconds(total_time));
+        }
+
         RAY_LOG(INFO) << "Actor creation task finished, task_id: " << task_spec.TaskId()
                       << ", actor_id: " << task_spec.ActorCreationId();
         // Tell raylet that an actor creation task has finished execution, so that
