@@ -14,6 +14,9 @@
 
 #include "ray/core_worker/core_worker.h"
 
+#include <boost/filesystem.hpp>
+#include <boost/iostreams/stream.hpp>
+#include <boost/iostreams/device/file_descriptor.hpp>
 #include "boost/fiber/all.hpp"
 #include "ray/common/bundle_spec.h"
 #include "ray/common/ray_config.h"
@@ -1810,6 +1813,26 @@ Status CoreWorker::ExecuteTask(const TaskSpecification &task_spec,
   std::vector<ObjectID> borrowed_ids;
   RAY_CHECK_OK(
       GetAndPinArgsForExecutor(task_spec, &args, &arg_reference_ids, &borrowed_ids));
+
+  if (RayConfig::instance().logging_enabled()) {
+    ActorID actor_id;
+    if (task_spec.IsActorTask()) {
+     actor_id = task_spec.ActorId();
+    }
+    boost::filesystem::path log_path("/tmp/ray/session_latest/logs/actor_task_log_" + actor_id.Hex() + ".txt");
+    boost::iostreams::stream<boost::iostreams::file_descriptor_sink> log(log_path,
+        std::ios_base::out | std::ios_base::app | std::ios_base::binary);
+    for (auto &arg : args) {
+      if (arg->HasData()) {
+        log.write(reinterpret_cast<char *>(arg->GetData()->Data()), arg->GetData()->Size());
+      }
+    }
+    task_spec.GetMessage().SerializeToOstream(&log);
+
+    log.flush();
+    ::fdatasync(log->handle());
+    log.close();
+  }
 
   std::vector<ObjectID> return_ids;
   for (size_t i = 0; i < task_spec.NumReturns(); i++) {

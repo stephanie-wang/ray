@@ -481,10 +481,11 @@ cdef execute_task(
                         start_time = time.time()
                         outputs = function_executor(*args, **kwargs)
                         end_time = time.time()
-                        actor_id = core_worker.get_actor_id().hex()
-                        actor_log_file = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id + ".txt"
-                        with open(actor_log_file, "a") as f:
-                            f.write(str(int(start_time)) + " " + str(int((end_time - start_time) * 1000)) + "\n")
+                        if RayConfig.instance().logging_enabled():
+                            actor_id = core_worker.get_actor_id().hex()
+                            actor_log_file = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id + ".txt"
+                            with open(actor_log_file, "a") as f:
+                                f.write(str(int(start_time)) + " " + str(int((end_time - start_time) * 1000)) + "\n")
 
                         next_breakpoint = (
                             ray.worker.global_worker.debugger_breakpoint)

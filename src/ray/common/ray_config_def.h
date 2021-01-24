@@ -367,4 +367,4 @@ RAY_CONFIG(int64_t, oom_grace_period_s, 10)
 RAY_CONFIG(bool, locality_aware_leasing_enabled, true)
 
 /// For recovery experiments, turn on per-task logging.
-RAY_CONFIG(bool, logging, false)
+RAY_CONFIG(bool, logging_enabled, false)

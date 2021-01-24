@@ -64,3 +64,5 @@ cdef extern from "ray/common/ray_config.h" nogil:
         c_bool automatic_object_deletion_enabled() const
 
         uint32_t max_grpc_message_size() const
+
+        c_bool logging_enabled() const
