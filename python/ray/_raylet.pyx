@@ -485,7 +485,7 @@ cdef execute_task(
                             actor_id = core_worker.get_actor_id().hex()
                             actor_log_file = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id + ".txt"
                             with open(actor_log_file, "a") as f:
-                                f.write(str(int(start_time)) + " " + str(int((end_time - start_time) * 1000)) + "\n")
+                                f.write(str(int(start_time * 1000)) + " " + str(int((end_time - start_time) * 1000)) + "\n")
 
                         next_breakpoint = (
                             ray.worker.global_worker.debugger_breakpoint)
