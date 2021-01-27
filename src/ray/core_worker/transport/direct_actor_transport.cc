@@ -449,6 +449,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
 
     std::vector<std::shared_ptr<RayObject>> return_objects;
     // Time task execution and print to log.
+<<<<<<< HEAD
     // auto start_time = current_time_ms();
     // auto time_now = std::chrono::system_clock::now();
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
@@ -456,13 +457,26 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     auto end_time = current_time_ms();
     // auto actor_id = worker_context_.GetCurrentActorID();
     // RAY_LOG(DEBUG) << "Task duration is alpha " << (end_time - start_time);
+=======
+    // auto start_time_ms = current_time_ms();
+    // auto time_now = std::chrono::system_clock::now();
+    auto status = task_handler_(task_spec, resource_ids, &return_objects,
+                                reply->mutable_borrowed_refs());
+    // auto end_time = current_time_ms();
+    // auto actor_id = worker_context_.GetCurrentActorID();
+    // RAY_LOG(DEBUG) << "Task duration is alpha " << (end_time - start_time_ms);
+>>>>>>> stephanie-ray/logging
     // std::ofstream persistent;
     
     // // persistent.open("/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
     // persistent.open("/home/ubuntu/ray_source/actor_time_log_" + actor_id.Hex() + ".txt",
     //     std::ofstream::out | std::ofstream::app | std::ios::binary);
     // persistent << std::chrono::duration_cast<std::chrono::seconds>(time_now.time_since_epoch()).count() 
+<<<<<<< HEAD
     //   << " " << std::to_string(end_time - start_time) << '\n';
+=======
+    //   << " " << std::to_string(end_time - start_time_ms).count() << '\n';
+>>>>>>> stephanie-ray/logging
     // persistent.close();
 
     bool objects_valid = return_objects.size() == num_returns;
@@ -491,6 +505,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
         }
       }
       if (task_spec.IsActorCreationTask()) {
+<<<<<<< HEAD
         int32_t checkpoint_time = 0;
         std::string checkpoint_file = "/home/ubuntu/ray_source/checkpoint_time.txt";
         // std::string checkpoint_file = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
@@ -529,6 +544,48 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
           infile.close();
           RAY_LOG(DEBUG) << "sleeping " << actor_id << " for " << total_time;
           std::this_thread::sleep_for(std::chrono::milliseconds(total_time));
+=======
+        if (RayConfig::instance().logging_enabled()) {
+          int64_t checkpoint_time_ms = 0;
+          std::string checkpoint_file = "/tmp/ray/session_latest/logs/checkpoint_time.txt";
+          // std::string checkpoint_file = "/Users/accheng/Documents/ray_source/checkpoint_time.txt";
+          std::ifstream checkpoint_infile(checkpoint_file.c_str());
+          if (checkpoint_infile.good()) {
+            std::string line;
+            while (getline(checkpoint_infile, line)) {
+              checkpoint_time_ms = std::stol(line);
+            }
+          }
+          checkpoint_infile.close();
+
+          auto actor_id = task_spec.ActorCreationId();
+          RAY_LOG(DEBUG) << "restarting actor_id" << actor_id;
+          std::string filename = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id.Hex() + ".txt";
+          // std::string filename = "/Users/accheng/Documents/ray_source/actor_time_log_" + actor_id.Hex() + ".txt";
+          // remove(filename.c_str());
+          std::ifstream infile(filename.c_str());
+          // If log file exists for this worker, wait for total time specified in file
+          if (infile.good()) {
+            int64_t total_time_ms = 0;
+            std::string line;
+            // while (getline(infile,line)) {
+            //   total_time += std::stoi(line);
+            // }
+            while (getline(infile, line)) {
+              RAY_LOG(DEBUG) << "line-time " << line;
+              int64_t start_time_ms = std::stol(line.substr(0, line.find(" ")));
+              if (start_time_ms > checkpoint_time_ms) {
+                std::string time = line.substr(line.find(" ") + 1, line.length());
+                total_time_ms += std::stol(time);
+              }
+              RAY_LOG(DEBUG) << "start_time " << start_time_ms << " checkpoint_time " 
+                << checkpoint_time_ms << " total_time " << total_time_ms;
+            }
+            infile.close();
+            RAY_LOG(INFO) << "Last checkpoint on actor " << actor_id << " was " << (current_time_ms() - checkpoint_time_ms) << "ms ago. Sleeping for " << total_time_ms;
+            std::this_thread::sleep_for(std::chrono::milliseconds(total_time_ms));
+          }
+>>>>>>> stephanie-ray/logging
         }
 
         RAY_LOG(INFO) << "Actor creation task finished, task_id: " << task_spec.TaskId()

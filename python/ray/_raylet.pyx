@@ -488,7 +488,16 @@ cdef execute_task(
                         if debugger_breakpoint != b"":
                             ray.util.pdb.set_trace(
                                 breakpoint_uuid=debugger_breakpoint)
+
+                        start_time = time.time()
                         outputs = function_executor(*args, **kwargs)
+                        end_time = time.time()
+                        if RayConfig.instance().logging_enabled():
+                            actor_id = core_worker.get_actor_id().hex()
+                            actor_log_file = "/tmp/ray/session_latest/logs/actor_time_log_" + actor_id + ".txt"
+                            with open(actor_log_file, "a") as f:
+                                f.write(str(int(start_time * 1000)) + " " + str(int((end_time - start_time) * 1000)) + "\n")
+
                         next_breakpoint = (
                             ray.worker.global_worker.debugger_breakpoint)
                         if next_breakpoint != b"":

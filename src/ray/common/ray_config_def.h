@@ -365,3 +365,6 @@ RAY_CONFIG(int64_t, oom_grace_period_s, 10)
 /// Whether to enable locality-aware leasing. If enabled, then Ray will consider task
 /// dependency locality when choosing a worker for leasing.
 RAY_CONFIG(bool, locality_aware_leasing_enabled, true)
+
+/// For recovery experiments, turn on per-task logging.
+RAY_CONFIG(bool, logging_enabled, false)
