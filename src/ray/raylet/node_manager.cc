@@ -2141,6 +2141,19 @@ void NodeManager::FinishAssignedTask(Worker &worker) {
   if (!spec.IsActorCreationTask() && !spec.IsActorTask()) {
     worker.AssignJobId(JobID::Nil());
   }
+
+  std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
+  data->mutable_task()->mutable_task_spec()->CopyFrom(spec.GetMessage());
+  RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+        JobID::FromInt(0), task_id, data, nullptr));
+  for (size_t i = 0; i < spec.NumArgs(); i++) {
+    if (spec.ArgByRef(i)) {
+      for (size_t j = 0; j < spec.ArgIdCount(i); j++) {
+        auto dependency = spec.ArgId(i, j);
+        RAY_CHECK_OK(gcs_client_->DecrementReference(dependency, nullptr));
+      }
+    }
+  }
 }
 
 std::shared_ptr<ActorTableData> NodeManager::CreateActorTableDataFromCreationTask(

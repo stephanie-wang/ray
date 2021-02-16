@@ -90,7 +90,11 @@ CoreWorker::CoreWorker(const WorkerType worker_type, const Language language,
     RayLog::StartRayLog(app_name.str(), RayLogLevel::INFO, log_dir_);
     RayLog::InstallFailureSignalHandler();
   }
-
+  if (RayConfig::instance().centralized_owner()) {
+    RAY_LOG(INFO) << "CENTRALIZED";
+  } else {
+    RAY_LOG(INFO) << "LEASES";
+  }
   // Initialize gcs client.
   gcs_client_ = std::make_shared<gcs::RedisGcsClient>(gcs_options);
   RAY_CHECK_OK(gcs_client_->Connect(io_service_));
@@ -164,7 +168,8 @@ CoreWorker::CoreWorker(const WorkerType worker_type, const Language language,
         RAY_CHECK_OK(plasma_store_provider_->Put(obj, obj_id));
       },
       ref_counting_enabled ? reference_counter_ : nullptr, raylet_client_));
-  task_manager_.reset(new TaskManager(memory_store_));
+  task_manager_.reset(new TaskManager(memory_store_,
+        RayConfig::instance().centralized_owner() ? gcs_client_ : nullptr));
   resolver_.reset(new LocalDependencyResolver(memory_store_));
 
   // Create an entry for the driver task in the task table. This task is
@@ -592,8 +597,38 @@ Status CoreWorker::SubmitTask(const RayFunction &function,
     return direct_task_submitter_->SubmitTask(task_spec);
   } else {
     PinObjectReferences(task_spec, TaskTransportType::RAYLET);
-    return raylet_client_->SubmitTask(task_spec);
+    if (RayConfig::instance().centralized_owner()) {
+      std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
+      data->mutable_task()->mutable_task_spec()->CopyFrom(task_spec.GetMessage());
+      RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+            task_spec.JobId(), task_spec.TaskId(), data, [this, task_spec](ray::gcs::RedisGcsClient *client, const TaskID &id,
+             const gcs::TaskTableData &data) {
+            const auto dependencies = task_spec.GetDependencies();
+            if (dependencies.size() == 0) {
+              RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+            } else {
+              auto num_ids_left = std::make_shared<int>(dependencies.size());
+              for (auto &dependency : dependencies) {
+                RAY_CHECK_OK(gcs_client_->IncrementReference(
+                    dependency, [this, task_spec, num_ids_left](const Status &status) {
+                      *num_ids_left -= 1;
+                      if (*num_ids_left == 0) {
+                        RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+                      }
+                    }));
+              }
+            }
+            }));
+    } else {
+      const auto dependencies = task_spec.GetDependencies();
+      for (auto &dependency : dependencies) {
+        RAY_CHECK_OK(gcs_client_->IncrementReference(
+            dependency, nullptr));
+      }
+      RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+    }
   }
+  return Status::OK();
 }
 
 Status CoreWorker::CreateActor(const RayFunction &function,
@@ -675,9 +710,39 @@ Status CoreWorker::SubmitActorTask(const ActorID &actor_id, const RayFunction &f
     status = direct_actor_submitter_->SubmitTask(task_spec);
   } else {
     PinObjectReferences(task_spec, TaskTransportType::RAYLET);
-    RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+    if (RayConfig::instance().centralized_owner()) {
+      std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
+      data->mutable_task()->mutable_task_spec()->CopyFrom(task_spec.GetMessage());
+      RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+            task_spec.JobId(), task_spec.TaskId(), data, [this, task_spec](ray::gcs::RedisGcsClient *client, const TaskID &id,
+             const gcs::TaskTableData &data) {
+            const auto dependencies = task_spec.GetDependencies();
+            if (dependencies.size() == 0) {
+              RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+            } else {
+              auto num_ids_left = std::make_shared<int>(dependencies.size());
+              for (auto &dependency : dependencies) {
+                RAY_CHECK_OK(gcs_client_->IncrementReference(
+                    dependency, [this, task_spec, num_ids_left](const Status &status) {
+                      RAY_CHECK_OK(status);
+                      *num_ids_left -= 1;
+                      if (*num_ids_left == 0) {
+                        RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+                      }
+                    }));
+              }
+            }
+          }));
+    } else {
+      const auto dependencies = task_spec.GetDependencies();
+      for (auto &dependency : dependencies) {
+        RAY_CHECK_OK(gcs_client_->IncrementReference(
+            dependency, nullptr));
+      }
+      RAY_CHECK_OK(raylet_client_->SubmitTask(task_spec));
+    }
   }
-  return status;
+  return Status::OK();
 }
 
 ActorID CoreWorker::DeserializeAndRegisterActorHandle(const std::string &serialized) {

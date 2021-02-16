@@ -57,6 +57,36 @@ class RAY_EXPORT RedisGcsClient : public GcsClientInterface {
   ActorCheckpointIdTable &actor_checkpoint_id_table();
   DynamicResourceTable &resource_table();
 
+  Status IncrementReference(const ObjectID &object_id, const StatusCallback &callback) {
+    static std::hash<ObjectID> index;
+    auto object_table_shard_contexts = object_table_shard_contexts_;
+    if (object_table_shard_contexts.empty()) {
+      object_table_shard_contexts = shard_contexts_;
+    }
+    auto context = object_table_shard_contexts[index(object_id) % object_table_shard_contexts.size()];
+    return context->RunArgvAsync({"INCR", object_id.Binary()},
+                                 [callback](std::shared_ptr<CallbackReply> reply) {
+                                   if (callback) {
+                                     callback(Status::OK());
+                                   }
+                                 });
+  }
+
+  Status DecrementReference(const ObjectID &object_id, const StatusCallback &callback) {
+    static std::hash<ObjectID> index;
+    auto object_table_shard_contexts = object_table_shard_contexts_;
+    if (object_table_shard_contexts.empty()) {
+      object_table_shard_contexts = shard_contexts_;
+    }
+    auto context = object_table_shard_contexts[index(object_id) % object_table_shard_contexts.size()];
+    return context->RunArgvAsync({"DECR", object_id.Binary()},
+                                 [callback](std::shared_ptr<CallbackReply> reply) {
+                                   if (callback) {
+                                     callback(Status::OK());
+                                   }
+                                 });
+  }
+
   // We also need something to export generic code to run on workers from the
   // driver (to set the PYTHONPATH)
 
@@ -96,6 +126,7 @@ class RAY_EXPORT RedisGcsClient : public GcsClientInterface {
   std::unique_ptr<DynamicResourceTable> resource_table_;
   // The following contexts write to the data shard
   std::vector<std::shared_ptr<RedisContext>> shard_contexts_;
+  std::vector<std::shared_ptr<RedisContext>> object_table_shard_contexts_;
   std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_async_clients_;
   std::vector<std::unique_ptr<RedisAsioClient>> shard_asio_subscribe_clients_;
   // The following context writes everything to the primary shard

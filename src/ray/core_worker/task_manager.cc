@@ -19,6 +19,21 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
     pending_tasks_.erase(it);
   }
 
+  if (gcs_client_) {
+    std::shared_ptr<gcs::TaskTableData> data = std::make_shared<gcs::TaskTableData>();
+    //data->mutable_task()->mutable_task_spec()->CopyFrom(spec.GetMessage());
+    RAY_CHECK_OK(gcs_client_->raylet_task_table().Add(
+          JobID::FromInt(0), task_id, data, nullptr));
+    //for (size_t i = 0; i < spec.NumArgs(); i++) {
+    //  if (spec.ArgByRef(i)) {
+    //    for (size_t j = 0; j < spec.ArgIdCount(i); j++) {
+    //      auto dependency = spec.ArgId(i, j);
+    //      RAY_CHECK_OK(gcs_client_->DecrementReference(dependency, nullptr));
+    //    }
+    //  }
+    //}
+  }
+
   for (int i = 0; i < reply.return_objects_size(); i++) {
     const auto &return_object = reply.return_objects(i);
     ObjectID object_id = ObjectID::FromBinary(return_object.object_id());

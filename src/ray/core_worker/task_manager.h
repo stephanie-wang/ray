@@ -10,6 +10,7 @@
 #include "ray/core_worker/store_provider/memory_store/memory_store.h"
 #include "ray/protobuf/core_worker.pb.h"
 #include "ray/protobuf/gcs.pb.h"
+#include "ray/gcs/redis_gcs_client.h"
 
 namespace ray {
 
@@ -25,8 +26,14 @@ class TaskFinisherInterface {
 
 class TaskManager : public TaskFinisherInterface {
  public:
-  TaskManager(std::shared_ptr<CoreWorkerMemoryStore> in_memory_store)
-      : in_memory_store_(in_memory_store) {}
+  TaskManager(std::shared_ptr<CoreWorkerMemoryStore> in_memory_store,
+              std::shared_ptr<gcs::RedisGcsClient> gcs_client = nullptr)
+      : in_memory_store_(in_memory_store),
+        gcs_client_(gcs_client) {
+    if (gcs_client_) {
+      RAY_LOG(INFO) << "** Using centralized owner!";
+    }
+  }
 
   /// Add a task that is pending execution.
   ///
@@ -67,6 +74,8 @@ class TaskManager : public TaskFinisherInterface {
   /// Map from task ID to the task's number of return values. This map contains
   /// one entry per pending task that we submitted.
   absl::flat_hash_map<TaskID, int64_t> pending_tasks_ GUARDED_BY(mu_);
+
+  std::shared_ptr<gcs::RedisGcsClient> gcs_client_;
 };
 
 }  // namespace ray

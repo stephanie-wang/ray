@@ -258,7 +258,8 @@ Status RedisContext::Connect(const std::string &address, int port, bool sharding
   return Status::OK();
 }
 
-Status RedisContext::RunArgvAsync(const std::vector<std::string> &args) {
+Status RedisContext::RunArgvAsync(const std::vector<std::string> &args,
+                                    const RedisCallback &callback) {
   RAY_CHECK(redis_async_context_);
   // Build the arguments.
   std::vector<const char *> argv;
@@ -267,9 +268,13 @@ Status RedisContext::RunArgvAsync(const std::vector<std::string> &args) {
     argv.push_back(args[i].data());
     argc.push_back(args[i].size());
   }
+  int64_t callback_index =
+      RedisCallbackManager::instance().add(callback, false, io_service_);
   // Run the Redis command.
   Status status = redis_async_context_->RedisAsyncCommandArgv(
-      nullptr, nullptr, args.size(), argv.data(), argc.data());
+          reinterpret_cast<redisCallbackFn *>(&GlobalRedisCallback),
+          reinterpret_cast<void *>(callback_index), 
+          args.size(), argv.data(), argc.data());
   return status;
 }
 
