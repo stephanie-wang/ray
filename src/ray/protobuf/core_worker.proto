@@ -111,6 +111,9 @@ message PushTaskReply {
   // may now be borrowing. The reference counts also include any new borrowers
   // that the worker created by passing a borrowed ID into a nested task.
   repeated ObjectReferenceCount borrowed_refs = 3;
+  uint64 start_time_us = 4;
+  uint64 finish_time_us = 5;
+  uint64 objects_stored_time_us = 6;
 }
 
 message DirectActorCallArgWaitCompleteRequest {
@@ -402,6 +405,26 @@ message RunOnUtilWorkerRequest {
 }
 
 message RunOnUtilWorkerReply {
+}
+
+message ObjectProfile {
+  string id = 1;
+  uint64 size = 2;
+}
+
+message TaskProfile {
+  string id = 1;
+  repeated string args = 2;
+  repeated string outputs = 3;
+  uint64 submit_time_us = 4;
+  uint64 start_time_us = 5;
+  uint64 finish_time_us = 6;
+  uint64 objects_stored_time_us = 7;
+}
+
+message Profile {
+  repeated TaskProfile tasks = 1;
+  repeated ObjectProfile objects = 2;
 }
 
 service CoreWorkerService {

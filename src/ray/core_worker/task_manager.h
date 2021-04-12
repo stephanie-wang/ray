@@ -58,6 +58,8 @@ class TaskResubmissionInterface {
 
 using RetryTaskCallback = std::function<void(TaskSpecification &spec, bool delay)>;
 using ReconstructObjectCallback = std::function<void(const ObjectID &object_id)>;
+using RecordTaskRuntimeCallback =
+    std::function<void(const TaskID &, uint64_t, uint64_t, uint64_t)>;
 
 class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterface {
  public:
@@ -65,12 +67,14 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
               std::shared_ptr<ReferenceCounter> reference_counter,
               RetryTaskCallback retry_task_callback,
               const std::function<bool(const NodeID &node_id)> &check_node_alive,
-              ReconstructObjectCallback reconstruct_object_callback)
+              ReconstructObjectCallback reconstruct_object_callback,
+              RecordTaskRuntimeCallback record_task_runtime = nullptr)
       : in_memory_store_(in_memory_store),
         reference_counter_(reference_counter),
         retry_task_callback_(retry_task_callback),
         check_node_alive_(check_node_alive),
-        reconstruct_object_callback_(reconstruct_object_callback) {
+        reconstruct_object_callback_(reconstruct_object_callback),
+        record_task_runtime_(record_task_runtime) {
     reference_counter_->SetReleaseLineageCallback(
         [this](const ObjectID &object_id, std::vector<ObjectID> *ids_to_release) {
           RemoveLineageReference(object_id, ids_to_release);
@@ -285,6 +289,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
 
   /// Optional shutdown hook to call when pending tasks all finish.
   std::function<void()> shutdown_hook_ GUARDED_BY(mu_) = nullptr;
+
+  RecordTaskRuntimeCallback record_task_runtime_;
 };
 
 }  // namespace ray

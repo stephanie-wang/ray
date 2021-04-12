@@ -469,8 +469,16 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     RAY_CHECK(num_returns >= 0);
 
     std::vector<std::shared_ptr<RayObject>> return_objects;
+    uint64_t start_time_us = 0;
+    uint64_t finish_time_us = 0;
+    uint64_t objects_stored_time_us = 0;
     auto status = task_handler_(task_spec, resource_ids, &return_objects,
-                                reply->mutable_borrowed_refs());
+                                reply->mutable_borrowed_refs(), &start_time_us,
+                                &finish_time_us, &objects_stored_time_us);
+
+    reply->set_start_time_us(start_time_us);
+    reply->set_finish_time_us(finish_time_us);
+    reply->set_objects_stored_time_us(objects_stored_time_us);
 
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {

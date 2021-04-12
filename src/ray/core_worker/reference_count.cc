@@ -192,6 +192,7 @@ void ReferenceCounter::RemoveOwnedObject(const ObjectID &object_id) {
 }
 
 void ReferenceCounter::UpdateObjectSize(const ObjectID &object_id, int64_t object_size) {
+  record_object_size_(object_id, object_size);
   absl::MutexLock lock(&mutex_);
   auto it = object_id_refs_.find(object_id);
   if (it != object_id_refs_.end()) {

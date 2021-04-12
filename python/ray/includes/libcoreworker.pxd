@@ -3,6 +3,7 @@
 # cython: embedsignature = True
 
 from libc.stdint cimport int64_t
+from libc.stdint cimport uint64_t
 from libcpp cimport bool as c_bool
 from libcpp.memory cimport shared_ptr, unique_ptr
 from libcpp.pair cimport pair as c_pair
@@ -225,6 +226,9 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
 
         c_bool IsExiting() const
 
+        void Dump(const c_string &tasks_filename, const c_string
+                  &objects_filename)
+
     cdef cppclass CCoreWorkerOptions "ray::CoreWorkerOptions":
         CWorkerType worker_type
         CLanguage language
@@ -251,6 +255,9 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
             const c_vector[CObjectID] &return_ids,
             const c_string debugger_breakpoint,
             c_vector[shared_ptr[CRayObject]] *returns,
+            uint64_t *start_time_us,
+            uint64_t *finish_time_us,
+            uint64_t *objects_stored_time_us,
             shared_ptr[LocalMemoryBuffer]
             &creation_task_exception_pb_bytes) nogil
          ) task_execution_callback

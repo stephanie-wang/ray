@@ -594,11 +594,12 @@ class NormalSchedulingQueue : public SchedulingQueue {
 
 class CoreWorkerDirectTaskReceiver {
  public:
-  using TaskHandler =
-      std::function<Status(const TaskSpecification &task_spec,
-                           const std::shared_ptr<ResourceMappingType> resource_ids,
-                           std::vector<std::shared_ptr<RayObject>> *return_objects,
-                           ReferenceCounter::ReferenceTableProto *borrower_refs)>;
+  using TaskHandler = std::function<Status(
+      const TaskSpecification &task_spec,
+      const std::shared_ptr<ResourceMappingType> resource_ids,
+      std::vector<std::shared_ptr<RayObject>> *return_objects,
+      ReferenceCounter::ReferenceTableProto *borrower_refs, uint64_t *start_time_us,
+      uint64_t *finish_time_us, uint64_t *objects_stored_time_us)>;
 
   using OnTaskDone = std::function<ray::Status()>;
 

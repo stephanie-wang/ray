@@ -65,14 +65,15 @@ class ReferenceCounter : public ReferenceCounterInterface,
   using LineageReleasedCallback =
       std::function<void(const ObjectID &, std::vector<ObjectID> *)>;
 
-  ReferenceCounter(const rpc::WorkerAddress &rpc_address,
-                   bool distributed_ref_counting_enabled = true,
-                   bool lineage_pinning_enabled = false,
-                   rpc::ClientFactoryFn client_factory = nullptr)
+  ReferenceCounter(
+      const rpc::WorkerAddress &rpc_address, bool distributed_ref_counting_enabled = true,
+      bool lineage_pinning_enabled = false, rpc::ClientFactoryFn client_factory = nullptr,
+      std::function<void(const ObjectID &, int64_t)> record_object_size = nullptr)
       : rpc_address_(rpc_address),
         distributed_ref_counting_enabled_(distributed_ref_counting_enabled),
         lineage_pinning_enabled_(lineage_pinning_enabled),
-        borrower_pool_(client_factory) {}
+        borrower_pool_(client_factory),
+        record_object_size_(record_object_size) {}
 
   ~ReferenceCounter() {}
 
@@ -804,6 +805,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// Optional shutdown hook to call when all references have gone
   /// out of scope.
   std::function<void()> shutdown_hook_ GUARDED_BY(mutex_) = nullptr;
+
+  std::function<void(const ObjectID &, int64_t)> record_object_size_ = nullptr;
 };
 
 }  // namespace ray

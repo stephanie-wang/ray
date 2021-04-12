@@ -358,7 +358,10 @@ cdef execute_task(
         const c_vector[CObjectID] &c_arg_reference_ids,
         const c_vector[CObjectID] &c_return_ids,
         const c_string debugger_breakpoint,
-        c_vector[shared_ptr[CRayObject]] *returns):
+        c_vector[shared_ptr[CRayObject]] *returns,
+        uint64_t *start_time_us,
+        uint64_t *finish_time_us,
+        uint64_t *objects_stored_time_us):
 
     worker = ray.worker.global_worker
     manager = worker.function_actor_manager
@@ -502,7 +505,9 @@ cdef execute_task(
                                 "tasks. You can wrap the async function with "
                                 "`asyncio.get_event_loop.run_until(f())`. "
                                 "See more at docs.ray.io/async_api.html")
+                        start_time_us[0] = time.monotonic() * 1e6
                         outputs = function_executor(*args, **kwargs)
+                        finish_time_us[0] = time.monotonic() * 1e6
                         next_breakpoint = (
                             ray.worker.global_worker.debugger_breakpoint)
                         if next_breakpoint != b"":
@@ -534,6 +539,7 @@ cdef execute_task(
             with core_worker.profile_event(b"task:store_outputs"):
                 core_worker.store_task_outputs(
                     worker, outputs, c_return_ids, returns)
+                objects_stored_time_us[0] = time.monotonic() * 1e6
         except Exception as error:
             # If the debugger is enabled, drop into the remote pdb here.
             if "RAY_PDB" in os.environ:
@@ -589,6 +595,9 @@ cdef CRayStatus task_execution_handler(
         const c_vector[CObjectID] &c_return_ids,
         const c_string debugger_breakpoint,
         c_vector[shared_ptr[CRayObject]] *returns,
+        uint64_t *start_time_us,
+        uint64_t *finish_time_us,
+        uint64_t *objects_stored_time_us,
         shared_ptr[LocalMemoryBuffer] &creation_task_exception_pb_bytes) nogil:
     with gil:
         try:
@@ -598,7 +607,9 @@ cdef CRayStatus task_execution_handler(
                 # it does, that indicates that there was an internal error.
                 execute_task(task_type, task_name, ray_function, c_resources,
                              c_args, c_arg_reference_ids, c_return_ids,
-                             debugger_breakpoint, returns)
+                             debugger_breakpoint, returns,
+                             start_time_us, finish_time_us,
+                             objects_stored_time_us)
             except Exception as e:
                 sys_exit = SystemExit()
                 if isinstance(e, RayActorError) and \
@@ -917,6 +928,11 @@ cdef class CoreWorker:
         options.metrics_agent_port = metrics_agent_port
         options.connect_on_start = False
         CCoreWorkerProcess.Initialize(options)
+
+    def dump(self, directory):
+        t = os.path.join(directory, "tasks_profile")
+        o = os.path.join(directory, "objects_profile")
+        CCoreWorkerProcess.GetCoreWorker().Dump(t, o)
 
     def __dealloc__(self):
         with nogil:

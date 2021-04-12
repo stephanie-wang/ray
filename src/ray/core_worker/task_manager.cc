@@ -178,6 +178,8 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
                                       const rpc::PushTaskReply &reply,
                                       const rpc::Address &worker_addr) {
   RAY_LOG(DEBUG) << "Completing task " << task_id;
+  record_task_runtime_(task_id, reply.start_time_us(), reply.finish_time_us(),
+                       reply.objects_stored_time_us());
 
   std::vector<ObjectID> direct_return_ids;
   std::vector<ObjectID> plasma_return_ids;

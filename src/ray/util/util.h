@@ -78,6 +78,13 @@ inline int64_t current_time_ms() {
   return ms_since_epoch.count();
 }
 
+inline uint64_t current_time_us() {
+  std::chrono::microseconds us_since_epoch =
+      std::chrono::duration_cast<std::chrono::microseconds>(
+          std::chrono::steady_clock::now().time_since_epoch());
+  return us_since_epoch.count();
+}
+
 inline int64_t current_sys_time_ms() {
   std::chrono::milliseconds ms_since_epoch =
       std::chrono::duration_cast<std::chrono::milliseconds>(

@@ -353,14 +353,18 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       task_execution_service_work_(task_execution_service_),
       resource_ids_(new ResourceMappingType()),
       grpc_service_(io_service_, *this) {
-  RAY_LOG(INFO) << "Constructing CoreWorker, worker_id: " << worker_id;
+  RAY_LOG(INFO) << "Constructing CoreWorker, worker_id: " << worker_id << " time is "
+                << current_time_us();
+
+  task_profiler_ = std::make_shared<Profiler>();
 
   // Initialize task receivers.
   if (options_.worker_type == WorkerType::WORKER || options_.is_local_mode) {
     RAY_CHECK(options_.task_execution_callback != nullptr);
     auto execute_task =
         std::bind(&CoreWorker::ExecuteTask, this, std::placeholders::_1,
-                  std::placeholders::_2, std::placeholders::_3, std::placeholders::_4);
+                  std::placeholders::_2, std::placeholders::_3, std::placeholders::_4,
+                  std::placeholders::_5, std::placeholders::_6, std::placeholders::_7);
     direct_task_receiver_ = std::make_unique<CoreWorkerDirectTaskReceiver>(
         worker_context_, task_execution_service_, execute_task,
         [this] { return local_raylet_client_->TaskDone(); });
@@ -448,9 +452,13 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
 
   reference_counter_ = std::make_shared<ReferenceCounter>(
       rpc_address_, RayConfig::instance().distributed_ref_counting_enabled(),
-      RayConfig::instance().lineage_pinning_enabled(), [this](const rpc::Address &addr) {
+      RayConfig::instance().lineage_pinning_enabled(),
+      [this](const rpc::Address &addr) {
         return std::shared_ptr<rpc::CoreWorkerClient>(
             new rpc::CoreWorkerClient(addr, *client_call_manager_));
+      },
+      [this](const ObjectID &obj_id, int64_t size) {
+        task_profiler_->SetObjectSize(obj_id, static_cast<uint64_t>(size));
       });
 
   if (options_.worker_type == ray::WorkerType::WORKER) {
@@ -524,7 +532,12 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
           }
         }
       },
-      check_node_alive_fn, reconstruct_object_callback));
+      check_node_alive_fn, reconstruct_object_callback,
+      [this](const TaskID &task_id, uint64_t start_time_us, uint64_t finish_time_us,
+             uint64_t objects_stored_time_us) {
+        task_profiler_->SetTaskRuntime(task_id, start_time_us, finish_time_us,
+                                       objects_stored_time_us);
+      }));
 
   // Create an entry for the driver task in the task table. This task is
   // added immediately with status RUNNING. This allows us to push errors
@@ -1514,6 +1527,11 @@ void CoreWorker::SubmitTask(const RayFunction &function,
                       placement_options, placement_group_capture_child_tasks,
                       debugger_breakpoint, override_environment_variables);
   TaskSpecification task_spec = builder.Build();
+
+  task_profiler_->SetTaskSubmitTime(task_id, current_time_us());
+  task_profiler_->SetTaskDependencies(task_id, task_spec.GetDependencyIds());
+  task_profiler_->SetTaskOutputs(task_id, *return_ids);
+
   if (options_.is_local_mode) {
     ExecuteTaskLocalMode(task_spec);
   } else {
@@ -1725,6 +1743,11 @@ void CoreWorker::SubmitActorTask(const ActorID &actor_id, const RayFunction &fun
 
   // Submit task.
   TaskSpecification task_spec = builder.Build();
+
+  task_profiler_->SetTaskSubmitTime(actor_task_id, current_time_us());
+  task_profiler_->SetTaskDependencies(actor_task_id, task_spec.GetDependencyIds());
+  task_profiler_->SetTaskOutputs(actor_task_id, *return_ids);
+
   if (options_.is_local_mode) {
     ExecuteTaskLocalMode(task_spec, actor_id);
   } else {
@@ -1959,7 +1982,9 @@ Status CoreWorker::AllocateReturnObjects(
 Status CoreWorker::ExecuteTask(const TaskSpecification &task_spec,
                                const std::shared_ptr<ResourceMappingType> &resource_ids,
                                std::vector<std::shared_ptr<RayObject>> *return_objects,
-                               ReferenceCounter::ReferenceTableProto *borrowed_refs) {
+                               ReferenceCounter::ReferenceTableProto *borrowed_refs,
+                               uint64_t *start_time_us, uint64_t *finish_time_us,
+                               uint64_t *objects_stored_time_us) {
   RAY_LOG(DEBUG) << "Executing task, task info = " << task_spec.DebugString();
   task_queue_length_ -= 1;
   num_executed_tasks_ += 1;
@@ -2016,8 +2041,8 @@ Status CoreWorker::ExecuteTask(const TaskSpecification &task_spec,
   status = options_.task_execution_callback(
       task_type, task_spec.GetName(), func,
       task_spec.GetRequiredResources().GetResourceMap(), args, arg_reference_ids,
-      return_ids, task_spec.GetDebuggerBreakpoint(), return_objects,
-      creation_task_exception_pb_bytes);
+      return_ids, task_spec.GetDebuggerBreakpoint(), return_objects, start_time_us,
+      finish_time_us, objects_stored_time_us, creation_task_exception_pb_bytes);
 
   absl::optional<rpc::Address> caller_address(
       options_.is_local_mode ? absl::optional<rpc::Address>()

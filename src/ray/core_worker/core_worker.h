@@ -26,6 +26,7 @@
 #include "ray/core_worker/future_resolver.h"
 #include "ray/core_worker/lease_policy.h"
 #include "ray/core_worker/object_recovery_manager.h"
+#include "ray/core_worker/profiler.h"
 #include "ray/core_worker/profiling.h"
 #include "ray/core_worker/reference_count.h"
 #include "ray/core_worker/store_provider/memory_store/memory_store.h"
@@ -64,7 +65,8 @@ struct CoreWorkerOptions {
       const std::vector<std::shared_ptr<RayObject>> &args,
       const std::vector<ObjectID> &arg_reference_ids,
       const std::vector<ObjectID> &return_ids, const std::string &debugger_breakpoint,
-      std::vector<std::shared_ptr<RayObject>> *results,
+      std::vector<std::shared_ptr<RayObject>> *results, uint64_t *start_time_us,
+      uint64_t *finish_time_us, uint64_t *objects_stored_time_us,
       std::shared_ptr<LocalMemoryBuffer> &creation_task_exception_pb_bytes)>;
 
   CoreWorkerOptions()
@@ -998,6 +1000,10 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   /// Return true if the core worker is in the exit process.
   bool IsExiting() const;
 
+  void Dump(const std::string &tasks_filename, const std::string &objects_filename) {
+    task_profiler_->Dump(tasks_filename, objects_filename);
+  }
+
  private:
   void SetCurrentTaskId(const TaskID &task_id);
 
@@ -1061,7 +1067,10 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   Status ExecuteTask(const TaskSpecification &task_spec,
                      const std::shared_ptr<ResourceMappingType> &resource_ids,
                      std::vector<std::shared_ptr<RayObject>> *return_objects,
-                     ReferenceCounter::ReferenceTableProto *borrowed_refs);
+                     ReferenceCounter::ReferenceTableProto *borrowed_refs,
+                     uint64_t *start_time_us = nullptr,
+                     uint64_t *finish_time_us = nullptr,
+                     uint64_t *objects_stored_time_us = nullptr);
 
   /// Execute a local mode task (runs normal ExecuteTask)
   ///
@@ -1149,6 +1158,8 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
     }
     return call_site;
   }
+
+  std::shared_ptr<Profiler> task_profiler_;
 
   /// Shared state of the worker. Includes process-level and thread-level state.
   /// TODO(edoakes): we should move process-level state into this class and make
