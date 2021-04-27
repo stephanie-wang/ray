@@ -2,11 +2,12 @@
 
 namespace ray {
 
-void Profiler::SetTaskSubmitTime(const TaskID &task_id, uint64_t time_us) {
+void Profiler::SetTaskSubmitTime(const TaskID &task_id, uint64_t time_us, const std::string &task_name) {
   absl::MutexLock lock(&mu_);
   RAY_CHECK(tasks_.count(task_id) == 0);
   tasks_[task_id].set_id(task_id.Hex());
   tasks_[task_id].set_submit_time_us(time_us);
+  tasks_[task_id].set_name(task_name);
 }
 
 void Profiler::SetTaskDependencies(const TaskID &task_id,
@@ -43,7 +44,7 @@ void Profiler::SetObjectSize(const ObjectID &object_id, uint64_t size) {
 }
 
 void Profiler::Dump(const std::string &tasks_filename,
-                    const std::string &objects_filename) const {
+                    const std::string &objects_filename) {
   absl::MutexLock lock(&mu_);
 
   rpc::Profile profile;
@@ -59,6 +60,9 @@ void Profiler::Dump(const std::string &tasks_filename,
   std::ofstream out(tasks_filename, std::ofstream::out);
   profile.SerializeToOstream(&out);
   out.close();
+
+  tasks_.clear();
+  objects_.clear();
 }
 
 }  // namespace ray

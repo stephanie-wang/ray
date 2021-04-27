@@ -420,6 +420,7 @@ message TaskProfile {
   uint64 start_time_us = 5;
   uint64 finish_time_us = 6;
   uint64 objects_stored_time_us = 7;
+  string name = 8;
 }
 
 message Profile {

@@ -12,7 +12,7 @@ class Profiler {
  public:
   Profiler() {}
 
-  void SetTaskSubmitTime(const TaskID &task_id, uint64_t time_us);
+  void SetTaskSubmitTime(const TaskID &task_id, uint64_t time_us, const std::string &task_name);
 
   void SetTaskDependencies(const TaskID &task_id, const std::vector<ObjectID> &deps);
 
@@ -23,7 +23,7 @@ class Profiler {
 
   void SetObjectSize(const ObjectID &object_id, uint64_t size);
 
-  void Dump(const std::string &tasks_filename, const std::string &objects_filename) const;
+  void Dump(const std::string &tasks_filename, const std::string &objects_filename);
 
  private:
   /// Mutex to protect the various maps below.

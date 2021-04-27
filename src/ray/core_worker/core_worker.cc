@@ -1528,7 +1528,7 @@ void CoreWorker::SubmitTask(const RayFunction &function,
                       debugger_breakpoint, override_environment_variables);
   TaskSpecification task_spec = builder.Build();
 
-  task_profiler_->SetTaskSubmitTime(task_id, current_time_us());
+  task_profiler_->SetTaskSubmitTime(task_id, current_time_us(), task_name);
   task_profiler_->SetTaskDependencies(task_id, task_spec.GetDependencyIds());
   task_profiler_->SetTaskOutputs(task_id, *return_ids);
 
@@ -1744,7 +1744,7 @@ void CoreWorker::SubmitActorTask(const ActorID &actor_id, const RayFunction &fun
   // Submit task.
   TaskSpecification task_spec = builder.Build();
 
-  task_profiler_->SetTaskSubmitTime(actor_task_id, current_time_us());
+  task_profiler_->SetTaskSubmitTime(actor_task_id, current_time_us(), task_name);
   task_profiler_->SetTaskDependencies(actor_task_id, task_spec.GetDependencyIds());
   task_profiler_->SetTaskOutputs(actor_task_id, *return_ids);
 
