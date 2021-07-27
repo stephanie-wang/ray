@@ -34,11 +34,19 @@ py_test(
 )
 
 py_test(
+    name = "test_client",
+    size = "large",
+    srcs = ["tests/test_client.py"],
+    deps = [":tune_lib"],
+    tags = ["client", "py37", "exclusive"]
+)
+
+py_test(
     name = "test_cluster",
     size = "large",
     srcs = ["tests/test_cluster.py"],
     deps = [":tune_lib"],
-    tags = ["flaky", "jenkins_only", "exclusive"],
+    tags = ["exclusive"],
 )
 
 py_test(
@@ -46,7 +54,7 @@ py_test(
     size = "large",
     srcs = ["tests/test_cluster_searcher.py"],
     deps = [":tune_lib"],
-    tags = ["flaky", "jenkins_only", "exclusive"],
+    tags = ["exclusive"],
 )
 
 py_test(
@@ -196,6 +204,14 @@ py_test(
 )
 
 py_test(
+    name = "test_soft_imports",
+    size = "small",
+    srcs = ["tests/test_soft_imports.py"],
+    deps = [":tune_lib"],
+    tags = ["soft_imports"],
+)
+
+py_test(
     name = "test_sync",
     size = "medium",
     srcs = ["tests/test_sync.py"],
@@ -278,7 +294,7 @@ py_test(
     size = "medium",
     srcs = ["tests/test_trial_scheduler_pbt.py"],
     deps = [":tune_lib"],
-    tags = ["exclusive"],
+    tags = ["exclusive", "flaky"],
 )
 
 py_test(
@@ -367,11 +383,29 @@ py_test(
 )
 
 py_test(
+    name = "blendsearch_example",
+    size = "small",
+    srcs = ["examples/blendsearch_example.py"],
+    deps = [":tune_lib"],
+    tags = ["exclusive", "example"],
+    args = ["--smoke-test"]
+)
+
+py_test(
     name = "bohb_example",
     size = "small",
     srcs = ["examples/bohb_example.py"],
     deps = [":tune_lib"],
     tags = ["exclusive", "example"]
+)
+
+py_test(
+    name = "cfo_example",
+    size = "small",
+    srcs = ["examples/cfo_example.py"],
+    deps = [":tune_lib"],
+    tags = ["exclusive", "example"],
+    args = ["--smoke-test"]
 )
 
 py_test(
@@ -552,7 +586,7 @@ py_test(
 
 py_test(
     name = "mnist_ptl_mini",
-    size = "medium",
+    size = "large",
     srcs = ["examples/mnist_ptl_mini.py"],
     deps = [":tune_lib"],
     tags = ["exclusive", "example", "pytorch"],
@@ -663,7 +697,7 @@ py_test(
     size = "medium",
     srcs = ["examples/pbt_memnn_example.py"],
     deps = [":tune_lib"],
-    tags = ["flaky", "exclusive", "example"],
+    tags = ["exclusive", "example"],
     args = ["--smoke-test"]
 )
 
@@ -682,7 +716,7 @@ py_test(
     size = "large",
     srcs = ["examples/pbt_transformers/pbt_transformers.py"],
     deps = [":tune_lib"],
-    tags = ["flaky", "exclusive", "example"],
+    tags = ["exclusive", "example"],
     args = ["--smoke-test"]
 )
 
@@ -792,11 +826,34 @@ py_test(
 )
 
 py_test(
+    name = "xgboost_dynamic_resources_example",
+    size = "large",
+    srcs = ["examples/xgboost_dynamic_resources_example.py"],
+    deps = [":tune_lib"],
+    tags = ["exclusive", "example"],
+    args = ["--test"]
+)
+
+py_test(
     name = "zoopt_example",
     size = "small",
     srcs = ["examples/zoopt_example.py"],
     deps = [":tune_lib"],
     tags = ["exclusive", "example"],
+    args = ["--smoke-test"]
+)
+
+# --------------------------------------------------------------------
+# Tune related tests from the ../../../../release directory.
+# Please keep these sorted alphabetically.
+# --------------------------------------------------------------------
+
+py_test(
+    name = "horovod_cifar_pbt_example",
+    size = "medium",
+    srcs = ["examples/horovod_cifar_pbt_example.py"],
+    tags = ["exlusive", "pytorch", "example", "release", "py37"],
+    deps = [":tune_lib"],
     args = ["--smoke-test"]
 )
 

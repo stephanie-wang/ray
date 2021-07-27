@@ -3,10 +3,11 @@ import asyncio
 import pytest
 
 import ray
+from ray import cloudpickle
 from ray.serve.backend_worker import create_backend_replica, wrap_to_ray_error
 from ray.serve.controller import TrafficPolicy
 from ray.serve.router import RequestMetadata, EndpointRouter
-from ray.serve.config import BackendConfig, BackendMetadata
+from ray.serve.config import BackendConfig
 from ray.serve.utils import get_random_letters
 
 pytestmark = pytest.mark.asyncio
@@ -23,7 +24,8 @@ def setup_worker(name,
     @ray.remote
     class WorkerActor:
         async def __init__(self):
-            self.worker = object.__new__(create_backend_replica(backend_def))
+            self.worker = object.__new__(
+                create_backend_replica(name, cloudpickle.dumps(backend_def)))
             await self.worker.__init__(name, name + ":tag", init_args,
                                        backend_config, controller_name)
 
@@ -34,8 +36,8 @@ def setup_worker(name,
         async def handle_request(self, *args, **kwargs):
             return await self.worker.handle_request(*args, **kwargs)
 
-        def update_config(self, new_config):
-            return self.worker.update_config(new_config)
+        async def reconfigure(self, new_config):
+            return await self.worker.reconfigure(new_config)
 
         async def drain_pending_queries(self):
             return await self.worker.drain_pending_queries()
@@ -157,8 +159,7 @@ async def test_task_runner_perform_async(serve_instance,
         await barrier.wait.remote()
         return "done!"
 
-    config = BackendConfig(
-        max_concurrent_queries=10, internal_metadata=BackendMetadata())
+    config = BackendConfig(max_concurrent_queries=10)
 
     worker, router = await add_servable_to_router(
         wait_and_go, *mock_controller_with_name, backend_config=config)
@@ -176,7 +177,7 @@ async def test_task_runner_perform_async(serve_instance,
 async def test_user_config_update(serve_instance, mock_controller_with_name):
     class Customizable:
         def __init__(self):
-            self.reval = ""
+            self.retval = ""
 
         def __call__(self, starlette_request):
             return self.retval
@@ -233,9 +234,7 @@ async def test_graceful_shutdown(serve_instance, mock_controller_with_name):
         KeepInflight,
         *mock_controller_with_name,
         backend_config=BackendConfig(
-            num_replicas=1,
-            internal_metadata=BackendMetadata(),
-            user_config={"release": False}))
+            num_replicas=1, user_config={"release": False}))
 
     query_param = make_request_param()
 

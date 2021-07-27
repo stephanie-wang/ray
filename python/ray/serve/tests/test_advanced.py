@@ -10,11 +10,11 @@ from ray.test_utils import SignalActor
 
 def test_serve_forceful_shutdown(serve_instance):
     @serve.deployment
-    def sleeper(_):
+    def sleeper():
         while True:
             time.sleep(1000)
 
-    sleeper.config.experimental_graceful_shutdown_timeout_s = 0.1
+    sleeper._config.experimental_graceful_shutdown_timeout_s = 0.1
     sleeper.deploy()
 
     handle = sleeper.get_handle()
@@ -30,13 +30,12 @@ def test_serve_graceful_shutdown(serve_instance):
 
     @serve.deployment(name="wait", max_concurrent_queries=10)
     class Wait:
-        async def __call__(self, request):
-            signal_actor = await request.body()
+        async def __call__(self, signal_actor):
             await signal_actor.wait.remote()
             return ""
 
-    Wait.config.experimental_graceful_shutdown_wait_loop_s = 0.5
-    Wait.config.experimental_graceful_shutdown_timeout_s = 1000
+    Wait._config.experimental_graceful_shutdown_wait_loop_s = 0.5
+    Wait._config.experimental_graceful_shutdown_timeout_s = 1000
     Wait.deploy()
     handle = Wait.get_handle()
     refs = [handle.remote(signal) for _ in range(10)]
@@ -92,7 +91,7 @@ def test_parallel_start(serve_instance):
         def __init__(self):
             ray.get(barrier.wait.remote(), timeout=10)
 
-        def __call__(self, _):
+        def __call__(self):
             return "Ready"
 
     LongStartingServable.deploy()
