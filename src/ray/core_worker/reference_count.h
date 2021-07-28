@@ -43,6 +43,7 @@ class ReferenceCounterInterface {
       const ObjectID &object_id, const std::vector<ObjectID> &contained_ids,
       const rpc::Address &owner_address, const std::string &call_site,
       const int64_t object_size, bool is_reconstructable,
+      int64_t depth,
       const absl::optional<NodeID> &pinned_at_raylet_id = absl::optional<NodeID>()) = 0;
   virtual bool SetDeleteCallback(
       const ObjectID &object_id,
@@ -102,6 +103,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// \param[out] deleted List to store objects that hit zero ref count.
   void RemoveLocalReference(const ObjectID &object_id, std::vector<ObjectID> *deleted)
       LOCKS_EXCLUDED(mutex_);
+
+  int64_t GetMaxDepth(const std::vector<ObjectID> &obj_ids) const;
 
   /// Add references for the provided object IDs that correspond to them being
   /// dependencies to a submitted task. If lineage pinning is enabled, then
@@ -181,6 +184,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
       const ObjectID &object_id, const std::vector<ObjectID> &contained_ids,
       const rpc::Address &owner_address, const std::string &call_site,
       const int64_t object_size, bool is_reconstructable,
+      int64_t depth,
       const absl::optional<NodeID> &pinned_at_raylet_id = absl::optional<NodeID>())
       LOCKS_EXCLUDED(mutex_);
 
@@ -475,11 +479,13 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// Constructor for a reference that we created.
     Reference(const rpc::Address &owner_address, std::string call_site,
               const int64_t object_size, bool is_reconstructable,
+              int64_t depth,
               const absl::optional<NodeID> &pinned_at_raylet_id)
         : call_site(call_site),
           object_size(object_size),
           owned_by_us(true),
           owner_address(owner_address),
+          depth(depth),
           pinned_at_raylet_id(pinned_at_raylet_id),
           is_reconstructable(is_reconstructable) {}
 
@@ -546,6 +552,9 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// process is a borrower, the borrower must add the owner's address before
     /// using the ObjectID.
     absl::optional<rpc::Address> owner_address;
+
+    int64_t depth = 0;
+
     /// If this object is owned by us and stored in plasma, and reference
     /// counting is enabled, then some raylet must be pinning the object value.
     /// This is the address of that raylet.

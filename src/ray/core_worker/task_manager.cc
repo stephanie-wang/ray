@@ -60,6 +60,7 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
     num_returns--;
   }
   if (!spec.IsActorCreationTask()) {
+    auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
     for (size_t i = 0; i < num_returns; i++) {
       // We pass an empty vector for inner IDs because we do not know the return
       // value of the task yet. If the task returns an ID(s), the worker will
@@ -68,7 +69,8 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
       // PushTaskReply.
       reference_counter_->AddOwnedObject(spec.ReturnId(i),
                                          /*inner_ids=*/{}, caller_address, call_site, -1,
-                                         /*is_reconstructable=*/true);
+                                         /*is_reconstructable=*/true,
+                                         depth);
     }
   }
 

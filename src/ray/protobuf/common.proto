@@ -198,6 +198,7 @@ message TaskSpec {
   bytes debugger_breakpoint = 23;
   // Serialized JSON string of the parsed runtime environment dict for this task.
   string serialized_runtime_env = 24;
+  int64 depth = 25;
 }
 
 message Bundle {

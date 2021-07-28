@@ -1083,7 +1083,9 @@ Status CoreWorker::Put(const RayObject &object,
                                    worker_context_.GetNextPutIndex());
   reference_counter_->AddOwnedObject(
       *object_id, contained_object_ids, rpc_address_, CurrentCallSite(), object.GetSize(),
-      /*is_reconstructable=*/false, NodeID::FromBinary(rpc_address_.raylet_id()));
+      /*is_reconstructable=*/false,
+      /*depth=*/0,
+      NodeID::FromBinary(rpc_address_.raylet_id()));
   auto status = Put(object, contained_object_ids, *object_id, /*pin_object=*/true);
   if (!status.ok()) {
     reference_counter_->RemoveOwnedObject(*object_id);
@@ -1142,6 +1144,7 @@ Status CoreWorker::CreateOwned(const std::shared_ptr<Buffer> &metadata,
     reference_counter_->AddOwnedObject(*object_id, contained_object_ids, rpc_address_,
                                        CurrentCallSite(), data_size + metadata->Size(),
                                        /*is_reconstructable=*/false,
+                                       /*depth=*/0,
                                        NodeID::FromBinary(rpc_address_.raylet_id()));
   } else {
     // Because in the remote worker's `HandleAssignObjectOwner`,
@@ -1727,6 +1730,12 @@ void CoreWorker::SubmitTask(const RayFunction &function,
   } else {
     task_manager_->AddPendingTask(task_spec.CallerAddress(), task_spec, CurrentCallSite(),
                                   max_retries);
+
+    uint64_t depth = reference_counter_->GetMaxDepth(*return_ids);
+    auto &msg = task_spec.GetMutableMessage();
+    msg.set_depth(depth);
+    RAY_LOG(DEBUG) << "Task " << task_spec.TaskId() << " has depth " << depth;
+
     io_service_.post(
         [this, task_spec]() {
           RAY_UNUSED(direct_task_submitter_->SubmitTask(task_spec));
@@ -2392,7 +2401,8 @@ void CoreWorker::ExecuteTaskLocalMode(const TaskSpecification &task_spec,
       reference_counter_->AddOwnedObject(task_spec.ReturnId(i),
                                          /*inner_ids=*/{}, rpc_address_,
                                          CurrentCallSite(), -1,
-                                         /*is_reconstructable=*/false);
+                                         /*is_reconstructable=*/false,
+                                         /*depth=*/0);
     }
   }
   auto old_id = GetActorId();
@@ -3136,6 +3146,7 @@ void CoreWorker::HandleAssignObjectOwner(const rpc::AssignObjectOwnerRequest &re
   reference_counter_->AddOwnedObject(
       object_id, contained_object_ids, rpc_address_, call_site, request.object_size(),
       /*is_reconstructable=*/false,
+      /*depth=*/0,
       /*pinned_at_raylet_id=*/NodeID::FromBinary(borrower_address.raylet_id()));
   reference_counter_->AddBorrowerAddress(object_id, borrower_address);
   RAY_CHECK(memory_store_->Put(RayObject(rpc::ErrorType::OBJECT_IN_PLASMA), object_id));

@@ -163,8 +163,9 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
                                       const rpc::Address &owner_address,
                                       const std::string &call_site,
                                       const int64_t object_size, bool is_reconstructable,
+                                      int64_t depth,
                                       const absl::optional<NodeID> &pinned_at_raylet_id) {
-  RAY_LOG(DEBUG) << "Adding owned object " << object_id;
+  RAY_LOG(DEBUG) << "Adding owned object " << object_id << " with depth " << depth;
   absl::MutexLock lock(&mutex_);
   RAY_CHECK(object_id_refs_.count(object_id) == 0)
       << "Tried to create an owned object that already exists: " << object_id;
@@ -173,7 +174,8 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
   // in the frontend language, incrementing the reference count.
   auto it = object_id_refs_
                 .emplace(object_id, Reference(owner_address, call_site, object_size,
-                                              is_reconstructable, pinned_at_raylet_id))
+                                              is_reconstructable, depth,
+                                              pinned_at_raylet_id))
                 .first;
   if (!inner_ids.empty()) {
     // Mark that this object ID contains other inner IDs. Then, we will not GC
@@ -267,6 +269,20 @@ void ReferenceCounter::UpdateSubmittedTaskReferences(
   // whose values were inlined.
   RemoveSubmittedTaskReferences(argument_ids_to_remove, /*release_lineage=*/true,
                                 deleted);
+}
+
+int64_t ReferenceCounter::GetMaxDepth(const std::vector<ObjectID> &obj_ids) const {
+  absl::MutexLock lock(&mutex_);
+  int64_t max_depth = -1;
+  for (const ObjectID &obj_id : obj_ids) {
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.depth > max_depth) {
+        max_depth = it->second.depth;
+      }
+    }
+  }
+  return max_depth;
 }
 
 void ReferenceCounter::UpdateResubmittedTaskReferences(

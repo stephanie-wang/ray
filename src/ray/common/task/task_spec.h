@@ -214,6 +214,10 @@ class TaskSpecification : public MessageWrapper<rpc::TaskSpec> {
   // Whether or not we should capture parent's placement group implicitly.
   bool PlacementGroupCaptureChildTasks() const;
 
+  int64_t GetDepth() const {
+    return message_->depth();
+  }
+
  private:
   void ComputeResources();
 
