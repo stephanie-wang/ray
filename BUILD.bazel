@@ -996,6 +996,17 @@ cc_test(
 )
 
 cc_test(
+    name = "task_priority_test",
+    size = "small",
+    srcs = ["src/ray/common/task/task_priority_test.cc"],
+    copts = COPTS,
+    deps = [
+        "ray_common",
+        "@com_google_googletest//:gtest_main",
+    ],
+)
+
+cc_test(
     name = "id_test",
     size = "small",
     srcs = ["src/ray/common/id_test.cc"],

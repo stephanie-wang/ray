@@ -473,9 +473,9 @@ class ReferenceCounter : public ReferenceCounterInterface,
  private:
   struct Reference {
     /// Constructor for a reference whose origin is unknown.
-    Reference() {}
+    Reference() : priority(depth) {}
     Reference(std::string call_site, const int64_t object_size)
-        : call_site(call_site), object_size(object_size) {}
+        : call_site(call_site), object_size(object_size), priority(depth) {}
     /// Constructor for a reference that we created.
     Reference(const rpc::Address &owner_address, std::string call_site,
               const int64_t object_size, bool is_reconstructable,
@@ -487,7 +487,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
           owner_address(owner_address),
           depth(depth),
           pinned_at_raylet_id(pinned_at_raylet_id),
-          is_reconstructable(is_reconstructable) {}
+          is_reconstructable(is_reconstructable),
+          priority(depth) {}
 
     /// Constructor from a protobuf. This is assumed to be a message from
     /// another process, so the object defaults to not being owned by us.
@@ -566,6 +567,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
     // object's value will be pinned as long as it is referenced by any other
     // object's lineage.
     const bool is_reconstructable = false;
+
+    Priority priority;
 
     /// The local ref count for the ObjectID in the language frontend.
     size_t local_ref_count = 0;

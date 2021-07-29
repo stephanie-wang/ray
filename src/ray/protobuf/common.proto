@@ -199,6 +199,7 @@ message TaskSpec {
   // Serialized JSON string of the parsed runtime environment dict for this task.
   string serialized_runtime_env = 24;
   int64 depth = 25;
+  repeated int32 priority = 26;
 }
 
 message Bundle {

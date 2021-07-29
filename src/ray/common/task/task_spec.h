@@ -11,6 +11,7 @@
 #include "ray/common/id.h"
 #include "ray/common/task/scheduling_resources.h"
 #include "ray/common/task/task_common.h"
+#include "ray/common/task/task_priority.h"
 
 extern "C" {
 #include "ray/thirdparty/sha256.h"
@@ -216,6 +217,19 @@ class TaskSpecification : public MessageWrapper<rpc::TaskSpec> {
 
   int64_t GetDepth() const {
     return message_->depth();
+  }
+
+  Priority GetPriority() const {
+    std::vector<int> p(message_->priority().data(), message_->priority().data() + message_->priority().size());
+    return Priority(p);
+  }
+
+  void SetPriority(const Priority &priority) {
+    auto p = message_->mutable_priority();
+    p->Clear();
+    for (auto &s : priority.score) {
+      p->Add(s);
+    }
   }
 
  private:
