@@ -62,6 +62,7 @@ bool ActorManager::AddNewActorHandle(std::unique_ptr<ActorHandle> actor_handle,
                                        /*inner_ids=*/{}, caller_address, call_site,
                                        /*object_size*/ -1,
                                        /*is_reconstructable=*/true,
+                                       /*priority=*/Priority(0),
                                        /*depth=*/0);
   }
 

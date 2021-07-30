@@ -190,14 +190,15 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// Return the number of pending tasks.
   size_t NumPendingTasks() const;
 
+  std::vector<ObjectID> GetDependencies(const ObjectID &object_id) const;
+
  private:
   struct TaskEntry {
     TaskEntry(const TaskSpecification &spec_arg, int num_retries_left_arg,
               size_t num_returns,
-              int64_t depth,
-              int64_t task_index)
+              Priority priority)
         : spec(spec_arg), num_retries_left(num_retries_left_arg),
-          priority(depth, task_index) {
+          priority(priority) {
       for (size_t i = 0; i < num_returns; i++) {
         reconstructable_return_ids.insert(spec.ReturnId(i));
       }

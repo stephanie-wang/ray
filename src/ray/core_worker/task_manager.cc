@@ -53,31 +53,57 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
     task_deps.push_back(actor_creation_return_id);
   }
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
+  auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
+
+  // Propagate priorities.
+  const auto task_dep_priorities = reference_counter_->PropagatePriority(
+      task_deps, depth, num_tasks_submitted_);
+  // Scores propagate downstream, so inherit score from directly upstream
+  // tasks.
+  Priority priority(depth);
+  priority.SetScore(depth, num_tasks_submitted_);
+  for (const auto &p : task_dep_priorities) {
+    for (int64_t i = depth; i < static_cast<int64_t>(p.score.size()); i++) {
+      auto s = p.GetScore(i);
+      if (s < priority.GetScore(i)) {
+        priority.SetScore(i, s);
+      }
+    }
+  }
 
   // Add new owned objects for the return values of the task.
   size_t num_returns = spec.NumReturns();
   if (spec.IsActorTask()) {
     num_returns--;
   }
+  std::vector<ObjectID> return_ids;
   if (!spec.IsActorCreationTask()) {
-    auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
     for (size_t i = 0; i < num_returns; i++) {
+      const auto return_id = spec.ReturnId(i);
       // We pass an empty vector for inner IDs because we do not know the return
       // value of the task yet. If the task returns an ID(s), the worker will
       // publish the WaitForRefRemoved message that we are now a borrower for
       // the inner IDs. Note that this message can be received *before* the
       // PushTaskReply.
-      reference_counter_->AddOwnedObject(spec.ReturnId(i),
+      reference_counter_->AddOwnedObject(return_id,
                                          /*inner_ids=*/{}, caller_address, call_site, -1,
                                          /*is_reconstructable=*/true,
+                                         priority,
                                          depth);
+      return_ids.push_back(return_id);
+    }
+  }
+
+  if (!return_ids.empty()) {
+    for (const auto &dep : task_deps) {
+      reference_counter_->AddDependentObjectIds(dep, return_ids);
     }
   }
 
   {
     absl::MutexLock lock(&mu_);
     RAY_CHECK(submissible_tasks_
-                  .emplace(spec.TaskId(), TaskEntry(spec, max_retries, num_returns))
+                  .emplace(spec.TaskId(), TaskEntry(spec, max_retries, num_returns, priority))
                   .second);
     num_pending_tasks_++;
   }
@@ -507,6 +533,30 @@ std::vector<TaskID> TaskManager::GetPendingChildrenTasks(
     }
   }
   return ret_vec;
+}
+
+std::vector<ObjectID> TaskManager::GetDependencies(const ObjectID &object_id) const {
+  const auto task_id = object_id.TaskId();
+  absl::MutexLock lock(&mu_);
+  auto it = submissible_tasks_.find(task_id);
+  if (it == submissible_tasks_.end()) {
+    RAY_LOG(INFO) << "No task spec found for return object " << object_id << " during priority propagation";
+    return {};
+  }
+
+  const auto &spec = it->second.spec;
+  std::vector<ObjectID> task_deps;
+  for (size_t i = 0; i < spec.NumArgs(); i++) {
+    if (spec.ArgByRef(i)) {
+      task_deps.push_back(spec.ArgId(i));
+    } else {
+      const auto &inlined_ids = spec.ArgInlinedIds(i);
+      for (const auto &inlined_id : inlined_ids) {
+        task_deps.push_back(inlined_id);
+      }
+    }
+  }
+  return task_deps;
 }
 
 }  // namespace ray

@@ -514,6 +514,9 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       rpc_address_,
       /*object_info_publisher=*/object_info_publisher_.get(),
       /*object_info_subscriber=*/object_info_subscriber_.get(),
+      [this](const ObjectID &obj_id) {
+        return task_manager_->GetDependencies(obj_id);
+      },
       RayConfig::instance().lineage_pinning_enabled(), [this](const rpc::Address &addr) {
         return std::shared_ptr<rpc::CoreWorkerClient>(
             new rpc::CoreWorkerClient(addr, *client_call_manager_));
@@ -1084,6 +1087,7 @@ Status CoreWorker::Put(const RayObject &object,
   reference_counter_->AddOwnedObject(
       *object_id, contained_object_ids, rpc_address_, CurrentCallSite(), object.GetSize(),
       /*is_reconstructable=*/false,
+      /*priority=*/Priority(0),
       /*depth=*/0,
       NodeID::FromBinary(rpc_address_.raylet_id()));
   auto status = Put(object, contained_object_ids, *object_id, /*pin_object=*/true);
@@ -1144,6 +1148,7 @@ Status CoreWorker::CreateOwned(const std::shared_ptr<Buffer> &metadata,
     reference_counter_->AddOwnedObject(*object_id, contained_object_ids, rpc_address_,
                                        CurrentCallSite(), data_size + metadata->Size(),
                                        /*is_reconstructable=*/false,
+                                       /*priority=*/Priority(0),
                                        /*depth=*/0,
                                        NodeID::FromBinary(rpc_address_.raylet_id()));
   } else {
@@ -2402,6 +2407,7 @@ void CoreWorker::ExecuteTaskLocalMode(const TaskSpecification &task_spec,
                                          /*inner_ids=*/{}, rpc_address_,
                                          CurrentCallSite(), -1,
                                          /*is_reconstructable=*/false,
+                                         /*priority=*/Priority(0),
                                          /*depth=*/0);
     }
   }
@@ -3146,6 +3152,7 @@ void CoreWorker::HandleAssignObjectOwner(const rpc::AssignObjectOwnerRequest &re
   reference_counter_->AddOwnedObject(
       object_id, contained_object_ids, rpc_address_, call_site, request.object_size(),
       /*is_reconstructable=*/false,
+      /*priority=*/Priority(0),
       /*depth=*/0,
       /*pinned_at_raylet_id=*/NodeID::FromBinary(borrower_address.raylet_id()));
   reference_counter_->AddBorrowerAddress(object_id, borrower_address);

@@ -43,6 +43,7 @@ class ReferenceCounterInterface {
       const ObjectID &object_id, const std::vector<ObjectID> &contained_ids,
       const rpc::Address &owner_address, const std::string &call_site,
       const int64_t object_size, bool is_reconstructable,
+      Priority priority,
       int64_t depth,
       const absl::optional<NodeID> &pinned_at_raylet_id = absl::optional<NodeID>()) = 0;
   virtual bool SetDeleteCallback(
@@ -67,6 +68,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
       const rpc::WorkerAddress &rpc_address,
       pubsub::PublisherInterface *object_info_publisher,
       pubsub::SubscriberInterface *object_info_subscriber,
+      std::function<std::vector<ObjectID>(const ObjectID &)> get_dependencies,
       bool lineage_pinning_enabled = false, rpc::ClientFactoryFn client_factory = nullptr,
       std::function<void(const ObjectID &, int64_t)> record_object_size = nullptr)
       : rpc_address_(rpc_address),
@@ -74,7 +76,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
         borrower_pool_(client_factory),
         object_info_publisher_(object_info_publisher),
         object_info_subscriber_(object_info_subscriber),
-        record_object_size_(record_object_size) {}
+        record_object_size_(record_object_size),
+        get_dependencies_(get_dependencies) {}
 
   ~ReferenceCounter() {}
 
@@ -184,6 +187,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
       const ObjectID &object_id, const std::vector<ObjectID> &contained_ids,
       const rpc::Address &owner_address, const std::string &call_site,
       const int64_t object_size, bool is_reconstructable,
+      Priority priority,
       int64_t depth,
       const absl::optional<NodeID> &pinned_at_raylet_id = absl::optional<NodeID>())
       LOCKS_EXCLUDED(mutex_);
@@ -470,6 +474,10 @@ class ReferenceCounter : public ReferenceCounterInterface,
   void AddBorrowerAddress(const ObjectID &object_id, const rpc::Address &borrower_address)
       LOCKS_EXCLUDED(mutex_);
 
+  std::vector<Priority> PropagatePriority(const std::vector<ObjectID> &obj_ids, int64_t depth, int score);
+
+  void AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids);
+
  private:
   struct Reference {
     /// Constructor for a reference whose origin is unknown.
@@ -479,6 +487,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// Constructor for a reference that we created.
     Reference(const rpc::Address &owner_address, std::string call_site,
               const int64_t object_size, bool is_reconstructable,
+              Priority priority,
               int64_t depth,
               const absl::optional<NodeID> &pinned_at_raylet_id)
         : call_site(call_site),
@@ -486,9 +495,9 @@ class ReferenceCounter : public ReferenceCounterInterface,
           owned_by_us(true),
           owner_address(owner_address),
           depth(depth),
+          priority(priority),
           pinned_at_raylet_id(pinned_at_raylet_id),
-          is_reconstructable(is_reconstructable),
-          priority(depth) {}
+          is_reconstructable(is_reconstructable) {}
 
     /// Constructor from a protobuf. This is assumed to be a message from
     /// another process, so the object defaults to not being owned by us.
@@ -556,6 +565,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
 
     int64_t depth = 0;
 
+    Priority priority;
+
     /// If this object is owned by us and stored in plasma, and reference
     /// counting is enabled, then some raylet must be pinning the object value.
     /// This is the address of that raylet.
@@ -568,7 +579,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
     // object's lineage.
     const bool is_reconstructable = false;
 
-    Priority priority;
+    // ObjectIDs that depend on this object.
+    std::vector<ObjectID> dependent_obj_ids = {};
 
     /// The local ref count for the ObjectID in the language frontend.
     size_t local_ref_count = 0;
@@ -835,6 +847,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
   pubsub::SubscriberInterface *object_info_subscriber_;
 
   std::function<void(const ObjectID &, int64_t)> record_object_size_ = nullptr;
+
+  std::function<std::vector<ObjectID>(const ObjectID &)> get_dependencies_;
 };
 
 }  // namespace ray

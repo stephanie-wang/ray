@@ -39,7 +39,10 @@ class ReferenceCountTest : public ::testing::Test {
     rpc::Address addr;
     publisher_ = std::make_shared<mock_pubsub::MockPublisher>();
     subscriber_ = std::make_shared<mock_pubsub::MockSubscriber>();
-    rc = std::make_unique<ReferenceCounter>(addr, publisher_.get(), subscriber_.get());
+    rc = std::make_unique<ReferenceCounter>(addr, publisher_.get(), subscriber_.get(),
+                                            [this](const ObjectID &obj_id) {
+                                              return dependencies_[obj_id];
+                                            });
   }
 
   virtual void TearDown() {
@@ -50,6 +53,7 @@ class ReferenceCountTest : public ::testing::Test {
 
   std::shared_ptr<mock_pubsub::MockPublisher> publisher_;
   std::shared_ptr<mock_pubsub::MockSubscriber> subscriber_;
+  absl::flat_hash_map<ObjectID, std::vector<ObjectID>> dependencies_;
 };
 
 class ReferenceCountLineageEnabledTest : public ::testing::Test {
@@ -60,6 +64,9 @@ class ReferenceCountLineageEnabledTest : public ::testing::Test {
     publisher_ = std::make_shared<mock_pubsub::MockPublisher>();
     subscriber_ = std::make_shared<mock_pubsub::MockSubscriber>();
     rc = std::make_unique<ReferenceCounter>(addr, publisher_.get(), subscriber_.get(),
+                                            [this](const ObjectID &obj_id) {
+                                              return dependencies_[obj_id];
+                                            },
                                             /*lineage_pinning_enabled=*/true);
   }
 
@@ -71,6 +78,7 @@ class ReferenceCountLineageEnabledTest : public ::testing::Test {
 
   std::shared_ptr<mock_pubsub::MockPublisher> publisher_;
   std::shared_ptr<mock_pubsub::MockSubscriber> subscriber_;
+  absl::flat_hash_map<ObjectID, std::vector<ObjectID>> dependencies_;
 };
 
 /// The 2 classes below are implemented to support distributed mock test using
@@ -252,6 +260,7 @@ class MockWorkerClient : public MockCoreWorkerClientInterface {
             &directory, &subscription_callback_map, &subscription_failure_callback_map,
             WorkerID::FromBinary(address_.worker_id()), client_factory)),
         rc_(rpc::WorkerAddress(address_), publisher_.get(), subscriber_.get(),
+            [](const ObjectID &object_id) { return std::vector<ObjectID>({}); },
             /*lineage_pinning_enabled=*/false, client_factory) {}
 
   void WaitForRefRemoved(const ObjectID object_id, const ObjectID contained_in_id,
@@ -299,12 +308,12 @@ class MockWorkerClient : public MockCoreWorkerClientInterface {
   // The below methods mirror a core worker's operations, e.g., `Put` simulates
   // a ray.put().
   void Put(const ObjectID &object_id) {
-    rc_.AddOwnedObject(object_id, {}, address_, "", 0, false);
+    rc_.AddOwnedObject(object_id, {}, address_, "", 0, false, Priority(0), /*depth=*/0);
     rc_.AddLocalReference(object_id, "");
   }
 
   void PutWrappedId(const ObjectID outer_id, const ObjectID &inner_id) {
-    rc_.AddOwnedObject(outer_id, {inner_id}, address_, "", 0, false);
+    rc_.AddOwnedObject(outer_id, {inner_id}, address_, "", 0, false, Priority(0), /*depth=*/0);
     rc_.AddLocalReference(outer_id, "");
   }
 
@@ -325,7 +334,7 @@ class MockWorkerClient : public MockCoreWorkerClientInterface {
   ObjectID SubmitTaskWithArg(const ObjectID &arg_id) {
     rc_.UpdateSubmittedTaskReferences({arg_id});
     ObjectID return_id = ObjectID::FromRandom();
-    rc_.AddOwnedObject(return_id, {}, address_, "", 0, false);
+    rc_.AddOwnedObject(return_id, {}, address_, "", 0, false, Priority(0), /*depth=*/0);
     // Add a sentinel reference to keep all nested object IDs in scope.
     rc_.AddLocalReference(return_id, "");
     return return_id;
@@ -456,7 +465,7 @@ TEST_F(ReferenceCountTest, TestUnreconstructableObjectOutOfScope) {
   // The object goes out of scope once it has no more refs.
   std::vector<ObjectID> out;
   ASSERT_FALSE(rc->SetDeleteCallback(id, callback));
-  rc->AddOwnedObject(id, {}, address, "", 0, false);
+  rc->AddOwnedObject(id, {}, address, "", 0, false, Priority(0), /*depth=*/0);
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   ASSERT_FALSE(*out_of_scope);
   rc->AddLocalReference(id, "");
@@ -468,7 +477,7 @@ TEST_F(ReferenceCountTest, TestUnreconstructableObjectOutOfScope) {
   // lineage ref count.
   *out_of_scope = false;
   ASSERT_FALSE(rc->SetDeleteCallback(id, callback));
-  rc->AddOwnedObject(id, {}, address, "", 0, false);
+  rc->AddOwnedObject(id, {}, address, "", 0, false, Priority(0), /*depth=*/0);
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   rc->UpdateSubmittedTaskReferences({id});
   ASSERT_FALSE(*out_of_scope);
@@ -495,7 +504,7 @@ TEST_F(ReferenceCountTest, TestReferenceStats) {
   ASSERT_EQ(stats.object_refs(0).call_site(), "file.py:42");
   rc->RemoveLocalReference(id1, nullptr);
 
-  rc->AddOwnedObject(id2, {}, address, "file2.py:43", 100, false);
+  rc->AddOwnedObject(id2, {}, address, "file2.py:43", 100, false, Priority(0), /*depth=*/0);
   rpc::CoreWorkerStats stats2;
   rc->AddObjectRefStats({}, &stats2);
   ASSERT_EQ(stats2.object_refs_size(), 1);
@@ -517,7 +526,7 @@ TEST_F(ReferenceCountTest, TestGetLocalityData) {
   // Owned object with defined object size and pinned node location should return valid
   // locality data.
   int64_t object_size = 100;
-  rc->AddOwnedObject(obj1, {}, address, "file2.py:42", object_size, false,
+  rc->AddOwnedObject(obj1, {}, address, "file2.py:42", object_size, false, Priority(0), /*depth=*/0,
                      absl::optional<NodeID>(node1));
   auto locality_data_obj1 = rc->GetLocalityData(obj1);
   ASSERT_TRUE(locality_data_obj1.has_value());
@@ -567,7 +576,7 @@ TEST_F(ReferenceCountTest, TestGetLocalityData) {
   // Fetching locality data for an object that doesn't have an object size defined
   // should return a null optional.
   rc->AddOwnedObject(obj2, {}, address, "file2.py:43", -1, false,
-                     absl::optional<NodeID>(node2));
+                     Priority(0), /*depth=*/0, absl::optional<NodeID>(node2));
   auto locality_data_obj2_no_object_size = rc->GetLocalityData(obj2);
   ASSERT_FALSE(locality_data_obj2_no_object_size.has_value());
 }
@@ -579,7 +588,7 @@ TEST_F(ReferenceCountTest, TestOwnerAddress) {
   auto object_id = ObjectID::FromRandom();
   rpc::Address address;
   address.set_ip_address("1234");
-  rc->AddOwnedObject(object_id, {}, address, "", 0, false);
+  rc->AddOwnedObject(object_id, {}, address, "", 0, false, Priority(0), /*depth=*/0);
 
   TaskID added_id;
   rpc::Address added_address;
@@ -588,7 +597,7 @@ TEST_F(ReferenceCountTest, TestOwnerAddress) {
 
   auto object_id2 = ObjectID::FromRandom();
   address.set_ip_address("5678");
-  rc->AddOwnedObject(object_id2, {}, address, "", 0, false);
+  rc->AddOwnedObject(object_id2, {}, address, "", 0, false, Priority(0), /*depth=*/0);
   ASSERT_TRUE(rc->GetOwner(object_id2, &added_address));
   ASSERT_EQ(address.ip_address(), added_address.ip_address());
 
@@ -609,7 +618,8 @@ TEST(MemoryStoreIntegrationTest, TestSimple) {
   auto publisher = std::make_shared<mock_pubsub::MockPublisher>();
   auto subscriber = std::make_shared<mock_pubsub::MockSubscriber>();
   auto rc = std::shared_ptr<ReferenceCounter>(new ReferenceCounter(
-      rpc::WorkerAddress(rpc::Address()), publisher.get(), subscriber.get()));
+      rpc::WorkerAddress(rpc::Address()), publisher.get(), subscriber.get(),
+            [](const ObjectID &object_id) { return std::vector<ObjectID>(); }));
   CoreWorkerMemoryStore store(nullptr, rc);
 
   // Tests putting an object with no references is ignored.
@@ -2085,7 +2095,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestUnreconstructableObjectOutOfScope) 
   // The object goes out of scope once it has no more refs.
   std::vector<ObjectID> out;
   ASSERT_FALSE(rc->SetDeleteCallback(id, callback));
-  rc->AddOwnedObject(id, {}, address, "", 0, false);
+  rc->AddOwnedObject(id, {}, address, "", 0, false, Priority(0), /*depth=*/0);
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   ASSERT_FALSE(*out_of_scope);
   rc->AddLocalReference(id, "");
@@ -2097,7 +2107,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestUnreconstructableObjectOutOfScope) 
   // count.
   *out_of_scope = false;
   ASSERT_FALSE(rc->SetDeleteCallback(id, callback));
-  rc->AddOwnedObject(id, {}, address, "", 0, false);
+  rc->AddOwnedObject(id, {}, address, "", 0, false, Priority(0), /*depth=*/0);
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   rc->UpdateSubmittedTaskReferences({id});
   ASSERT_FALSE(*out_of_scope);
@@ -2130,7 +2140,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestBasicLineage) {
   ASSERT_TRUE(lineage_deleted.empty());
 
   // We should keep lineage for owned objects.
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, false);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, false, Priority(0), /*depth=*/0);
   rc->AddLocalReference(id, "");
   ASSERT_TRUE(rc->HasReference(id));
   rc->RemoveLocalReference(id, nullptr);
@@ -2149,7 +2159,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestPinLineageRecursive) {
   for (int i = 0; i < 3; i++) {
     ObjectID id = ObjectID::FromRandom();
     ids.push_back(id);
-    rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true);
+    rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true, Priority(0), /*depth=*/0);
   }
 
   rc->SetReleaseLineageCallback(
@@ -2203,7 +2213,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestResubmittedTask) {
   std::vector<ObjectID> lineage_deleted;
 
   ObjectID id = ObjectID::FromRandom();
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true, Priority(0), /*depth=*/0);
 
   rc->SetReleaseLineageCallback(
       [&](const ObjectID &object_id, std::vector<ObjectID> *ids_to_release) {
@@ -2250,7 +2260,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestPlasmaLocation) {
 
   ObjectID id = ObjectID::FromRandom();
   NodeID node_id = NodeID::FromRandom();
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true, Priority(0), /*depth=*/0);
   rc->AddLocalReference(id, "");
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   ASSERT_TRUE(rc->IsPlasmaObjectPinnedOrSpilled(id, &owned_by_us, &pinned_at, &spilled));
@@ -2266,7 +2276,7 @@ TEST_F(ReferenceCountLineageEnabledTest, TestPlasmaLocation) {
   ASSERT_TRUE(deleted->count(id) > 0);
   deleted->clear();
 
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true, Priority(0), /*depth=*/0);
   rc->AddLocalReference(id, "");
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   rc->UpdateObjectPinnedAtRaylet(id, node_id);
@@ -2288,7 +2298,7 @@ TEST_F(ReferenceCountTest, TestFree) {
   NodeID node_id = NodeID::FromRandom();
 
   // Test free before receiving information about where the object is pinned.
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true, Priority(0), /*depth=*/0);
   ASSERT_FALSE(rc->IsPlasmaObjectFreed(id));
   rc->AddLocalReference(id, "");
   rc->FreePlasmaObjects({id});
@@ -2307,7 +2317,7 @@ TEST_F(ReferenceCountTest, TestFree) {
   ASSERT_FALSE(rc->IsPlasmaObjectFreed(id));
 
   // Test free after receiving information about where the object is pinned.
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, true, Priority(0), /*depth=*/0);
   rc->AddLocalReference(id, "");
   ASSERT_TRUE(rc->SetDeleteCallback(id, callback));
   rc->UpdateObjectPinnedAtRaylet(id, node_id);
@@ -2326,10 +2336,13 @@ TEST_F(ReferenceCountTest, TestRemoveOwnedObject) {
   ObjectID id = ObjectID::FromRandom();
 
   // Test remove owned object.
-  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, false);
+  rc->AddOwnedObject(id, {}, rpc::Address(), "", 0, false, Priority(0), /*depth=*/0);
   ASSERT_TRUE(rc->HasReference(id));
   rc->RemoveOwnedObject(id);
   ASSERT_FALSE(rc->HasReference(id));
+}
+
+TEST_F(ReferenceCountTest, TestPropagatePriorities) {
 }
 
 }  // namespace ray

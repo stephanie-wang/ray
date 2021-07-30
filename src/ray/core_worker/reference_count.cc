@@ -163,9 +163,10 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
                                       const rpc::Address &owner_address,
                                       const std::string &call_site,
                                       const int64_t object_size, bool is_reconstructable,
+                                      Priority priority,
                                       int64_t depth,
                                       const absl::optional<NodeID> &pinned_at_raylet_id) {
-  RAY_LOG(DEBUG) << "Adding owned object " << object_id << " with depth " << depth;
+  RAY_LOG(DEBUG) << "Adding owned object " << object_id << " with priority " << priority << ", depth " << depth;
   absl::MutexLock lock(&mutex_);
   RAY_CHECK(object_id_refs_.count(object_id) == 0)
       << "Tried to create an owned object that already exists: " << object_id;
@@ -174,7 +175,7 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
   // in the frontend language, incrementing the reference count.
   auto it = object_id_refs_
                 .emplace(object_id, Reference(owner_address, call_site, object_size,
-                                              is_reconstructable, depth,
+                                              is_reconstructable, priority, depth,
                                               pinned_at_raylet_id))
                 .first;
   if (!inner_ids.empty()) {
@@ -269,20 +270,6 @@ void ReferenceCounter::UpdateSubmittedTaskReferences(
   // whose values were inlined.
   RemoveSubmittedTaskReferences(argument_ids_to_remove, /*release_lineage=*/true,
                                 deleted);
-}
-
-int64_t ReferenceCounter::GetMaxDepth(const std::vector<ObjectID> &obj_ids) const {
-  absl::MutexLock lock(&mutex_);
-  int64_t max_depth = -1;
-  for (const ObjectID &obj_id : obj_ids) {
-    auto it = object_id_refs_.find(obj_id);
-    if (it != object_id_refs_.end()) {
-      if (it->second.depth > max_depth) {
-        max_depth = it->second.depth;
-      }
-    }
-  }
-  return max_depth;
 }
 
 void ReferenceCounter::UpdateResubmittedTaskReferences(
@@ -1241,6 +1228,95 @@ void ReferenceCounter::Reference::ToProto(rpc::ObjectReferenceCount *ref) const 
   for (const auto &contains_id : contains) {
     ref->add_contains(contains_id.Binary());
   }
+}
+
+int64_t ReferenceCounter::GetMaxDepth(const std::vector<ObjectID> &obj_ids) const {
+  absl::MutexLock lock(&mutex_);
+  int64_t max_depth = -1;
+  for (const ObjectID &obj_id : obj_ids) {
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.depth > max_depth) {
+        max_depth = it->second.depth;
+      }
+    }
+  }
+  return max_depth;
+}
+
+std::vector<Priority> ReferenceCounter::PropagatePriority(const std::vector<ObjectID> &obj_ids, int64_t depth, int score) {
+  absl::MutexLock lock(&mutex_);
+  absl::flat_hash_set<ObjectID> downstream;
+  absl::flat_hash_set<ObjectID> visited;
+
+  // Propagate priorities upward.
+  std::list<ObjectID> queue(obj_ids.begin(), obj_ids.end());
+  while (!queue.empty()) {
+    auto obj_id = std::move(queue.front());
+    queue.pop_front();
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.priority.GetScore(depth) <= score) {
+        continue;
+      }
+
+      it->second.priority.SetScore(depth, score);
+      RAY_LOG(DEBUG) << "Updated priority for upstream object " << obj_id
+        << " to " << it->second.priority;
+      downstream.insert(
+          it->second.dependent_obj_ids.begin(),
+          it->second.dependent_obj_ids.end());
+      for (auto &dep : get_dependencies_(obj_id)) {
+        if (!visited.contains(dep)) {
+          queue.push_back(dep);
+          visited.insert(dep);
+        }
+      }
+    }
+  }
+
+  // Propagate priorities downward.
+  visited.clear();
+  queue.insert(queue.end(), downstream.begin(), downstream.end());
+  while (!queue.empty()) {
+    auto obj_id = std::move(queue.front());
+    queue.pop_front();
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.priority.GetScore(depth) <= score) {
+        continue;
+      }
+
+      it->second.priority.SetScore(depth, score);
+      RAY_LOG(DEBUG) << "Updated priority for downstream object " << obj_id
+        << " to " << it->second.priority;
+      for (auto &dependent_id: it->second.dependent_obj_ids) {
+        if (!visited.contains(dependent_id)) {
+          queue.push_back(dependent_id);
+          visited.insert(dependent_id);
+        }
+      }
+    }
+  }
+
+  std::vector<Priority> priorities;
+  for (const auto &obj_id : obj_ids) {
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      priorities.push_back(it->second.priority);
+    }
+  }
+  return priorities;
+}
+
+void ReferenceCounter::AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids) {
+  absl::MutexLock lock(&mutex_);
+  auto it = object_id_refs_.find(obj_id);
+  RAY_CHECK(it != object_id_refs_.end());
+  it->second.dependent_obj_ids.insert(
+      it->second.dependent_obj_ids.end(),
+      dependent_obj_ids.begin(),
+      dependent_obj_ids.end());
 }
 
 }  // namespace ray
