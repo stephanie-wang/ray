@@ -19,7 +19,6 @@
 #include "absl/synchronization/mutex.h"
 #include "ray/common/id.h"
 #include "ray/common/task/task.h"
-#include "ray/common/task/task_priority.h"
 #include "ray/core_worker/store_provider/memory_store/memory_store.h"
 #include "src/ray/protobuf/core_worker.pb.h"
 #include "src/ray/protobuf/gcs.pb.h"
@@ -195,10 +194,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
  private:
   struct TaskEntry {
     TaskEntry(const TaskSpecification &spec_arg, int num_retries_left_arg,
-              size_t num_returns,
-              Priority priority)
-        : spec(spec_arg), num_retries_left(num_retries_left_arg),
-          priority(priority) {
+              size_t num_returns)
+        : spec(spec_arg), num_retries_left(num_retries_left_arg) {
       for (size_t i = 0; i < num_returns; i++) {
         reconstructable_return_ids.insert(spec.ReturnId(i));
       }
@@ -234,8 +231,6 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
     //    pending tasks and tasks that finished execution but that may be
     //    retried in the future.
     absl::flat_hash_set<ObjectID> reconstructable_return_ids;
-
-    Priority priority;
   };
 
   /// Remove a lineage reference to this object ID. This should be called

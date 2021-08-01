@@ -1244,6 +1244,20 @@ int64_t ReferenceCounter::GetMaxDepth(const std::vector<ObjectID> &obj_ids) cons
   return max_depth;
 }
 
+Priority ReferenceCounter::GetMinPriority(const std::vector<ObjectID> &obj_ids) {
+  absl::MutexLock lock(&mutex_);
+  Priority min_priority(0);
+  for (const auto &obj_id : obj_ids) {
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.priority < min_priority) {
+        min_priority = it->second.priority;
+      }
+    }
+  }
+  return min_priority;
+}
+
 std::vector<Priority> ReferenceCounter::PropagatePriority(const std::vector<ObjectID> &obj_ids, int64_t depth, int score) {
   absl::MutexLock lock(&mutex_);
   absl::flat_hash_set<ObjectID> downstream;

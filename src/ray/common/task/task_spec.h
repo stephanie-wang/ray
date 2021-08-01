@@ -86,6 +86,8 @@ class TaskSpecification : public MessageWrapper<rpc::TaskSpec> {
 
   size_t NumReturns() const;
 
+  std::vector<ObjectID> ReturnIds() const;
+
   bool ArgByRef(size_t arg_index) const;
 
   ObjectID ArgId(size_t arg_index) const;

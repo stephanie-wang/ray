@@ -63,6 +63,7 @@ class CoreWorkerDirectTaskSubmitter {
       std::shared_ptr<CoreWorkerMemoryStore> store,
       std::shared_ptr<TaskFinisherInterface> task_finisher, NodeID local_raylet_id,
       int64_t lease_timeout_ms, std::shared_ptr<ActorCreatorInterface> actor_creator,
+      std::function<Priority(const TaskSpecification &spec)> get_task_priority,
       uint32_t max_tasks_in_flight_per_worker =
           RayConfig::instance().max_tasks_in_flight_per_worker(),
       absl::optional<boost::asio::steady_timer> cancel_timer = absl::nullopt)
@@ -77,7 +78,8 @@ class CoreWorkerDirectTaskSubmitter {
         actor_creator_(std::move(actor_creator)),
         client_cache_(core_worker_client_pool),
         max_tasks_in_flight_per_worker_(max_tasks_in_flight_per_worker),
-        cancel_retry_timer_(std::move(cancel_timer)) {}
+        cancel_retry_timer_(std::move(cancel_timer)),
+        get_task_priority_(get_task_priority) {}
 
   /// Schedule a task for direct submission to a worker.
   ///
@@ -347,6 +349,8 @@ class CoreWorkerDirectTaskSubmitter {
 
   // Retries cancelation requests if they were not successful.
   absl::optional<boost::asio::steady_timer> cancel_retry_timer_;
+
+  std::function<Priority(const TaskSpecification &spec)> get_task_priority_;
 };
 
 };  // namespace ray

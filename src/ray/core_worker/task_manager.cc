@@ -16,6 +16,7 @@
 
 #include "ray/common/buffer.h"
 #include "ray/common/constants.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/util/util.h"
 
 #include "msgpack.hpp"
@@ -72,26 +73,18 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
   }
 
   // Add new owned objects for the return values of the task.
-  size_t num_returns = spec.NumReturns();
-  if (spec.IsActorTask()) {
-    num_returns--;
-  }
-  std::vector<ObjectID> return_ids;
-  if (!spec.IsActorCreationTask()) {
-    for (size_t i = 0; i < num_returns; i++) {
-      const auto return_id = spec.ReturnId(i);
-      // We pass an empty vector for inner IDs because we do not know the return
-      // value of the task yet. If the task returns an ID(s), the worker will
-      // publish the WaitForRefRemoved message that we are now a borrower for
-      // the inner IDs. Note that this message can be received *before* the
-      // PushTaskReply.
-      reference_counter_->AddOwnedObject(return_id,
-                                         /*inner_ids=*/{}, caller_address, call_site, -1,
-                                         /*is_reconstructable=*/true,
-                                         priority,
-                                         depth);
-      return_ids.push_back(return_id);
-    }
+  const auto &return_ids = spec.ReturnIds();
+  for (const auto &return_id : return_ids) {
+    // We pass an empty vector for inner IDs because we do not know the return
+    // value of the task yet. If the task returns an ID(s), the worker will
+    // publish the WaitForRefRemoved message that we are now a borrower for
+    // the inner IDs. Note that this message can be received *before* the
+    // PushTaskReply.
+    reference_counter_->AddOwnedObject(return_id,
+                                       /*inner_ids=*/{}, caller_address, call_site, -1,
+                                       /*is_reconstructable=*/true,
+                                       priority,
+                                       depth);
   }
 
   if (!return_ids.empty()) {
@@ -102,8 +95,9 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
 
   {
     absl::MutexLock lock(&mu_);
+    const auto num_returns = spec.NumReturns();
     RAY_CHECK(submissible_tasks_
-                  .emplace(spec.TaskId(), TaskEntry(spec, max_retries, num_returns, priority))
+                  .emplace(spec.TaskId(), TaskEntry(spec, max_retries, num_returns))
                   .second);
     num_pending_tasks_++;
   }
