@@ -77,7 +77,14 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
                                             : ActorID::Nil(),
             task_spec.GetRuntimeEnvHash());
         auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
-        scheduling_key_entry.task_queue.push_back(task_spec);
+        const auto priority = get_task_priority_(task_spec);
+        auto inserted = tasks_.emplace(task_spec.TaskId(), TaskEntry(task_spec, scheduling_key, priority));
+        RAY_CHECK(inserted.second);
+        const auto &task_key = inserted.first->second.task_key;
+        RAY_CHECK(scheduling_key_entry.task_priority_queue.emplace(task_key).second) << task_spec.TaskId();
+        RAY_LOG(DEBUG) << "Placed task " << task_spec.TaskId()
+                       << " with priority " << priority
+                       << " queue size is now " << scheduling_key_entry.task_priority_queue.size();
         scheduling_key_entry.resource_spec = task_spec;
 
         if (!scheduling_key_entry.AllPipelinesToWorkersFull(
@@ -312,8 +319,12 @@ void CoreWorkerDirectTaskSubmitter::StealTasksOrReturnWorker(
           // Add the task to the queue
           RAY_LOG(DEBUG) << "Adding stolen task " << stolen_task_spec.TaskId()
                          << " back to the queue (of current size="
-                         << scheduling_key_entry.task_queue.size() << ")!";
-          scheduling_key_entry.task_queue.push_front(stolen_task_spec);
+                         << scheduling_key_entry.task_priority_queue.size() << ")!";
+          const auto priority = get_task_priority_(stolen_task_spec);
+          auto inserted = tasks_.emplace(stolen_task_id, TaskEntry(stolen_task_spec, scheduling_key, priority));
+          RAY_CHECK(inserted.second);
+          const auto &task_key = inserted.first->second.task_key;
+          RAY_CHECK(scheduling_key_entry.task_priority_queue.emplace(task_key).second) << stolen_task_spec.TaskId();
         }
         // call OnWorkerIdle to ship the task to the thief
         OnWorkerIdle(thief_addr, scheduling_key, /*error=*/!status.ok(),
@@ -330,7 +341,7 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
   }
 
   auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
-  auto &current_queue = scheduling_key_entry.task_queue;
+  auto &current_queue = scheduling_key_entry.task_priority_queue;
   // Return the worker if there was an error executing the previous task,
   // the lease is expired; Steal or return the worker if there are no more applicable
   // queued tasks and the worker is not stealing.
@@ -349,7 +360,11 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
 
     while (!current_queue.empty() &&
            !lease_entry.PipelineToWorkerFull(max_tasks_in_flight_per_worker_)) {
-      auto task_spec = current_queue.front();
+      const auto task_key_it = current_queue.begin();
+      const auto &task_id = task_key_it->second;
+      const auto task_it = tasks_.find(task_id);
+      const auto &task_spec = task_it->second.task_spec;
+      RAY_LOG(DEBUG) << "First task in queue is " << task_spec.TaskId();
       // Increment the number of tasks in flight to the worker
       lease_entry.tasks_in_flight++;
 
@@ -361,7 +376,8 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
 
       executing_tasks_.emplace(task_spec.TaskId(), addr);
       PushNormalTask(addr, client, scheduling_key, task_spec, assigned_resources);
-      current_queue.pop_front();
+      current_queue.erase(task_key_it);
+      tasks_.erase(task_it);
     }
     // If stealing is not an option, we can cancel the request for new worker leases
     if (max_tasks_in_flight_per_worker_ == 1) {
@@ -374,8 +390,8 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
 void CoreWorkerDirectTaskSubmitter::CancelWorkerLeaseIfNeeded(
     const SchedulingKey &scheduling_key) {
   auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
-  auto &task_queue = scheduling_key_entry.task_queue;
-  if (!task_queue.empty() || scheduling_key_entry.StealableTasks()) {
+  auto &task_priority_queue = scheduling_key_entry.task_priority_queue;
+  if (!task_priority_queue.empty() || scheduling_key_entry.StealableTasks()) {
     // There are still pending tasks, or there are tasks that can be stolen by a new
     // worker, so let the worker lease request succeed.
     return;
@@ -454,13 +470,13 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
     return;
   }
 
-  auto &task_queue = scheduling_key_entry.task_queue;
+  auto &task_priority_queue = scheduling_key_entry.task_priority_queue;
   // Check if the task queue is empty. If that is the case, it only makes sense to
   // consider requesting a new worker if work stealing is enabled, and there is at least a
   // worker with stealable tasks. If work stealing is not enabled, or there is no tasks
   // that we can steal from existing workers, we don't need a new worker because we don't
   // have any tasks to execute on that worker.
-  if (task_queue.empty()) {
+  if (task_priority_queue.empty()) {
     // If any worker has more than one task in flight, then that task can be stolen.
     bool stealable_tasks = scheduling_key_entry.StealableTasks();
     if (!stealable_tasks) {
@@ -489,7 +505,7 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   auto lease_client = GetOrConnectLeaseClient(raylet_address);
   TaskID task_id = resource_spec.TaskId();
   // Subtract 1 so we don't double count the task we are requesting for.
-  int64_t queue_size = task_queue.size() - 1;
+  int64_t queue_size = task_priority_queue.size() - 1;
 
   lease_client->RequestWorkerLease(
       resource_spec,
@@ -510,13 +526,17 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
             // tasks in the queue. This makes an implicit assumption that runtime_env
             // failures are not transient -- we may consider adding some retries
             // in the future.
-            auto &task_queue = scheduling_key_entry.task_queue;
-            while (!task_queue.empty()) {
-              auto &task_spec = task_queue.front();
+            auto &task_priority_queue = scheduling_key_entry.task_priority_queue;
+            while (!task_priority_queue.empty()) {
+              const auto task_key_it = task_priority_queue.begin();
+              const auto &task_id = task_key_it->second;
+              const auto task_it = tasks_.find(task_id);
+              const auto &task_spec = task_it->second.task_spec;
               RAY_UNUSED(task_finisher_->MarkPendingTaskFailed(
                   task_spec.TaskId(), task_spec, rpc::ErrorType::RUNTIME_ENV_SETUP_FAILED,
                   nullptr));
-              task_queue.pop_front();
+              task_priority_queue.erase(task_key_it);
+              tasks_.erase(task_it);
             }
             if (scheduling_key_entry.CanDelete()) {
               scheduling_key_entries_.erase(scheduling_key);
@@ -656,13 +676,17 @@ Status CoreWorkerDirectTaskSubmitter::CancelTask(TaskSpecification task_spec,
     }
 
     auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
-    auto &scheduled_tasks = scheduling_key_entry.task_queue;
+    auto &scheduled_tasks = scheduling_key_entry.task_priority_queue;
     // This cancels tasks that have completed dependencies and are awaiting
     // a worker lease.
     if (!scheduled_tasks.empty()) {
-      for (auto spec = scheduled_tasks.begin(); spec != scheduled_tasks.end(); spec++) {
-        if (spec->TaskId() == task_spec.TaskId()) {
-          scheduled_tasks.erase(spec);
+      for (auto it = scheduled_tasks.begin(); it != scheduled_tasks.end(); it++) {
+        const auto &task_id = it->second;
+        const auto task_it = tasks_.find(task_id);
+        const auto &spec = task_it->second.task_spec;
+        if (spec.TaskId() == task_spec.TaskId()) {
+          scheduled_tasks.erase(it);
+          tasks_.erase(task_it);
 
           if (scheduled_tasks.empty()) {
             CancelWorkerLeaseIfNeeded(scheduling_key);

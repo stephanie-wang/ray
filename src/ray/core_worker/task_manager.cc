@@ -101,6 +101,8 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
                   .second);
     num_pending_tasks_++;
   }
+
+  num_tasks_submitted_++;
 }
 
 Status TaskManager::ResubmitTask(const TaskID &task_id,

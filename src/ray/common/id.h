@@ -236,6 +236,10 @@ class TaskID : public BaseID<TaskID> {
 
   MSGPACK_DEFINE(id_);
 
+  bool operator<(const TaskID &rhs) const {
+    return id_ < rhs.id_;
+  }
+
  private:
   uint8_t id_[kLength];
 };
