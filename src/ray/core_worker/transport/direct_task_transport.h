@@ -102,6 +102,8 @@ class CoreWorkerDirectTaskSubmitter {
     return scheduling_key_entries_.empty();
   }
 
+  void UpdateTaskPriorities(const absl::flat_hash_map<TaskID, Priority> &priorities);
+
  private:
   /// Schedule more work onto an idle worker or return it back to the raylet if
   /// no more tasks are queued for submission. If an error was encountered

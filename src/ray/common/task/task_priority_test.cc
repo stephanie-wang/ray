@@ -14,7 +14,7 @@
 
 #include "gtest/gtest.h"
 #include <limits.h>
-#include "absl/container/btree_map.h"
+#include "absl/container/btree_set.h"
 
 #include "ray/common/common_protocol.h"
 #include "ray/common/task/task_priority.h"
@@ -95,15 +95,21 @@ TEST(TaskPriorityTest, TestBtree) {
   Priority p2({1, 2});
   Priority p3({});
 
-  absl::btree_map<Priority, int> map;
-  map.insert({p1, 1});
-  map.insert({p2, 2});
-  map.insert({p3, 3});
+  std::vector<std::pair<Priority, TaskID>> vec = {
+    std::make_pair(p1, ObjectID::FromRandom().TaskId()),
+    std::make_pair(p2, ObjectID::FromRandom().TaskId()),
+    std::make_pair(p3, ObjectID::FromRandom().TaskId())
+  };
+
+  absl::btree_set<std::pair<Priority, TaskID>> set;
+  for (auto &p : vec) {
+    RAY_CHECK(set.emplace(p).second);
+    RAY_CHECK(set.find(p) != set.end());
+  }
   {
-    std::vector<int> expected_order({1, 2, 3});
-    for (auto &p : map) {
-      ASSERT_EQ(p.second, expected_order.front());
-      expected_order.erase(expected_order.begin());
+    for (auto &p : set) {
+      ASSERT_EQ(p, vec.front());
+      vec.erase(vec.begin());
     }
   }
 }

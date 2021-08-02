@@ -1259,68 +1259,88 @@ Priority ReferenceCounter::GetMinPriority(const std::vector<ObjectID> &obj_ids) 
 }
 
 std::vector<Priority> ReferenceCounter::PropagatePriority(const std::vector<ObjectID> &obj_ids, int64_t depth, int score) {
-  absl::MutexLock lock(&mutex_);
-  absl::flat_hash_set<ObjectID> downstream;
-  absl::flat_hash_set<ObjectID> visited;
+  absl::flat_hash_map<TaskID, Priority> updated_priorities;
+  std::vector<Priority> parent_priorities;
+  {
+    absl::MutexLock lock(&mutex_);
+    absl::flat_hash_set<ObjectID> downstream;
+    absl::flat_hash_set<ObjectID> visited;
 
-  // Propagate priorities upward.
-  std::list<ObjectID> queue(obj_ids.begin(), obj_ids.end());
-  while (!queue.empty()) {
-    auto obj_id = std::move(queue.front());
-    queue.pop_front();
-    auto it = object_id_refs_.find(obj_id);
-    if (it != object_id_refs_.end()) {
-      if (it->second.priority.GetScore(depth) <= score) {
-        continue;
-      }
+    // Propagate priorities upward.
+    std::list<ObjectID> queue(obj_ids.begin(), obj_ids.end());
+    while (!queue.empty()) {
+      auto obj_id = std::move(queue.front());
+      queue.pop_front();
+      auto it = object_id_refs_.find(obj_id);
+      if (it != object_id_refs_.end()) {
+        if (it->second.priority.GetScore(depth) <= score) {
+          continue;
+        }
 
-      it->second.priority.SetScore(depth, score);
-      RAY_LOG(DEBUG) << "Updated priority for upstream object " << obj_id
-        << " to " << it->second.priority;
-      downstream.insert(
-          it->second.dependent_obj_ids.begin(),
-          it->second.dependent_obj_ids.end());
-      for (auto &dep : get_dependencies_(obj_id)) {
-        if (!visited.contains(dep)) {
-          queue.push_back(dep);
-          visited.insert(dep);
+        it->second.priority.SetScore(depth, score);
+        RAY_LOG(DEBUG) << "Updated priority for upstream object " << obj_id
+          << " to " << it->second.priority;
+
+        const auto task_id = obj_id.TaskId();
+        if (it->second.priority < updated_priorities[task_id]) {
+          updated_priorities[task_id] = it->second.priority;
+        }
+
+        downstream.insert(
+            it->second.dependent_obj_ids.begin(),
+            it->second.dependent_obj_ids.end());
+        for (auto &dep : get_dependencies_(obj_id)) {
+          if (!visited.contains(dep)) {
+            queue.push_back(dep);
+            visited.insert(dep);
+          }
         }
       }
     }
-  }
 
-  // Propagate priorities downward.
-  visited.clear();
-  queue.insert(queue.end(), downstream.begin(), downstream.end());
-  while (!queue.empty()) {
-    auto obj_id = std::move(queue.front());
-    queue.pop_front();
-    auto it = object_id_refs_.find(obj_id);
-    if (it != object_id_refs_.end()) {
-      if (it->second.priority.GetScore(depth) <= score) {
-        continue;
-      }
+    // Propagate priorities downward.
+    visited.clear();
+    queue.insert(queue.end(), downstream.begin(), downstream.end());
+    while (!queue.empty()) {
+      auto obj_id = std::move(queue.front());
+      queue.pop_front();
+      auto it = object_id_refs_.find(obj_id);
+      if (it != object_id_refs_.end()) {
+        if (it->second.priority.GetScore(depth) <= score) {
+          continue;
+        }
 
-      it->second.priority.SetScore(depth, score);
-      RAY_LOG(DEBUG) << "Updated priority for downstream object " << obj_id
-        << " to " << it->second.priority;
-      for (auto &dependent_id: it->second.dependent_obj_ids) {
-        if (!visited.contains(dependent_id)) {
-          queue.push_back(dependent_id);
-          visited.insert(dependent_id);
+        it->second.priority.SetScore(depth, score);
+        RAY_LOG(DEBUG) << "Updated priority for downstream object " << obj_id
+          << " to " << it->second.priority;
+
+        const auto task_id = obj_id.TaskId();
+        if (it->second.priority < updated_priorities[task_id]) {
+          updated_priorities[task_id] = it->second.priority;
+        }
+
+        for (auto &dependent_id: it->second.dependent_obj_ids) {
+          if (!visited.contains(dependent_id)) {
+            queue.push_back(dependent_id);
+            visited.insert(dependent_id);
+          }
         }
       }
     }
-  }
 
-  std::vector<Priority> priorities;
-  for (const auto &obj_id : obj_ids) {
-    auto it = object_id_refs_.find(obj_id);
-    if (it != object_id_refs_.end()) {
-      priorities.push_back(it->second.priority);
+    for (const auto &obj_id : obj_ids) {
+      auto it = object_id_refs_.find(obj_id);
+      if (it != object_id_refs_.end()) {
+        parent_priorities.push_back(it->second.priority);
+      }
     }
   }
-  return priorities;
+
+  if (on_priorities_updated_ && !updated_priorities.empty()) {
+    on_priorities_updated_(updated_priorities);
+  }
+
+  return parent_priorities;
 }
 
 void ReferenceCounter::AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids) {

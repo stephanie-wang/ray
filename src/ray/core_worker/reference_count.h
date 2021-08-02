@@ -53,6 +53,8 @@ class ReferenceCounterInterface {
   virtual ~ReferenceCounterInterface() {}
 };
 
+using PrioritiesUpdatedCallback = std::function<void(const absl::flat_hash_map<TaskID, Priority> &updated_priorities)>;
+
 /// Class used by the core worker to keep track of ObjectID reference counts for garbage
 /// collection. This class is thread safe.
 class ReferenceCounter : public ReferenceCounterInterface,
@@ -69,6 +71,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
       pubsub::PublisherInterface *object_info_publisher,
       pubsub::SubscriberInterface *object_info_subscriber,
       std::function<std::vector<ObjectID>(const ObjectID &)> get_dependencies,
+      const PrioritiesUpdatedCallback &on_priorities_updated,
       bool lineage_pinning_enabled = false, rpc::ClientFactoryFn client_factory = nullptr,
       std::function<void(const ObjectID &, int64_t)> record_object_size = nullptr)
       : rpc_address_(rpc_address),
@@ -77,7 +80,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
         object_info_publisher_(object_info_publisher),
         object_info_subscriber_(object_info_subscriber),
         record_object_size_(record_object_size),
-        get_dependencies_(get_dependencies) {}
+        get_dependencies_(get_dependencies),
+        on_priorities_updated_(on_priorities_updated) {}
 
   ~ReferenceCounter() {}
 
@@ -851,6 +855,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
   std::function<void(const ObjectID &, int64_t)> record_object_size_ = nullptr;
 
   std::function<std::vector<ObjectID>(const ObjectID &)> get_dependencies_;
+
+  PrioritiesUpdatedCallback on_priorities_updated_;
 };
 
 }  // namespace ray

@@ -237,7 +237,7 @@ class TaskID : public BaseID<TaskID> {
   MSGPACK_DEFINE(id_);
 
   bool operator<(const TaskID &rhs) const {
-    return id_ < rhs.id_;
+    return std::memcmp(id_, rhs.id_, kLength) < 0;
   }
 
  private:

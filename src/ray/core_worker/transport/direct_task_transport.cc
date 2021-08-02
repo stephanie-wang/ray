@@ -76,14 +76,13 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
             task_spec.IsActorCreationTask() ? task_spec.ActorCreationId()
                                             : ActorID::Nil(),
             task_spec.GetRuntimeEnvHash());
-        auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
         const auto priority = get_task_priority_(task_spec);
         auto inserted = tasks_.emplace(task_spec.TaskId(), TaskEntry(task_spec, scheduling_key, priority));
         RAY_CHECK(inserted.second);
-        const auto &task_key = inserted.first->second.task_key;
+        const auto task_key = inserted.first->second.task_key;
+        auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
         RAY_CHECK(scheduling_key_entry.task_priority_queue.emplace(task_key).second) << task_spec.TaskId();
-        RAY_LOG(DEBUG) << "Placed task " << task_spec.TaskId()
-                       << " with priority " << priority
+        RAY_LOG(DEBUG) << "Placed task " << task_key.second << " " << task_key.first
                        << " queue size is now " << scheduling_key_entry.task_priority_queue.size();
         scheduling_key_entry.resource_spec = task_spec;
 
@@ -362,9 +361,10 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
            !lease_entry.PipelineToWorkerFull(max_tasks_in_flight_per_worker_)) {
       const auto task_key_it = current_queue.begin();
       const auto &task_id = task_key_it->second;
+      RAY_LOG(DEBUG) << "First task in queue is " << task_id;
       const auto task_it = tasks_.find(task_id);
+      RAY_CHECK(task_it != tasks_.end()) << task_id;
       const auto &task_spec = task_it->second.task_spec;
-      RAY_LOG(DEBUG) << "First task in queue is " << task_spec.TaskId();
       // Increment the number of tasks in flight to the worker
       lease_entry.tasks_in_flight++;
 
@@ -531,6 +531,7 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
               const auto task_key_it = task_priority_queue.begin();
               const auto &task_id = task_key_it->second;
               const auto task_it = tasks_.find(task_id);
+              RAY_CHECK(task_it != tasks_.end());
               const auto &task_spec = task_it->second.task_spec;
               RAY_UNUSED(task_finisher_->MarkPendingTaskFailed(
                   task_spec.TaskId(), task_spec, rpc::ErrorType::RUNTIME_ENV_SETUP_FAILED,
@@ -683,6 +684,7 @@ Status CoreWorkerDirectTaskSubmitter::CancelTask(TaskSpecification task_spec,
       for (auto it = scheduled_tasks.begin(); it != scheduled_tasks.end(); it++) {
         const auto &task_id = it->second;
         const auto task_it = tasks_.find(task_id);
+        RAY_CHECK(task_it != tasks_.end());
         const auto &spec = task_it->second.task_spec;
         if (spec.TaskId() == task_spec.TaskId()) {
           scheduled_tasks.erase(it);
@@ -768,6 +770,28 @@ Status CoreWorkerDirectTaskSubmitter::CancelRemoteTask(const ObjectID &object_id
   request.set_remote_object_id(object_id.Binary());
   client->RemoteCancelTask(request, nullptr);
   return Status::OK();
+}
+
+void CoreWorkerDirectTaskSubmitter::UpdateTaskPriorities(const absl::flat_hash_map<TaskID, Priority> &priorities) {
+  absl::MutexLock lock(&mu_);
+  for (const auto &pair : priorities) {
+    const auto &task_id = pair.first;
+    const auto &priority = pair.second;
+    auto task_it = tasks_.find(task_id);
+    if (task_it == tasks_.end()) {
+      continue;
+    }
+    const auto &task_key = task_it->second.task_key;
+    if (priority < task_key.first) {
+      auto it = scheduling_key_entries_.find(task_it->second.key);
+      RAY_CHECK(it != scheduling_key_entries_.end());
+      RAY_CHECK(it->second.task_priority_queue.erase(task_key)) << task_id;
+
+      task_it->second.task_key = std::make_pair(priority, task_id);
+      RAY_CHECK(it->second.task_priority_queue.emplace(task_it->second.task_key).second);
+      RAY_LOG(DEBUG) << "Updated task " << task_id << " priority to " << priority;
+    }
+  }
 }
 
 };  // namespace ray

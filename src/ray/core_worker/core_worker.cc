@@ -517,6 +517,9 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       [this](const ObjectID &obj_id) {
         return task_manager_->GetDependencies(obj_id);
       },
+      [this](const absl::flat_hash_map<TaskID, Priority> &priorities) {
+        direct_task_submitter_->UpdateTaskPriorities(priorities);
+      },
       RayConfig::instance().lineage_pinning_enabled(), [this](const rpc::Address &addr) {
         return std::shared_ptr<rpc::CoreWorkerClient>(
             new rpc::CoreWorkerClient(addr, *client_call_manager_));

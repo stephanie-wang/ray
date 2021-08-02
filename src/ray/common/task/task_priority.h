@@ -11,6 +11,8 @@ namespace ray {
 
 struct Priority {
  public:
+  Priority() : Priority(0) {}
+
   Priority(int64_t depth) {
     extend(depth + 1);
   }
