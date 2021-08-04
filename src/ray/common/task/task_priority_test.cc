@@ -15,6 +15,7 @@
 #include "gtest/gtest.h"
 #include <limits.h>
 #include "absl/container/btree_set.h"
+#include "absl/container/flat_hash_set.h"
 
 #include "ray/common/common_protocol.h"
 #include "ray/common/task/task_priority.h"
@@ -90,10 +91,11 @@ TEST(TaskPriorityTest, TestSort) {
   }
 }
 
-TEST(TaskPriorityTest, TestBtree) {
+TEST(TaskPriorityTest, TestDataStructures) {
   Priority p1({1, 2, 3});
   Priority p2({1, 2});
   Priority p3({});
+  Priority p4({1, 3, 5});
 
   std::vector<std::pair<Priority, TaskID>> vec = {
     std::make_pair(p1, ObjectID::FromRandom().TaskId()),
@@ -101,17 +103,45 @@ TEST(TaskPriorityTest, TestBtree) {
     std::make_pair(p3, ObjectID::FromRandom().TaskId())
   };
 
-  absl::btree_set<std::pair<Priority, TaskID>> set;
+  absl::btree_set<TaskKey> set;
   for (auto &p : vec) {
-    RAY_CHECK(set.emplace(p).second);
-    RAY_CHECK(set.find(p) != set.end());
+    ASSERT_TRUE(set.emplace(p).second);
+    ASSERT_TRUE(set.find(p) != set.end());
   }
+  TaskKey key(p4, vec[0].second);
+  ASSERT_TRUE(set.find(key) == set.end());
   {
-    for (auto &p : set) {
-      ASSERT_EQ(p, vec.front());
-      vec.erase(vec.begin());
+    auto it = set.begin();
+    for (int i = 0; i < 3; i++) {
+      ASSERT_EQ(*it, vec[i]);
+      it++;
     }
   }
+
+  absl::flat_hash_set<Priority> hash_set({p1, p2, p3});
+  ASSERT_TRUE(hash_set.count(p1));
+  ASSERT_TRUE(hash_set.count(p2));
+  ASSERT_TRUE(hash_set.count(p3));
+  ASSERT_EQ(hash_set.size(), 3);
+  ASSERT_FALSE(hash_set.count(p4));
+
+  // Length of the score vector does not matter, if all elements at the end are
+  // null.
+  auto p1_it = hash_set.find(p1);
+  p1.extend(10);
+  ASSERT_EQ(p1_it, hash_set.find(p1));
+  ASSERT_NE(hash_set.find(p2), hash_set.find(p1));
+
+  auto p3_it = hash_set.find(p3);
+  p3.extend(10);
+  ASSERT_EQ(p3_it, hash_set.find(p3));
+  ASSERT_NE(hash_set.find(p2), hash_set.find(p3));
+
+  absl::flat_hash_set<TaskKey> task_key_hash_set(vec.begin(), vec.end());
+  ASSERT_TRUE(task_key_hash_set.count(vec[0]));
+  ASSERT_TRUE(task_key_hash_set.count(vec[1]));
+  ASSERT_TRUE(task_key_hash_set.count(vec[2]));
+  ASSERT_FALSE(task_key_hash_set.count(TaskKey(p4, ObjectID::FromRandom().TaskId())));
 }
 
 }  // namespace ray
