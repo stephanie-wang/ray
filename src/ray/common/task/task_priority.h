@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <ostream>
 
+#include "ray/common/id.h"
 #include "ray/util/logging.h"
 
 namespace ray {
@@ -76,6 +77,8 @@ struct Priority {
 
   mutable std::vector<int> score = {};
 };
+
+using TaskKey = std::pair<Priority, TaskID>;
 
 std::ostream &operator<<(std::ostream &os, const Priority &p);
 

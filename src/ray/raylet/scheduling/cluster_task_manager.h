@@ -1,5 +1,6 @@
 #pragma once
 
+#include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "ray/common/ray_object.h"
@@ -227,7 +228,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// through queues to cancel tasks, etc.
   /// Queue of lease requests that are waiting for resources to become available.
   /// Tasks move from scheduled -> dispatch | waiting.
-  std::unordered_map<SchedulingClass, std::deque<Work>> tasks_to_schedule_;
+  std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, Work>> tasks_to_schedule_;
 
   /// Queue of lease requests that should be scheduled onto workers.
   /// Tasks move from scheduled | waiting -> dispatch.
@@ -236,7 +237,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// All tasks in this map that have dependencies should be registered with
   /// the dependency manager, in case a dependency gets evicted while the task
   /// is still queued.
-  std::unordered_map<SchedulingClass, std::deque<Work>> tasks_to_dispatch_;
+  std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, Work>> tasks_to_dispatch_;
 
   /// Tasks waiting for arguments to be transferred locally.
   /// Tasks move from waiting -> dispatch.
@@ -261,7 +262,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   /// Queue of lease requests that are infeasible.
   /// Tasks go between scheduling <-> infeasible.
-  std::unordered_map<SchedulingClass, std::deque<Work>> infeasible_tasks_;
+  std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, Work>> infeasible_tasks_;
 
   /// Track the cumulative backlog of all workers requesting a lease to this raylet.
   std::unordered_map<SchedulingClass, int> backlog_tracker_;

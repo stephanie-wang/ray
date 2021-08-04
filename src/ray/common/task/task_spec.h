@@ -226,6 +226,11 @@ class TaskSpecification : public MessageWrapper<rpc::TaskSpec> {
     return Priority(p);
   }
 
+  TaskKey GetTaskKey() const {
+    std::vector<int> p(message_->priority().data(), message_->priority().data() + message_->priority().size());
+    return std::make_pair<Priority, TaskID>(std::move(p), TaskId());
+  }
+
   void SetPriority(const Priority &priority) {
     auto p = message_->mutable_priority();
     p->Clear();

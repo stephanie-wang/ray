@@ -187,6 +187,7 @@ class CoreWorkerDirectTaskSubmitter {
                       rpc::CoreWorkerClientInterface &client,
                       const SchedulingKey &task_queue_key,
                       const TaskSpecification &task_spec,
+                      const Priority &priority,
                       const google::protobuf::RepeatedPtrField<rpc::ResourceMapEntry>
                           &assigned_resources);
 
@@ -290,8 +291,6 @@ class CoreWorkerDirectTaskSubmitter {
   // Map from worker address to a LeaseEntry struct containing the lease's metadata.
   absl::flat_hash_map<rpc::WorkerAddress, LeaseEntry> worker_to_lease_entry_
       GUARDED_BY(mu_);
-
-  using TaskKey = std::pair<Priority, TaskID>;
 
   struct TaskEntry {
     TaskEntry(const TaskSpecification &task_spec, const SchedulingKey &key,

@@ -1626,6 +1626,8 @@ void NodeManager::HandleRequestWorkerLease(const rpc::RequestWorkerLeaseRequest 
     worker_pool_.PrestartWorkers(task_spec, request.backlog_size());
   }
 
+  auto task_spec = task.GetTaskSpecification();
+  RAY_LOG(DEBUG) << "Received task " << task_spec.TaskId() << " with priority " << task_spec.GetPriority();
   cluster_task_manager_->QueueAndScheduleTask(task, reply, send_reply_callback);
 }
 

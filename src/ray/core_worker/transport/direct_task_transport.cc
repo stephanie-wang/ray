@@ -361,7 +361,6 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
            !lease_entry.PipelineToWorkerFull(max_tasks_in_flight_per_worker_)) {
       const auto task_key_it = current_queue.begin();
       const auto &task_id = task_key_it->second;
-      RAY_LOG(DEBUG) << "First task in queue is " << task_id;
       const auto task_it = tasks_.find(task_id);
       RAY_CHECK(task_it != tasks_.end()) << task_id;
       const auto &task_spec = task_it->second.task_spec;
@@ -375,7 +374,7 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
       scheduling_key_entry.total_tasks_in_flight++;
 
       executing_tasks_.emplace(task_spec.TaskId(), addr);
-      PushNormalTask(addr, client, scheduling_key, task_spec, assigned_resources);
+      PushNormalTask(addr, client, scheduling_key, task_spec, task_key_it->first, assigned_resources);
       current_queue.erase(task_key_it);
       tasks_.erase(task_it);
     }
@@ -489,10 +488,18 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
     }
   }
 
-  // Create a TaskSpecification with an overwritten TaskID to make sure we don't reuse the
-  // same TaskID to request a worker
-  auto resource_spec_msg = scheduling_key_entry.resource_spec.GetMutableMessage();
-  resource_spec_msg.set_task_id(TaskID::ForFakeTask().Binary());
+  const auto &head = task_priority_queue.begin();
+  const auto &task_id = head->second;
+  auto task_it = tasks_.find(task_id);
+  RAY_CHECK(task_it != tasks_.end());
+  auto resource_spec_msg = task_it->second.task_spec.GetMutableMessage();
+  // Set task priority so raylet can use this to sort task queues.
+  const auto &priority = head->first;
+  auto msg_priority = resource_spec_msg.mutable_priority();
+  msg_priority->Clear();
+  for (auto &s : priority.score) {
+    msg_priority->Add(s);
+  }
   TaskSpecification resource_spec = TaskSpecification(resource_spec_msg);
 
   rpc::Address best_node_address;
@@ -503,10 +510,10 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   }
 
   auto lease_client = GetOrConnectLeaseClient(raylet_address);
-  TaskID task_id = resource_spec.TaskId();
   // Subtract 1 so we don't double count the task we are requesting for.
   int64_t queue_size = task_priority_queue.size() - 1;
 
+  RAY_LOG(DEBUG) << "Requesting worker lease " << task_id << " with priority " << priority;
   lease_client->RequestWorkerLease(
       resource_spec,
       [this, scheduling_key](const Status &status,
@@ -589,6 +596,7 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
 void CoreWorkerDirectTaskSubmitter::PushNormalTask(
     const rpc::WorkerAddress &addr, rpc::CoreWorkerClientInterface &client,
     const SchedulingKey &scheduling_key, const TaskSpecification &task_spec,
+    const Priority &priority,
     const google::protobuf::RepeatedPtrField<rpc::ResourceMapEntry> &assigned_resources) {
   auto task_id = task_spec.TaskId();
   auto request = std::make_unique<rpc::PushTaskRequest>();
@@ -599,8 +607,15 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
   // fails, then the task data will be gone when the TaskManager attempts to
   // access the task.
   request->mutable_task_spec()->CopyFrom(task_spec.GetMessage());
+  auto msg_priority = request->mutable_task_spec()->mutable_priority();
+  msg_priority->Clear();
+  for (auto &s : priority.score) {
+    msg_priority->Add(s);
+  }
+
   request->mutable_resource_mapping()->CopyFrom(assigned_resources);
   request->set_intended_worker_id(addr.worker_id.Binary());
+  RAY_LOG(DEBUG) << "Pushing task " << task_id << " with priority " << priority;
   client.PushNormalTask(
       std::move(request),
       [this, task_spec, task_id, is_actor, is_actor_creation, scheduling_key, addr,
