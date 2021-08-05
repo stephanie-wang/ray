@@ -210,10 +210,12 @@ void ObjectManager::HandleObjectDeleted(const ObjectID &object_id) {
   pull_manager_->ResetRetryTimer(object_id);
 }
 
-uint64_t ObjectManager::Pull(const std::vector<rpc::ObjectReference> &object_refs,
+void ObjectManager::Pull(const TaskKey &task_key,
+                             const std::vector<rpc::ObjectReference> &object_refs,
                              BundlePriority prio) {
   std::vector<rpc::ObjectReference> objects_to_locate;
-  auto request_id = pull_manager_->Pull(object_refs, prio, &objects_to_locate);
+  pull_manager_->Pull(task_key, object_refs, prio,
+      &objects_to_locate);
 
   const auto &callback = [this](const ObjectID &object_id,
                                 const std::unordered_set<NodeID> &client_ids,
@@ -232,11 +234,9 @@ uint64_t ObjectManager::Pull(const std::vector<rpc::ObjectReference> &object_ref
     RAY_CHECK_OK(object_directory_->SubscribeObjectLocations(
         object_directory_pull_callback_id_, object_id, ref.owner_address(), callback));
   }
-
-  return request_id;
 }
 
-void ObjectManager::CancelPull(uint64_t request_id) {
+void ObjectManager::CancelPull(const TaskKey &request_id) {
   const auto objects_to_cancel = pull_manager_->CancelPull(request_id);
   for (const auto &object_id : objects_to_cancel) {
     RAY_CHECK_OK(object_directory_->UnsubscribeObjectLocations(

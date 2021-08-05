@@ -32,7 +32,7 @@ using rpc::TaskLeaseData;
 class TaskDependencyManagerInterface {
  public:
   virtual bool RequestTaskDependencies(
-      const TaskID &task_id,
+      const TaskKey &task_key,
       const std::vector<rpc::ObjectReference> &required_objects) = 0;
   virtual void RemoveTaskDependencies(const TaskID &task_id) = 0;
   virtual bool TaskDependenciesBlocked(const TaskID &task_id) const = 0;
@@ -124,7 +124,7 @@ class DependencyManager : public TaskDependencyManagerInterface {
   /// \param task_id The task that requires the objects.
   /// \param required_objects The objects required by the task.
   /// \return Void.
-  bool RequestTaskDependencies(const TaskID &task_id,
+  bool RequestTaskDependencies(const TaskKey &task_key,
                                const std::vector<rpc::ObjectReference> &required_objects);
 
   /// Cancel a task's dependencies. We will no longer attempt to fetch any
@@ -167,8 +167,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
   /// Metadata for an object that is needed by at least one executing worker
   /// and/or one queued task.
   struct ObjectDependencies {
-    ObjectDependencies(const rpc::ObjectReference &ref)
-        : owner_address(ref.owner_address()) {}
+    ObjectDependencies(const TaskKey &task_key, const rpc::ObjectReference &ref)
+        : wait_request_id(task_key), owner_address(ref.owner_address()) {}
     /// The tasks that depend on this object, either because the object is a task argument
     /// or because the task called `ray.get` on the object.
     std::unordered_set<TaskID> dependent_tasks;
@@ -180,7 +180,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
     std::unordered_set<WorkerID> dependent_wait_requests;
     /// If this object is required by at least one worker that called `ray.wait`, this is
     /// the pull request ID.
-    uint64_t wait_request_id = 0;
+    TaskKey wait_request_id;
+    bool pulling = false;
     /// The address of the worker that owns this object.
     rpc::Address owner_address;
 
@@ -192,8 +193,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
 
   /// A struct to represent the object dependencies of a task.
   struct TaskDependencies {
-    TaskDependencies(const absl::flat_hash_set<ObjectID> &deps)
-        : dependencies(std::move(deps)), num_missing_dependencies(dependencies.size()) {}
+    TaskDependencies(const TaskKey &task_key, const absl::flat_hash_set<ObjectID> &deps)
+        : dependencies(std::move(deps)), num_missing_dependencies(dependencies.size()), pull_request_id(task_key) {}
     /// The objects that the task depends on. These are the arguments to the
     /// task. These must all be simultaneously local before the task is ready
     /// to execute. Objects are removed from this set once
@@ -204,7 +205,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
     size_t num_missing_dependencies;
     /// Used to identify the pull request for the dependencies to the object
     /// manager.
-    uint64_t pull_request_id = 0;
+    TaskKey pull_request_id;
+    bool pulling = false;
   };
 
   /// Stop tracking this object, if it is no longer needed by any worker or
@@ -227,7 +229,7 @@ class DependencyManager : public TaskDependencyManagerInterface {
   /// `ray.get` on and a pull request ID for these objects. The pull request ID
   /// should be used to cancel the pull request in the object manager once the
   /// worker cancels the `ray.get` request.
-  absl::flat_hash_map<WorkerID, std::pair<absl::flat_hash_set<ObjectID>, uint64_t>>
+  absl::flat_hash_map<WorkerID, std::pair<absl::flat_hash_set<ObjectID>, TaskKey>>
       get_requests_;
 
   /// A map from worker ID to the set of objects that the worker called

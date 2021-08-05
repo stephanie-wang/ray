@@ -8,11 +8,13 @@
 
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
+#include "absl/container/btree_map.h"
 #include "absl/time/clock.h"
 #include "ray/common/id.h"
 #include "ray/common/ray_config.h"
 #include "ray/common/ray_object.h"
 #include "ray/common/status.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/object_manager/common.h"
 #include "ray/object_manager/object_directory.h"
 #include "ray/object_manager/ownership_based_object_directory.h"
@@ -69,7 +71,8 @@ class PullManager {
   /// should subscribe to, and call OnLocationChange for.
   /// prioritized over queued task arguments.
   /// \return A request ID that can be used to cancel the request.
-  uint64_t Pull(const std::vector<rpc::ObjectReference> &object_ref_bundle,
+  void Pull(const TaskKey &task_key,
+                const std::vector<rpc::ObjectReference> &object_ref_bundle,
                 BundlePriority prio,
                 std::vector<rpc::ObjectReference> *objects_to_locate);
 
@@ -101,7 +104,7 @@ class PullManager {
   /// \param request_id The request ID returned by Pull that should be canceled.
   /// \return The objects for which the caller should stop subscribing to
   /// locations.
-  std::vector<ObjectID> CancelPull(uint64_t request_id);
+  std::vector<ObjectID> CancelPull(const TaskKey &request_id);
 
   /// Called when the retry timer fires. If this fires, the pull manager may try to pull
   /// existing objects from other nodes if necessary.
@@ -132,7 +135,7 @@ class PullManager {
   /// size information. If this returns false, then the pull request is most
   /// likely inactive due to lack of memory. This can also return false if an
   /// earlier request is waiting for metadata.
-  bool PullRequestActiveOrWaitingForMetadata(uint64_t request_id) const;
+  bool PullRequestActiveOrWaitingForMetadata(const TaskKey &request_id) const;
 
   std::string DebugString() const;
 
@@ -159,7 +162,7 @@ class PullManager {
     // All bundle requests that haven't been canceled yet that require this
     // object. This includes bundle requests whose objects are not actively
     // being pulled.
-    absl::flat_hash_set<uint64_t> bundle_request_ids;
+    absl::flat_hash_set<TaskKey> bundle_request_ids;
   };
 
   struct PullBundleRequest {
@@ -179,7 +182,7 @@ class PullManager {
     }
   };
 
-  using Queue = std::map<uint64_t, PullBundleRequest>;
+  using Queue = std::map<TaskKey, PullBundleRequest>;
 
   /// Try to make an object local, by restoring the object from external
   /// storage or by fetching the object from one of its expected client
@@ -224,7 +227,7 @@ class PullManager {
   ///
   /// Note that we allow exceeding the quota to maintain at least 1 active bundle.
   bool ActivateNextPullBundleRequest(const Queue &bundles,
-                                     uint64_t *highest_req_id_being_pulled,
+                                     TaskKey *highest_req_id_being_pulled,
                                      bool respect_quota,
                                      std::vector<ObjectID> *objects_to_pull);
 
@@ -232,7 +235,7 @@ class PullManager {
   /// operations for the object.
   void DeactivatePullBundleRequest(const Queue &bundles,
                                    const Queue::iterator &request_it,
-                                   uint64_t *highest_req_id_being_pulled,
+                                   TaskKey *highest_req_id_being_pulled,
                                    std::unordered_set<ObjectID> *objects_to_cancel);
 
   /// Helper method that deactivates requests from the given queue until the pull
@@ -244,7 +247,7 @@ class PullManager {
   ///                     becomes available.
   void DeactivateUntilMarginAvailable(const std::string &debug_name, Queue &bundles,
                                       int retain_min, int64_t quota_margin,
-                                      uint64_t *highest_id_for_bundle,
+                                      TaskKey *highest_id_for_bundle,
                                       std::unordered_set<ObjectID> *objects_to_cancel);
 
   /// Trigger out-of-memory handling if the first request in the queue needs
@@ -253,12 +256,12 @@ class PullManager {
   void TriggerOutOfMemoryHandlingIfNeeded();
 
   /// Return debug info about this bundle queue.
-  std::string BundleInfo(const Queue &bundles, uint64_t highest_id_being_pulled) const;
+  std::string BundleInfo(const Queue &bundles, const TaskKey &highest_id_being_pulled) const;
 
   /// Return the incremental space required to pull the next bundle, if available.
   /// If the next bundle is not ready for pulling, 0L will be returned.
   int64_t NextRequestBundleSize(const Queue &bundles,
-                                uint64_t highest_id_being_pulled) const;
+                                const TaskKey &highest_id_being_pulled) const;
 
   /// See the constructor's arguments.
   NodeID self_node_id_;
@@ -270,10 +273,6 @@ class PullManager {
   /// The minimum number of pull bundles to keep active.
   const int min_active_pulls_;
   uint64_t pull_timeout_ms_;
-
-  /// The next ID to assign to a bundle pull request, so that the caller can
-  /// cancel. Start at 1 because 0 means null.
-  uint64_t next_req_id_ = 1;
 
   /// The currently active pull requests. Each request is a bundle of objects
   /// that must be made local. The key is the ID that was assigned to that
@@ -325,9 +324,9 @@ class PullManager {
   ///
   /// We keep one pointer for each request queue, since we prioritize worker
   /// requests over task argument requests, and gets over waits.
-  uint64_t highest_get_req_id_being_pulled_ = 0;
-  uint64_t highest_wait_req_id_being_pulled_ = 0;
-  uint64_t highest_task_req_id_being_pulled_ = 0;
+  TaskKey highest_get_req_id_being_pulled_ = TaskKey(Priority(0), TaskID::Nil());
+  TaskKey highest_wait_req_id_being_pulled_ = TaskKey(Priority(0), TaskID::Nil());
+  TaskKey highest_task_req_id_being_pulled_ = TaskKey(Priority(0), TaskID::Nil());
 
   /// The objects that this object manager has been asked to fetch from remote
   /// object managers.
@@ -341,7 +340,7 @@ class PullManager {
   /// objects that we have been asked to fetch. The total size of these objects
   /// is the number of bytes that we are currently pulling, and it must be less
   /// than the bytes available.
-  absl::flat_hash_map<ObjectID, absl::flat_hash_set<uint64_t>>
+  absl::flat_hash_map<ObjectID, absl::flat_hash_set<TaskKey>>
       active_object_pull_requests_ GUARDED_BY(active_objects_mu_);
 
   /// Tracks the objects we have pinned. Keys are subset of active_object_pull_requests_.

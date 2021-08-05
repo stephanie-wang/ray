@@ -101,6 +101,7 @@ struct Priority {
 using TaskKey = std::pair<Priority, TaskID>;
 
 std::ostream &operator<<(std::ostream &os, const Priority &p);
+std::ostream &operator<<(std::ostream &os, const TaskKey &k);
 
 }  // namespace ray
 

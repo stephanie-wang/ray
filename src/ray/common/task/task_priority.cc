@@ -20,4 +20,8 @@ std::ostream &operator<<(std::ostream &os, const Priority &p) {
   return os;
 }
 
+std::ostream &operator<<(std::ostream &os, const TaskKey &k) {
+  return os << k.second << " " << k.first;
+}
+
 }  // namespace ray

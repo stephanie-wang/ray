@@ -27,7 +27,8 @@ PullManager::PullManager(
       pin_object_(pin_object),
       gen_(std::chrono::high_resolution_clock::now().time_since_epoch().count()) {}
 
-uint64_t PullManager::Pull(const std::vector<rpc::ObjectReference> &object_ref_bundle,
+void PullManager::Pull(const TaskKey &task_key,
+                           const std::vector<rpc::ObjectReference> &object_ref_bundle,
                            BundlePriority prio,
                            std::vector<rpc::ObjectReference> *objects_to_locate) {
   // To avoid edge cases dealing with duplicated object ids in the bundle,
@@ -44,14 +45,14 @@ uint64_t PullManager::Pull(const std::vector<rpc::ObjectReference> &object_ref_b
   Queue::iterator bundle_it;
   if (prio == BundlePriority::GET_REQUEST) {
     bundle_it =
-        get_request_bundles_.emplace(next_req_id_++, std::move(deduplicated)).first;
+        get_request_bundles_.emplace(task_key, std::move(deduplicated)).first;
   } else if (prio == BundlePriority::WAIT_REQUEST) {
     bundle_it =
-        wait_request_bundles_.emplace(next_req_id_++, std::move(deduplicated)).first;
+        wait_request_bundles_.emplace(task_key, std::move(deduplicated)).first;
   } else {
     RAY_CHECK(prio == BundlePriority::TASK_ARGS);
     bundle_it =
-        task_argument_bundles_.emplace(next_req_id_++, std::move(deduplicated)).first;
+        task_argument_bundles_.emplace(task_key, std::move(deduplicated)).first;
   }
   RAY_LOG(DEBUG) << "Start pull request " << bundle_it->first
                  << ". Bundle size: " << bundle_it->second.objects.size();
@@ -80,12 +81,10 @@ uint64_t PullManager::Pull(const std::vector<rpc::ObjectReference> &object_ref_b
   // We have a new request. Activate the new request, if the
   // current available memory allows it.
   UpdatePullsBasedOnAvailableMemory(num_bytes_available_);
-
-  return bundle_it->first;
 }
 
 bool PullManager::ActivateNextPullBundleRequest(const Queue &bundles,
-                                                uint64_t *highest_req_id_being_pulled,
+                                                TaskKey *highest_req_id_being_pulled,
                                                 bool respect_quota,
                                                 std::vector<ObjectID> *objects_to_pull) {
   // Get the next pull request in the queue.
@@ -132,7 +131,7 @@ bool PullManager::ActivateNextPullBundleRequest(const Queue &bundles,
     // Quota check.
     if (respect_quota && num_active_bundles_ >= min_active_pulls_ &&
         bytes_to_pull > RemainingQuota()) {
-      RAY_LOG(DEBUG) << "Bundle would exceed quota: "
+      RAY_LOG(INFO) << "Bundle would exceed quota: "
                      << "num_bytes_being_pulled(" << num_bytes_being_pulled_
                      << ") + "
                         "bytes_to_pull("
@@ -164,7 +163,7 @@ bool PullManager::ActivateNextPullBundleRequest(const Queue &bundles,
   }
 
   // Update the pointer to the last pull request that we are actively pulling.
-  RAY_CHECK(next_request_it->first > *highest_req_id_being_pulled);
+  RAY_CHECK(highest_req_id_being_pulled->second.IsNil() || next_request_it->first > *highest_req_id_being_pulled);
   *highest_req_id_being_pulled = next_request_it->first;
 
   num_active_bundles_ += 1;
@@ -173,7 +172,7 @@ bool PullManager::ActivateNextPullBundleRequest(const Queue &bundles,
 
 void PullManager::DeactivatePullBundleRequest(
     const Queue &bundles, const Queue::iterator &request_it,
-    uint64_t *highest_req_id_being_pulled,
+    TaskKey *highest_req_id_being_pulled,
     std::unordered_set<ObjectID> *objects_to_cancel) {
   for (const auto &ref : request_it->second.objects) {
     absl::MutexLock lock(&active_objects_mu_);
@@ -199,7 +198,7 @@ void PullManager::DeactivatePullBundleRequest(
   // predecessor, if one exists.
   if (*highest_req_id_being_pulled == request_it->first) {
     if (request_it == bundles.begin()) {
-      *highest_req_id_being_pulled = 0;
+      *highest_req_id_being_pulled = TaskKey(Priority(), TaskID::Nil());
     } else {
       *highest_req_id_being_pulled = std::prev(request_it)->first;
     }
@@ -210,8 +209,8 @@ void PullManager::DeactivatePullBundleRequest(
 
 void PullManager::DeactivateUntilMarginAvailable(
     const std::string &debug_name, Queue &bundles, int retain_min, int64_t quota_margin,
-    uint64_t *highest_id_for_bundle, std::unordered_set<ObjectID> *object_ids_to_cancel) {
-  while (RemainingQuota() < quota_margin && *highest_id_for_bundle != 0) {
+    TaskKey *highest_id_for_bundle, std::unordered_set<ObjectID> *object_ids_to_cancel) {
+  while (RemainingQuota() < quota_margin && !highest_id_for_bundle->second.IsNil()) {
     if (num_active_bundles_ <= retain_min) {
       return;
     }
@@ -324,8 +323,8 @@ void PullManager::UpdatePullsBasedOnAvailableMemory(int64_t num_bytes_available)
 }
 
 void PullManager::TriggerOutOfMemoryHandlingIfNeeded() {
-  if (highest_get_req_id_being_pulled_ > 0 || highest_wait_req_id_being_pulled_ > 0 ||
-      highest_task_req_id_being_pulled_ > 0) {
+  if (!highest_get_req_id_being_pulled_.second.IsNil() || !highest_wait_req_id_being_pulled_.second.IsNil() ||
+      !highest_task_req_id_being_pulled_.second.IsNil()) {
     // At least one request is being actively pulled, so there is
     // currently enough space. Note that if pull_manager_min_active_pulls > 0, then
     // we will always return here.
@@ -352,11 +351,11 @@ void PullManager::TriggerOutOfMemoryHandlingIfNeeded() {
   object_store_full_callback_();
 }
 
-std::vector<ObjectID> PullManager::CancelPull(uint64_t request_id) {
+std::vector<ObjectID> PullManager::CancelPull(const TaskKey &request_id) {
   RAY_LOG(DEBUG) << "Cancel pull request " << request_id;
 
   Queue *request_queue = nullptr;
-  uint64_t *highest_req_id_being_pulled = nullptr;
+  TaskKey *highest_req_id_being_pulled = nullptr;
   auto bundle_it = get_request_bundles_.find(request_id);
   if (bundle_it != get_request_bundles_.end()) {
     request_queue = &get_request_bundles_;
@@ -375,7 +374,7 @@ std::vector<ObjectID> PullManager::CancelPull(uint64_t request_id) {
   }
 
   // If the pull request was being actively pulled, deactivate it now.
-  if (bundle_it->first <= *highest_req_id_being_pulled) {
+  if (!highest_req_id_being_pulled->second.IsNil() && bundle_it->first <= *highest_req_id_being_pulled) {
     std::unordered_set<ObjectID> object_ids_to_cancel;
     DeactivatePullBundleRequest(*request_queue, bundle_it, highest_req_id_being_pulled,
                                 &object_ids_to_cancel);
@@ -643,8 +642,8 @@ bool PullManager::IsObjectActive(const ObjectID &object_id) const {
   return active_object_pull_requests_.count(object_id) == 1;
 }
 
-bool PullManager::PullRequestActiveOrWaitingForMetadata(uint64_t request_id) const {
-  const uint64_t *highest_req_id_being_pulled = nullptr;
+bool PullManager::PullRequestActiveOrWaitingForMetadata(const TaskKey &request_id) const {
+  const TaskKey *highest_req_id_being_pulled = nullptr;
   auto bundle_it = get_request_bundles_.find(request_id);
   if (bundle_it != get_request_bundles_.end()) {
     highest_req_id_being_pulled = &highest_get_req_id_being_pulled_;
@@ -659,7 +658,7 @@ bool PullManager::PullRequestActiveOrWaitingForMetadata(uint64_t request_id) con
     }
   }
 
-  if (request_id <= *highest_req_id_being_pulled) {
+  if (!highest_req_id_being_pulled->second.IsNil() && request_id <= *highest_req_id_being_pulled) {
     // This request is in the prefix of the queue that is being pulled.
     return true;
   }
@@ -667,15 +666,15 @@ bool PullManager::PullRequestActiveOrWaitingForMetadata(uint64_t request_id) con
 }
 
 std::string PullManager::BundleInfo(const Queue &bundles,
-                                    uint64_t highest_id_being_pulled) const {
+                                    const TaskKey &highest_id_being_pulled) const {
   auto it = bundles.begin();
   if (it == bundles.end()) {
     return "N/A";
   }
-  auto bundle = it->second;
+  const auto &bundle = it->second;
   std::stringstream result;
   result << bundle.num_bytes_needed << " bytes, " << bundle.objects.size() << " objects";
-  if (highest_id_being_pulled) {
+  if (!highest_id_being_pulled.second.IsNil()) {
     result << " (active)";
   } else {
     if (bundle.num_object_sizes_missing > 0) {
@@ -688,7 +687,7 @@ std::string PullManager::BundleInfo(const Queue &bundles,
 }
 
 int64_t PullManager::NextRequestBundleSize(const Queue &bundles,
-                                           uint64_t highest_id_being_pulled) const {
+                                           const TaskKey &highest_id_being_pulled) const {
   // Get the next pull request in the queue.
   const auto last_request_it = bundles.find(highest_id_being_pulled);
   auto next_request_it = last_request_it;

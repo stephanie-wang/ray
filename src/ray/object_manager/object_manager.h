@@ -101,10 +101,11 @@ class ObjectStoreRunner {
 
 class ObjectManagerInterface {
  public:
-  virtual uint64_t Pull(const std::vector<rpc::ObjectReference> &object_refs,
+  virtual void Pull(const TaskKey &task_key,
+                        const std::vector<rpc::ObjectReference> &object_refs,
                         BundlePriority prio) = 0;
-  virtual void CancelPull(uint64_t request_id) = 0;
-  virtual bool PullRequestActiveOrWaitingForMetadata(uint64_t request_id) const = 0;
+  virtual void CancelPull(const TaskKey &request_id) = 0;
+  virtual bool PullRequestActiveOrWaitingForMetadata(const TaskKey &request_id) const = 0;
   virtual ~ObjectManagerInterface(){};
 };
 
@@ -184,7 +185,7 @@ class ObjectManager : public ObjectManagerInterface,
   /// Get the port of the object manager rpc server.
   int GetServerPort() const { return object_manager_server_.GetPort(); }
 
-  bool PullRequestActiveOrWaitingForMetadata(uint64_t pull_request_id) const override {
+  bool PullRequestActiveOrWaitingForMetadata(const TaskKey &pull_request_id) const override {
     return pull_manager_->PullRequestActiveOrWaitingForMetadata(pull_request_id);
   }
 
@@ -234,7 +235,8 @@ class ObjectManager : public ObjectManagerInterface,
   /// \param object_refs The bundle of objects that must be made local.
   /// \param prio The bundle priority.
   /// \return A request ID that can be used to cancel the request.
-  uint64_t Pull(const std::vector<rpc::ObjectReference> &object_refs,
+  void Pull(const TaskKey &task_key,
+                const std::vector<rpc::ObjectReference> &object_refs,
                 BundlePriority prio) override;
 
   /// Cancels the pull request with the given ID. This cancels any fetches for
@@ -242,7 +244,7 @@ class ObjectManager : public ObjectManagerInterface,
   /// request requires them.
   ///
   /// \param pull_request_id The request to cancel.
-  void CancelPull(uint64_t pull_request_id) override;
+  void CancelPull(const TaskKey &pull_request_id) override;
 
   /// Callback definition for wait.
   using WaitCallback = std::function<void(const std::vector<ray::ObjectID> &found,
