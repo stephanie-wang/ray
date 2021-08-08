@@ -28,7 +28,8 @@ ObjectStoreRunner::ObjectStoreRunner(const ObjectManagerConfig &config,
                                      SpillObjectsCallback spill_objects_callback,
                                      std::function<void()> object_store_full_callback,
                                      AddObjectCallback add_object_callback,
-                                     DeleteObjectCallback delete_object_callback) {
+                                     DeleteObjectCallback delete_object_callback,
+                                     std::function<void(const ObjectID &oid)> release_object_refs_callback) {
   plasma::plasma_store_runner.reset(new plasma::PlasmaStoreRunner(
       config.store_socket_name, config.object_store_memory, config.huge_pages,
       config.plasma_directory, config.fallback_directory));
@@ -36,7 +37,7 @@ ObjectStoreRunner::ObjectStoreRunner(const ObjectManagerConfig &config,
   store_thread_ =
       std::thread(&plasma::PlasmaStoreRunner::Start, plasma::plasma_store_runner.get(),
                   spill_objects_callback, object_store_full_callback, add_object_callback,
-                  delete_object_callback);
+                  delete_object_callback, release_object_refs_callback);
   // Sleep for sometime until the store is working. This can suppress some
   // connection warnings.
   std::this_thread::sleep_for(std::chrono::microseconds(500));
@@ -56,7 +57,8 @@ ObjectManager::ObjectManager(
     SpillObjectsCallback spill_objects_callback,
     std::function<void()> object_store_full_callback,
     AddObjectCallback add_object_callback, DeleteObjectCallback delete_object_callback,
-    std::function<std::unique_ptr<RayObject>(const ObjectID &object_id)> pin_object)
+    std::function<std::unique_ptr<RayObject>(const ObjectID &object_id)> pin_object,
+    std::function<void(const ObjectID &oid)> release_object_refs_callback)
     : main_service_(&main_service),
       self_node_id_(self_node_id),
       config_(config),
@@ -84,7 +86,8 @@ ObjectManager::ObjectManager(
                   delete_object_callback(object_id);
                 },
                 "ObjectManager.ObjectDeleted");
-          }),
+          },
+          release_object_refs_callback),
       buffer_pool_(config_.store_socket_name, config_.object_chunk_size),
       rpc_work_(rpc_service_),
       object_manager_server_("ObjectManager", config_.object_manager_port,

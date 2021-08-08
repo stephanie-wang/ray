@@ -246,6 +246,10 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
               result = std::move(results[0]);
             }
             return result;
+          },
+          /*release_refs_callback=*/
+          [this](const ObjectID &object_id) {
+            ReleaseObjectReferences(object_id);
           }),
       periodical_runner_(io_service),
       report_resources_period_ms_(config.report_resources_period_ms),
@@ -2459,6 +2463,11 @@ void NodeManager::PublishInfeasibleTaskError(const Task &task) const {
         type, error_message_str, current_time_ms(), task.GetTaskSpecification().JobId());
     RAY_CHECK_OK(gcs_client_->Errors().AsyncReportJobError(error_data_ptr, nullptr));
   }
+}
+
+void NodeManager::ReleaseObjectReferences(const ObjectID &object_id) {
+  // TODO: Callback to owner to release the object. We will receive the
+  // WaitForRefRemoved callback and release the object from plasma.
 }
 
 }  // namespace raylet

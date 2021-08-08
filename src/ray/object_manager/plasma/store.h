@@ -58,7 +58,8 @@ class PlasmaStore {
               ray::SpillObjectsCallback spill_objects_callback,
               std::function<void()> object_store_full_callback,
               ray::AddObjectCallback add_object_callback,
-              ray::DeleteObjectCallback delete_object_callback);
+              ray::DeleteObjectCallback delete_object_callback,
+              std::function<void(const ObjectID &oid)> release_object_references_callback);
 
   ~PlasmaStore();
 
@@ -252,6 +253,8 @@ class PlasmaStore {
                           ptrdiff_t *offset, const std::shared_ptr<Client> &client,
                           bool is_create, bool fallback_allocator, PlasmaError *error);
 
+  void PreemptObject(const ObjectID &object_id);
+
   // Start listening for clients.
   void DoAccept();
 
@@ -346,6 +349,12 @@ class PlasmaStore {
 
   /// A running total of the objects that have ever been created on this node.
   size_t num_bytes_created_total_ = 0;
+
+  /// Callback to the raylet to:
+  /// - TODO: release the primary copy
+  /// - TODO: revoke any tasks that are using this object
+  /// - TODO: release any copies that are being held for object transfer
+  const std::function<void(const ObjectID &object_id)> release_object_references_;
 };
 
 }  // namespace plasma

@@ -92,7 +92,8 @@ class ObjectStoreRunner {
                     SpillObjectsCallback spill_objects_callback,
                     std::function<void()> object_store_full_callback,
                     AddObjectCallback add_object_callback,
-                    DeleteObjectCallback delete_object_callback);
+                    DeleteObjectCallback delete_object_callback,
+                    std::function<void(const ObjectID &oid)> release_object_refs_callback);
   ~ObjectStoreRunner();
 
  private:
@@ -205,7 +206,8 @@ class ObjectManager : public ObjectManagerInterface,
       SpillObjectsCallback spill_objects_callback,
       std::function<void()> object_store_full_callback,
       AddObjectCallback add_object_callback, DeleteObjectCallback delete_object_callback,
-      std::function<std::unique_ptr<RayObject>(const ObjectID &object_id)> pin_object);
+      std::function<std::unique_ptr<RayObject>(const ObjectID &object_id)> pin_object,
+      std::function<void(const ObjectID &oid)> release_object_refs_callback);
 
   ~ObjectManager();
 

@@ -17,7 +17,8 @@ class PlasmaStoreRunner {
   void Start(ray::SpillObjectsCallback spill_objects_callback,
              std::function<void()> object_store_full_callback,
              ray::AddObjectCallback add_object_callback,
-             ray::DeleteObjectCallback delete_object_callback);
+             ray::DeleteObjectCallback delete_object_callback,
+             std::function<void(const ObjectID &object_id)> release_object_refs_callback);
   void Stop();
 
   bool IsPlasmaObjectSpillable(const ObjectID &object_id);

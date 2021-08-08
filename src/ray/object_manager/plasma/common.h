@@ -84,6 +84,8 @@ struct ObjectTableEntry {
   ObjectState state;
   /// The source of the object. Used for debugging purposes.
   plasma::flatbuf::ObjectSource source;
+
+  bool preempted = false;
 };
 
 /// Mapping from ObjectIDs to information about the object.

@@ -138,7 +138,8 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, std::string dire
                          ray::SpillObjectsCallback spill_objects_callback,
                          std::function<void()> object_store_full_callback,
                          ray::AddObjectCallback add_object_callback,
-                         ray::DeleteObjectCallback delete_object_callback)
+                         ray::DeleteObjectCallback delete_object_callback,
+                         std::function<void(const ObjectID &oid)> release_object_references_callback)
     : io_context_(main_service),
       socket_name_(socket_name),
       acceptor_(main_service, ParseUrlEndpoint(socket_name)),
@@ -156,7 +157,8 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, std::string dire
           spill_objects_callback, object_store_full_callback,
           /*get_time=*/
           []() { return absl::GetCurrentTimeNanos(); },
-          [this]() { return GetDebugDump(); }) {
+          [this]() { return GetDebugDump(); }),
+      release_object_references_(release_object_references_callback) {
   store_info_.directory = directory;
   store_info_.fallback_directory = fallback_directory;
   store_info_.hugepages_enabled = hugepages_enabled;
@@ -556,12 +558,14 @@ void PlasmaStore::ProcessGetRequest(const std::shared_ptr<Client> &client,
     // locally. If so, record that the object is being used and mark it as accounted for.
     auto entry = GetObjectTableEntry(&store_info_, object_id);
     if (entry && entry->state == ObjectState::PLASMA_SEALED) {
-      // Update the get request to take into account the present object.
-      PlasmaObject_init(&get_req->objects[object_id], entry);
+      if (!entry->preempted) {
+        // Update the get request to take into account the present object.
+        PlasmaObject_init(&get_req->objects[object_id], entry);
+        // If necessary, record that this client is using this object. In the case
+        // where entry == NULL, this will be called from SealObject.
+        AddToClientObjectIds(object_id, entry, client);
+      }
       get_req->num_satisfied += 1;
-      // If necessary, record that this client is using this object. In the case
-      // where entry == NULL, this will be called from SealObject.
-      AddToClientObjectIds(object_id, entry, client);
     } else {
       // Add a placeholder plasma object to the get request to indicate that the
       // object is not present. This will be parsed by the client. We set the
@@ -999,6 +1003,21 @@ void PlasmaStore::PrintDebugDump() const {
 
   stats_timer_ = execute_after(io_context_, [this]() { PrintDebugDump(); },
                                RayConfig::instance().event_stats_print_interval_ms());
+}
+
+void PlasmaStore::PreemptObject(const ObjectID &object_id) {
+  auto entry = GetObjectTableEntry(&store_info_, object_id);
+  RAY_CHECK(entry != nullptr);
+
+  if (entry->preempted) {
+    // Preemption already triggered for this object.
+    return;
+  }
+
+  // Future Get requests will not be served if this flag is set.
+  entry->preempted = true;
+
+  release_object_references_(object_id);
 }
 
 std::string PlasmaStore::GetDebugDump() const {
