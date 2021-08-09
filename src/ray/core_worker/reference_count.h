@@ -374,6 +374,10 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// \return The set of objects that were pinned on the given node.
   std::vector<ObjectID> ResetObjectsOnRemovedNode(const NodeID &raylet_id);
 
+  NodeID ResetPreemptedObject(const ObjectID &object_id);
+
+  void WaitForLocationRemoved(const ObjectID &object_id, const NodeID &raylet_id, std::function<void()> callback);
+
   /// Whether we have a reference to a particular ObjectID.
   ///
   /// \param[in] object_id The object ID to check for.
@@ -580,6 +584,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// If this object is owned by us and stored in plasma, this contains all
     /// object locations.
     absl::flat_hash_set<NodeID> locations;
+    std::unordered_map<NodeID, std::function<void()>> location_removed_callbacks;
     // Whether this object can be reconstructed via lineage. If false, then the
     // object's value will be pinned as long as it is referenced by any other
     // object's lineage.

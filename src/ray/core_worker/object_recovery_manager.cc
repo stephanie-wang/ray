@@ -133,6 +133,7 @@ void ObjectRecoveryManager::ReconstructObject(const ObjectID &object_id) {
   const auto task_id = object_id.TaskId();
   std::vector<ObjectID> task_deps;
   auto status = task_resubmitter_->ResubmitTask(task_id, &task_deps);
+  // TODO(memory): Cancel downstream tasks.
 
   if (status.ok()) {
     // Try to recover the task's dependencies.

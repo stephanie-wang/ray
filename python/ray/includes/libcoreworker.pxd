@@ -247,6 +247,8 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
         void Dump(const c_string &tasks_filename, const c_string
                   &objects_filename)
 
+        void PreemptObject(const CObjectID &object_id)
+
     cdef cppclass CCoreWorkerOptions "ray::CoreWorkerOptions":
         CWorkerType worker_type
         CLanguage language

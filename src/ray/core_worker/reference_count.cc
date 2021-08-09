@@ -493,6 +493,10 @@ void ReferenceCounter::DeleteReferenceInternal(ReferenceTable::iterator it,
       ReleaseLineageReferencesInternal(ids_to_release);
     }
 
+    //for (auto &callback : it->second.location_removed_callbacks) {
+    //  callback.second();
+    //}
+
     freed_objects_.erase(id);
     object_id_refs_.erase(it);
     ShutdownIfNeeded();
@@ -547,6 +551,34 @@ std::vector<ObjectID> ReferenceCounter::ResetObjectsOnRemovedNode(
     }
   }
   return lost_objects;
+}
+
+NodeID ReferenceCounter::ResetPreemptedObject(const ObjectID &object_id) {
+  absl::MutexLock lock(&mutex_);
+  NodeID pinned_at_raylet_id;
+  auto it = object_id_refs_.find(object_id);
+  if (it != object_id_refs_.end()) {
+    pinned_at_raylet_id = it->second.pinned_at_raylet_id.value_or(NodeID::Nil());
+    RAY_LOG(DEBUG) << "Freeing preempted object " << object_id;
+    ReleasePlasmaObject(it);
+  }
+  return pinned_at_raylet_id;
+}
+
+void ReferenceCounter::WaitForLocationRemoved(const ObjectID &object_id, const NodeID &raylet_id, std::function<void()> callback) {
+  bool trigger_callback = false;
+  {
+    absl::MutexLock lock(&mutex_);
+    auto it = object_id_refs_.find(object_id);
+    if (it == object_id_refs_.end() || !it->second.locations.count(raylet_id)) {
+      trigger_callback = true;
+    } else {
+      it->second.location_removed_callbacks[raylet_id] = callback;
+    }
+  }
+  if (trigger_callback) {
+    callback();
+  }
 }
 
 void ReferenceCounter::UpdateObjectPinnedAtRaylet(const ObjectID &object_id,
@@ -977,16 +1009,29 @@ void ReferenceCounter::AddObjectLocationInternal(ReferenceTable::iterator it,
 
 bool ReferenceCounter::RemoveObjectLocation(const ObjectID &object_id,
                                             const NodeID &node_id) {
-  absl::MutexLock lock(&mutex_);
-  auto it = object_id_refs_.find(object_id);
-  if (it == object_id_refs_.end()) {
-    RAY_LOG(DEBUG) << "Tried to remove an object location for an object " << object_id
-                   << " that doesn't exist in the reference table. It can happen if the "
-                      "object is already evicted.";
-    return false;
+  std::function<void()> callback = nullptr;
+  {
+    absl::MutexLock lock(&mutex_);
+    auto it = object_id_refs_.find(object_id);
+    if (it == object_id_refs_.end()) {
+      RAY_LOG(DEBUG) << "Tried to remove an object location for an object " << object_id
+                     << " that doesn't exist in the reference table. It can happen if the "
+                        "object is already evicted.";
+      return false;
+    }
+    it->second.locations.erase(node_id);
+    PushToLocationSubscribers(it);
+
+    auto callback_it = it->second.location_removed_callbacks.find(node_id);
+    if (callback_it != it->second.location_removed_callbacks.end()) {
+      callback = std::move(callback_it->second);
+      it->second.location_removed_callbacks.erase(callback_it);
+    }
   }
-  it->second.locations.erase(node_id);
-  PushToLocationSubscribers(it);
+
+  if (callback) {
+    callback();
+  }
   return true;
 }
 

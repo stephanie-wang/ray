@@ -375,6 +375,17 @@ message AssignObjectOwnerRequest {
 message AssignObjectOwnerReply {
 }
 
+message PreemptObjectRequest {
+  // The ID of the worker that owns this object. This is also
+  // the ID of the worker that this message is intended for.
+  bytes owner_worker_id = 1;
+  // Preempt this object.
+  bytes object_id = 2;
+}
+
+message PreemptObjectReply {
+}
+
 service CoreWorkerService {
   // Push a task directly to this worker from another.
   rpc PushTask(PushTaskRequest) returns (PushTaskReply);
@@ -434,4 +445,5 @@ service CoreWorkerService {
   rpc Exit(ExitRequest) returns (ExitReply);
   // Assign the owner of an object to the intended worker.
   rpc AssignObjectOwner(AssignObjectOwnerRequest) returns (AssignObjectOwnerReply);
+  rpc PreemptObject(PreemptObjectRequest) returns (PreemptObjectReply);
 }

@@ -3166,6 +3166,48 @@ void CoreWorker::HandleAssignObjectOwner(const rpc::AssignObjectOwnerRequest &re
   send_reply_callback(Status::OK(), nullptr, nullptr);
 }
 
+void CoreWorker::HandlePreemptObject(const rpc::PreemptObjectRequest &request,
+                             rpc::PreemptObjectReply *reply,
+                             rpc::SendReplyCallback send_reply_callback) {
+  if (HandleWrongRecipient(WorkerID::FromBinary(request.owner_worker_id()),
+                           send_reply_callback)) {
+    RAY_LOG(INFO) << "Handling PreemptObject for object produced by a previous worker "
+                     "with the same address";
+    return;
+  }
+  auto object_id = ObjectID::FromBinary(request.object_id());
+  PreemptObject(object_id);
+  send_reply_callback(Status::OK(), nullptr, nullptr);
+}
+
+void CoreWorker::PreemptObject(const ObjectID &object_id) {
+  // TODO(memory): Check num reconstructions remaining before preempting.
+  // Clear pinned location and callback to primary raylet to release the object.
+  NodeID pinned_at_raylet_id = reference_counter_->ResetPreemptedObject(object_id);
+  RAY_LOG(INFO) << "Preempting " << object_id << " was stored at " << pinned_at_raylet_id;
+  // Delete the object from the in-memory store to indicate that it is not
+  // available. The object recovery manager will guarantee that a new value
+  // will eventually be stored for the objects (either an
+  // UnreconstructableError or a value reconstructed from lineage).
+  memory_store_->Delete({object_id});
+
+  // NOTE: This assumes that the location is actually in the directory right
+  // now, and that the location will be removed in the future. This will likely
+  // crash or hang if either is false.
+  reference_counter_->WaitForLocationRemoved(object_id, pinned_at_raylet_id, [this, object_id, pinned_at_raylet_id]() {
+    RAY_LOG(DEBUG) << "Location " << pinned_at_raylet_id << " removed for object " << object_id << ", starting reconstruction";
+    auto recovered = object_recovery_manager_->RecoverObject(object_id);
+    // NOTE(swang): There is a race condition where this can return false if
+    // the reference went out of scope since the call to the ref counter to get
+    // the lost objects. It's okay to not mark the object as failed or recover
+    // the object since there are no reference holders.
+    // Reconstruct the object.
+    if (!recovered) {
+      RAY_LOG(DEBUG) << "Object " << object_id << " lost due to preemption.";
+    }
+  });
+}
+
 void CoreWorker::YieldCurrentFiber(FiberEvent &event) {
   RAY_CHECK(worker_context_.CurrentActorIsAsync());
   boost::this_fiber::yield();

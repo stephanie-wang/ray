@@ -143,6 +143,8 @@ class LocalObjectManager {
   /// Return the spilled object URL or the empty string.
   std::string GetSpilledObjectURL(const ObjectID &object_id);
 
+  void PreemptObject(const ObjectID &object_id);
+
   std::string DebugString() const;
 
  private:

@@ -1018,6 +1018,12 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
                                rpc::AssignObjectOwnerReply *reply,
                                rpc::SendReplyCallback send_reply_callback) override;
 
+  void HandlePreemptObject(const rpc::PreemptObjectRequest &request,
+                               rpc::PreemptObjectReply *reply,
+                               rpc::SendReplyCallback send_reply_callback) override;
+
+  void PreemptObject(const ObjectID &object_id);
+
   ///
   /// Public methods related to async actor call. This should only be used when
   /// the actor is (1) direct actor and (2) using asyncio mode.

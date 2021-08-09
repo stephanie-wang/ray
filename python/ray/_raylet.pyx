@@ -1903,6 +1903,15 @@ cdef class CoreWorker:
         # so all the serialization and validation is done in one place
         return json.dumps(result_dict, sort_keys=True)
 
+    def preempt(self, ObjectRef object_ref):
+        # Used for testing purposes only.
+
+        cdef:
+            CObjectID c_object_id = object_ref.native()
+
+        CCoreWorkerProcess.GetCoreWorker().PreemptObject(c_object_id)
+
+
 cdef void async_callback(shared_ptr[CRayObject] obj,
                          CObjectID object_ref,
                          void *user_callback) with gil:

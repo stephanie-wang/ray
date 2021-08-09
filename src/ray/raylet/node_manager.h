@@ -204,8 +204,6 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// Stop this node manager.
   void Stop();
 
-  void ReleaseObjectReferences(const ObjectID &object_id);
-
  private:
   /// Methods for handling nodes.
 
