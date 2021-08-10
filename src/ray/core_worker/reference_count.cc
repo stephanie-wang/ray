@@ -1398,4 +1398,16 @@ void ReferenceCounter::AddDependentObjectIds(const ObjectID &obj_id, const std::
       dependent_obj_ids.end());
 }
 
+std::unordered_set<TaskID> ReferenceCounter::GetDependentTaskIds(const ObjectID &object_id) const {
+  absl::MutexLock lock(&mutex_);
+  std::unordered_set<TaskID> task_ids;
+  auto it = object_id_refs_.find(object_id);
+  if (it != object_id_refs_.end()) {
+    for (const auto &obj_id : it->second.dependent_obj_ids) {
+      task_ids.insert(obj_id.TaskId());
+    }
+  }
+  return task_ids;
+}
+
 }  // namespace ray

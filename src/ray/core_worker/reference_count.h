@@ -488,6 +488,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
 
   void AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids);
 
+  std::unordered_set<TaskID> GetDependentTaskIds(const ObjectID &object_id) const;
+
  private:
   struct Reference {
     /// Constructor for a reference whose origin is unknown.

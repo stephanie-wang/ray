@@ -68,6 +68,7 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
         cancelled_tasks_.erase(task_spec.TaskId());
         keep_executing = false;
       }
+
       if (keep_executing) {
         // Note that the dependencies in the task spec are mutated to only contain
         // plasma dependencies after ResolveDependencies finishes.
@@ -661,29 +662,86 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
           }
         }
         if (!status.ok()) {
-          // TODO: It'd be nice to differentiate here between process vs node
-          // failure (e.g., by contacting the raylet). If it was a process
-          // failure, it may have been an application-level error and it may
-          // not make sense to retry the task.
-          RAY_UNUSED(task_finisher_->PendingTaskFailed(
-              task_id,
-              is_actor ? rpc::ErrorType::ACTOR_DIED : rpc::ErrorType::WORKER_DIED,
-              &status));
+          if (!preempted_tasks_.erase(task_id)) {
+            // TODO: It'd be nice to differentiate here between process vs node
+            // failure (e.g., by contacting the raylet). If it was a process
+            // failure, it may have been an application-level error and it may
+            // not make sense to retry the task.
+            RAY_UNUSED(task_finisher_->PendingTaskFailed(
+                task_id,
+                is_actor ? rpc::ErrorType::ACTOR_DIED : rpc::ErrorType::WORKER_DIED,
+                &status));
+          } else {
+            // Task cancellation succeeded. Resubmit the preempted task so that
+            // it has to resolve dependencies again.
+            SubmitTask(task_spec);
+          }
         } else {
           task_finisher_->CompletePendingTask(task_id, reply, addr.ToProto());
         }
       });
 }
 
+void CoreWorkerDirectTaskSubmitter::PreemptTask(const TaskSpecification &task_spec) {
+  std::shared_ptr<rpc::CoreWorkerClientInterface> worker_client = nullptr;
+  bool resubmit = true;
+  {
+    absl::MutexLock lock(&mu_);
+    auto inserted = preempted_tasks_.emplace(task_spec.TaskId());
+    if (!inserted.second) {
+      // Task is already being preempted.
+      return;
+    }
+
+    resubmit = CancelTaskInternal(task_spec, &worker_client);
+    if (resubmit) {
+      RAY_LOG(DEBUG) << "Preempted task " << task_spec.TaskId() << " was in owner or raylet queue";
+    } else if (!worker_client) {
+      RAY_LOG(DEBUG) << "Preempted task " << task_spec.TaskId() << " still resolving dependencies";
+    }
+    if (resubmit || !worker_client) {
+      // We successfully found and deleted the task from the queue OR the task
+      // is currently resolving dependencies.
+      preempted_tasks_.erase(inserted.first);
+    }
+  }
+
+  if (worker_client) {
+    RAY_LOG(DEBUG) << "Sending RPC to cancel preempted task " << task_spec.TaskId();
+    auto request = rpc::CancelTaskRequest();
+    request.set_intended_task_id(task_spec.TaskId().Binary());
+    request.set_force_kill(true);
+    worker_client->CancelTask(
+        request, [this, task_spec](
+                     const Status &status, const rpc::CancelTaskReply &reply) {
+          absl::MutexLock lock(&mu_);
+          if (status.ok() && !reply.attempt_succeeded()) {
+            if (cancel_retry_timer_.has_value()) {
+              if (cancel_retry_timer_->expiry().time_since_epoch() <=
+                  std::chrono::high_resolution_clock::now().time_since_epoch()) {
+                cancel_retry_timer_->expires_after(boost::asio::chrono::milliseconds(
+                    RayConfig::instance().cancellation_retry_ms()));
+              }
+              cancel_retry_timer_->async_wait(
+                  boost::bind(&CoreWorkerDirectTaskSubmitter::PreemptTask, this, task_spec));
+            }
+          }
+          // Retry is not attempted if !status.ok() because force-kill may kill the worker
+          // before the reply is sent.
+        });
+  }
+
+  if (resubmit) {
+    RAY_LOG(DEBUG) << "Resubmitting preempted task " << task_spec.TaskId();
+    SubmitTask(task_spec);
+  }
+}
+
 Status CoreWorkerDirectTaskSubmitter::CancelTask(TaskSpecification task_spec,
                                                  bool force_kill, bool recursive) {
   RAY_LOG(INFO) << "Cancelling a task: " << task_spec.TaskId()
                 << " force_kill: " << force_kill << " recursive: " << recursive;
-  const SchedulingKey scheduling_key(
-      task_spec.GetSchedulingClass(), task_spec.GetDependencyIds(),
-      task_spec.IsActorCreationTask() ? task_spec.ActorCreationId() : ActorID::Nil(),
-      task_spec.GetRuntimeEnvHash());
-  std::shared_ptr<rpc::CoreWorkerClientInterface> client = nullptr;
+  std::shared_ptr<rpc::CoreWorkerClientInterface> worker_client = nullptr;
   {
     absl::MutexLock lock(&mu_);
     if (cancelled_tasks_.find(task_spec.TaskId()) != cancelled_tasks_.end() ||
@@ -691,83 +749,89 @@ Status CoreWorkerDirectTaskSubmitter::CancelTask(TaskSpecification task_spec,
       return Status::OK();
     }
 
-    auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
-    auto &scheduled_tasks = scheduling_key_entry.task_priority_queue;
-    // This cancels tasks that have completed dependencies and are awaiting
-    // a worker lease.
-    if (!scheduled_tasks.empty()) {
-      for (auto it = scheduled_tasks.begin(); it != scheduled_tasks.end(); it++) {
-        const auto &task_id = it->second;
-        const auto task_it = tasks_.find(task_id);
-        RAY_CHECK(task_it != tasks_.end());
-        const auto &spec = task_it->second.task_spec;
-        if (spec.TaskId() == task_spec.TaskId()) {
-          scheduled_tasks.erase(it);
-          tasks_.erase(task_it);
-
-          if (scheduled_tasks.empty()) {
-            CancelWorkerLeaseIfNeeded(scheduling_key);
-          }
-          RAY_UNUSED(task_finisher_->PendingTaskFailed(
-              task_spec.TaskId(), rpc::ErrorType::TASK_CANCELLED, nullptr));
-          return Status::OK();
-        }
-      }
-    }
-
     // This will get removed either when the RPC call to cancel is returned
     // or when all dependencies are resolved.
     RAY_CHECK(cancelled_tasks_.emplace(task_spec.TaskId()).second);
-    auto rpc_client = executing_tasks_.find(task_spec.TaskId());
 
-    if (rpc_client == executing_tasks_.end()) {
-      // This case is reached for tasks that have unresolved dependencies.
-      // No executing tasks, so cancelling is a noop.
-      if (scheduling_key_entry.CanDelete()) {
-        // We can safely remove the entry keyed by scheduling_key from the
-        // scheduling_key_entries_ hashmap.
-        scheduling_key_entries_.erase(scheduling_key);
-      }
-      return Status::OK();
+    bool success = CancelTaskInternal(task_spec, &worker_client);
+    if (success) {
+      RAY_LOG(DEBUG) << "Cancelled task removed from queue, failing " << task_spec.TaskId();
+      RAY_CHECK(cancelled_tasks_.erase(task_spec.TaskId()));
+      RAY_UNUSED(task_finisher_->PendingTaskFailed(
+          task_spec.TaskId(), rpc::ErrorType::TASK_CANCELLED, nullptr));
     }
-    // Looks for an RPC handle for the worker executing the task.
-    auto maybe_client = client_cache_->GetByID(rpc_client->second.worker_id);
-    if (!maybe_client.has_value()) {
-      // If we don't have a connection to that worker, we can't cancel it.
-      // This case is reached for tasks that have unresolved dependencies.
-      return Status::OK();
-    }
-    client = maybe_client.value();
   }
 
-  RAY_CHECK(client != nullptr);
+  if (worker_client) {
+    RAY_LOG(DEBUG) << "Sending RPC to cancel task " << task_spec.TaskId();
+    auto request = rpc::CancelTaskRequest();
+    request.set_intended_task_id(task_spec.TaskId().Binary());
+    request.set_force_kill(force_kill);
+    request.set_recursive(recursive);
+    worker_client->CancelTask(
+        request, [this, task_spec, force_kill, recursive](
+                     const Status &status, const rpc::CancelTaskReply &reply) {
+          absl::MutexLock lock(&mu_);
+          cancelled_tasks_.erase(task_spec.TaskId());
 
-  auto request = rpc::CancelTaskRequest();
-  request.set_intended_task_id(task_spec.TaskId().Binary());
-  request.set_force_kill(force_kill);
-  request.set_recursive(recursive);
-  client->CancelTask(
-      request, [this, task_spec, scheduling_key, force_kill, recursive](
-                   const Status &status, const rpc::CancelTaskReply &reply) {
-        absl::MutexLock lock(&mu_);
-        cancelled_tasks_.erase(task_spec.TaskId());
-
-        if (status.ok() && !reply.attempt_succeeded()) {
-          if (cancel_retry_timer_.has_value()) {
-            if (cancel_retry_timer_->expiry().time_since_epoch() <=
-                std::chrono::high_resolution_clock::now().time_since_epoch()) {
-              cancel_retry_timer_->expires_after(boost::asio::chrono::milliseconds(
-                  RayConfig::instance().cancellation_retry_ms()));
+          if (status.ok() && !reply.attempt_succeeded()) {
+            if (cancel_retry_timer_.has_value()) {
+              if (cancel_retry_timer_->expiry().time_since_epoch() <=
+                  std::chrono::high_resolution_clock::now().time_since_epoch()) {
+                cancel_retry_timer_->expires_after(boost::asio::chrono::milliseconds(
+                    RayConfig::instance().cancellation_retry_ms()));
+              }
+              cancel_retry_timer_->async_wait(
+                  boost::bind(&CoreWorkerDirectTaskSubmitter::CancelTask, this, task_spec,
+                              force_kill, recursive));
             }
-            cancel_retry_timer_->async_wait(
-                boost::bind(&CoreWorkerDirectTaskSubmitter::CancelTask, this, task_spec,
-                            force_kill, recursive));
           }
-        }
-        // Retry is not attempted if !status.ok() because force-kill may kill the worker
-        // before the reply is sent.
-      });
+          // Retry is not attempted if !status.ok() because force-kill may kill the worker
+          // before the reply is sent.
+        });
+  }
   return Status::OK();
+}
+
+bool CoreWorkerDirectTaskSubmitter::CancelTaskInternal(const TaskSpecification &task_spec,
+                                                       std::shared_ptr<rpc::CoreWorkerClientInterface> *worker) {
+  // This will get removed either when the RPC call to cancel is returned
+  // or when all dependencies are resolved.
+  auto rpc_it = executing_tasks_.find(task_spec.TaskId());
+  if (rpc_it != executing_tasks_.end()) {
+    *worker = client_cache_->GetOrConnect(rpc_it->second.ToProto());
+    return false;
+  }
+
+  const SchedulingKey scheduling_key(
+      task_spec.GetSchedulingClass(), task_spec.GetDependencyIds(),
+      task_spec.IsActorCreationTask() ? task_spec.ActorCreationId() : ActorID::Nil(),
+      task_spec.GetRuntimeEnvHash());
+  auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
+  auto &scheduled_tasks = scheduling_key_entry.task_priority_queue;
+  // This cancels tasks that have completed dependencies and are awaiting
+  // a worker lease.
+  if (!scheduled_tasks.empty()) {
+    for (auto it = scheduled_tasks.begin(); it != scheduled_tasks.end(); it++) {
+      const auto &task_id = it->second;
+      const auto task_it = tasks_.find(task_id);
+      RAY_CHECK(task_it != tasks_.end());
+      const auto &spec = task_it->second.task_spec;
+      if (spec.TaskId() == task_spec.TaskId()) {
+        scheduled_tasks.erase(it);
+        tasks_.erase(task_it);
+
+        if (scheduled_tasks.empty()) {
+          CancelWorkerLeaseIfNeeded(scheduling_key);
+        }
+        return true;
+      }
+    }
+  }
+
+  RAY_LOG(DEBUG) << "Cancelled task " << task_spec.TaskId() << " is waiting for dependencies";
+  // This case is reached for tasks that have unresolved dependencies.
+  return false;
 }
 
 Status CoreWorkerDirectTaskSubmitter::CancelRemoteTask(const ObjectID &object_id,

@@ -104,7 +104,11 @@ class CoreWorkerDirectTaskSubmitter {
 
   void UpdateTaskPriorities(const absl::flat_hash_map<TaskID, Priority> &priorities);
 
+  void PreemptTask(const TaskSpecification &task_spec);
+
  private:
+  bool CancelTaskInternal(const TaskSpecification &task_spec,
+      std::shared_ptr<rpc::CoreWorkerClientInterface> *worker) EXCLUSIVE_LOCKS_REQUIRED(mu_);
   /// Schedule more work onto an idle worker or return it back to the raylet if
   /// no more tasks are queued for submission. If an error was encountered
   /// processing the worker, we don't attempt to re-use the worker.
@@ -360,6 +364,9 @@ class CoreWorkerDirectTaskSubmitter {
 
   // Tasks that were cancelled while being resolved.
   absl::flat_hash_set<TaskID> cancelled_tasks_ GUARDED_BY(mu_);
+
+  // Tasks that were preempted while executing or while being resolved.
+  absl::flat_hash_set<TaskID> preempted_tasks_ GUARDED_BY(mu_);
 
   // Keeps track of where currently executing tasks are being run.
   absl::flat_hash_map<TaskID, rpc::WorkerAddress> executing_tasks_ GUARDED_BY(mu_);

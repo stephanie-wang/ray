@@ -3184,12 +3184,24 @@ void CoreWorker::PreemptObject(const ObjectID &object_id) {
   // TODO(memory): Check num reconstructions remaining before preempting.
   // Clear pinned location and callback to primary raylet to release the object.
   NodeID pinned_at_raylet_id = reference_counter_->ResetPreemptedObject(object_id);
-  RAY_LOG(INFO) << "Preempting " << object_id << " was stored at " << pinned_at_raylet_id;
+  RAY_LOG(INFO) << "Preempting object " << object_id << ", was stored at " << pinned_at_raylet_id;
   // Delete the object from the in-memory store to indicate that it is not
   // available. The object recovery manager will guarantee that a new value
   // will eventually be stored for the objects (either an
   // UnreconstructableError or a value reconstructed from lineage).
   memory_store_->Delete({object_id});
+
+  // Cancel all downstream tasks to release references to the preempted object
+  // (and avoid the PullManager deadlock issue).
+  const auto &dependent_task_ids = reference_counter_->GetDependentTaskIds(object_id);
+  for (const auto &task_id : dependent_task_ids) {
+    auto task_spec = task_manager_->GetTaskSpec(task_id);
+    if (task_spec.has_value() && !task_spec.value().IsActorCreationTask()) {
+      RAY_CHECK(!task_spec->IsActorTask() && !task_spec->IsActorCreationTask());
+      RAY_LOG(DEBUG) << "Preempting and resubmitting task " << task_id << " downstream to object " << object_id;
+      direct_task_submitter_->PreemptTask(*task_spec);
+    }
+  }
 
   // NOTE: This assumes that the location is actually in the directory right
   // now, and that the location will be removed in the future. This will likely

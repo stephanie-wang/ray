@@ -481,6 +481,7 @@ void ReplyCancelled(Work &work, bool runtime_env_setup_failed) {
 
 bool ClusterTaskManager::CancelTask(const TaskID &task_id,
                                     bool runtime_env_setup_failed) {
+  RAY_LOG(DEBUG) << "Received cancellation request for task " << task_id;
   // TODO(sang): There are lots of repetitive code around task backlogs. We should
   // refactor them.
   for (auto shapes_it = tasks_to_schedule_.begin(); shapes_it != tasks_to_schedule_.end();
@@ -508,6 +509,7 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
     for (auto work_it = work_queue.begin(); work_it != work_queue.end(); ) {
       const auto &task = std::get<0>(work_it->second);
       if (task.GetTaskSpecification().TaskId() == task_id) {
+        RAY_LOG(DEBUG) << "Canceling task " << task_id;
         RemoveFromBacklogTracker(task);
         ReplyCancelled(work_it->second, runtime_env_setup_failed);
         if (!task.GetTaskSpecification().GetDependencies().empty()) {
@@ -531,6 +533,7 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
     for (auto work_it = work_queue.begin(); work_it != work_queue.end(); ) {
       const auto &task = std::get<0>(work_it->second);
       if (task.GetTaskSpecification().TaskId() == task_id) {
+        RAY_LOG(DEBUG) << "Canceling task " << task_id;
         RemoveFromBacklogTracker(task);
         ReplyCancelled(work_it->second, runtime_env_setup_failed);
         work_it = work_queue.erase(work_it);
@@ -546,6 +549,7 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
 
   auto iter = waiting_tasks_index_.find(task_id);
   if (iter != waiting_tasks_index_.end()) {
+    RAY_LOG(DEBUG) << "Canceling task " << task_id;
     const auto &task = std::get<0>(*iter->second);
     RemoveFromBacklogTracker(task);
     ReplyCancelled(*iter->second, runtime_env_setup_failed);
@@ -559,6 +563,7 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
     return true;
   }
 
+  RAY_LOG(DEBUG) << "Task to cancel " << task_id << " no longer queued, probably already dispatched";
   return false;
 }
 
