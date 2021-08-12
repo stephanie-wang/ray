@@ -40,7 +40,7 @@ DependencyManager::GetOrInsertRequiredObject(const ObjectID &object_id,
   auto it = required_objects_.find(object_id);
   if (it == required_objects_.end()) {
     const auto key = TaskKey(Priority(), ObjectID::FromRandom().TaskId());
-    // TODO: Fill in priority.
+    // TODO(memory): Fill in priority.
     it = required_objects_.emplace(object_id, ObjectDependencies(key, ref)).first;
   }
   return it;
@@ -120,7 +120,7 @@ void DependencyManager::StartOrUpdateGetRequest(
     }
     // Pull the new dependencies before canceling the old request, in case some
     // of the old dependencies are still being fetched.
-    // // TODO: Fill in priority.
+    // // TODO(memory): Fill in priority.
     TaskKey new_request_id(Priority(0), ObjectID::FromRandom().TaskId());
     object_manager_.Pull(new_request_id, refs, BundlePriority::GET_REQUEST);
     if (!get_request.second.second.IsNil()) {

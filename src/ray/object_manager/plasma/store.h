@@ -351,9 +351,7 @@ class PlasmaStore {
   size_t num_bytes_created_total_ = 0;
 
   /// Callback to the raylet to:
-  /// - TODO: release the primary copy
-  /// - TODO: revoke any tasks that are using this object
-  /// - TODO: release any copies that are being held for object transfer
+  /// - TODO(memory): release any copies that are being held for object transfer?
   const std::function<void(const ObjectID &object_id)> release_object_references_;
 };
 

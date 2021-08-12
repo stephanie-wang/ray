@@ -493,15 +493,9 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   const auto &task_id = head->second;
   auto task_it = tasks_.find(task_id);
   RAY_CHECK(task_it != tasks_.end());
-  auto resource_spec_msg = task_it->second.task_spec.GetMutableMessage();
   // Set task priority so raylet can use this to sort task queues.
-  const auto &priority = head->first;
-  auto msg_priority = resource_spec_msg.mutable_priority();
-  msg_priority->Clear();
-  for (auto &s : priority.score) {
-    msg_priority->Add(s);
-  }
-  TaskSpecification resource_spec = TaskSpecification(resource_spec_msg);
+  task_it->second.task_spec.SetPriority(head->first);
+  auto &resource_spec = task_it->second.task_spec;
 
   rpc::Address best_node_address;
   if (raylet_address == nullptr) {
@@ -514,7 +508,7 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   // Subtract 1 so we don't double count the task we are requesting for.
   int64_t queue_size = task_priority_queue.size() - 1;
 
-  RAY_LOG(DEBUG) << "Requesting worker lease " << task_id << " with priority " << priority;
+  RAY_LOG(DEBUG) << "Requesting worker lease " << task_id << " with priority " << head->first;
   lease_client->RequestWorkerLease(
       resource_spec,
       [this, scheduling_key](const Status &status,
