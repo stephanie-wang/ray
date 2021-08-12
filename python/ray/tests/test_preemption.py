@@ -145,6 +145,68 @@ def test_deps_pending(ray_start_cluster):
     # Make sure the task actually reran.
     assert (end - start) >= 1
 
+def test_deps_pending_on_remote_node(ray_start_cluster):
+    config = {
+        "lineage_pinning_enabled": True,
+        "max_direct_call_object_size": 10,
+        "worker_lease_timeout_milliseconds": 0,
+    }
+    cluster = ray_start_cluster
+    cluster.add_node(num_cpus=1, _system_config=config, resources={"local": 1})
+    cluster.add_node(num_cpus=1, resources={"remote": 1})
+
+    ray.init(cluster.address)
+
+    @ray.remote(resources={"local": 1})
+    def f():
+        time.sleep(1)
+
+    @ray.remote
+    def sleep():
+        while True:
+            pass
+
+    @ray.remote(resources={"remote": 1})
+    def g(x):
+        return
+
+    x = f.remote()
+    ray.get(x)
+    start = time.time()
+    ray.get(x, timeout=0)
+    end = time.time()
+    print("first get done", end - start)
+
+    s = [sleep.remote() for _ in range(2)]
+    time.sleep(1)  # Let sleep tasks be scheduled.
+    y = g.remote(x)  # Only 1 CPU, so g should now be queued.
+    ready, _ = ray.wait([y], timeout=1)
+    assert not ready
+
+    worker = ray.worker.global_worker
+    worker.core_worker.preempt(x)
+    time.sleep(1)
+    # Cancel s to give f and g the CPU.
+    def cancel(s):
+        print("try cancel")
+        ray.cancel(s, force=True)
+        try:
+            ray.get(s, timeout=1)
+        except ray.exceptions.GetTimeoutError:
+            return False
+        except ray.exceptions.WorkerCrashedError:
+            return True
+    wait_for_condition(lambda: cancel(s[0]))
+    wait_for_condition(lambda: cancel(s[1]))
+
+    start = time.time()
+    print(ray.get(y, timeout=10))
+    end = time.time()
+    print("DONE", end - start)
+
+    # Make sure the task actually reran.
+    assert (end - start) >= 1
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main(["-v", __file__]))

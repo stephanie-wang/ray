@@ -999,6 +999,7 @@ bool ReferenceCounter::AddObjectLocation(const ObjectID &object_id,
 
 void ReferenceCounter::AddObjectLocationInternal(ReferenceTable::iterator it,
                                                  const NodeID &node_id) {
+  RAY_LOG(DEBUG) << "Adding location " << node_id << " for object " << it->first;
   if (it->second.locations.emplace(node_id).second) {
     // Only push to subscribers if we added a new location. We eagerly add the pinned
     // location without waiting for the object store notification to trigger a location
@@ -1009,6 +1010,7 @@ void ReferenceCounter::AddObjectLocationInternal(ReferenceTable::iterator it,
 
 bool ReferenceCounter::RemoveObjectLocation(const ObjectID &object_id,
                                             const NodeID &node_id) {
+  RAY_LOG(DEBUG) << "Removing location " << node_id << " for object " << object_id;
   std::function<void()> callback = nullptr;
   {
     absl::MutexLock lock(&mutex_);

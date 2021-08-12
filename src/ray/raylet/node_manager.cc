@@ -2134,6 +2134,15 @@ void NodeManager::HandlePinObjectIDs(const rpc::PinObjectIDsRequest &request,
     send_reply_callback(Status::Invalid("Failed to get objects."), nullptr, nullptr);
     return;
   }
+  for (const auto &result : results) {
+    if (result == nullptr) {
+      RAY_LOG(WARNING)
+          << "Failed to get objects that should have been in the object store. These "
+             "objects may have been evicted while there are still references in scope.";
+      send_reply_callback(Status::Invalid("Failed to get objects."), nullptr, nullptr);
+      return;
+    }
+  }
   local_object_manager_.PinObjects(object_ids, std::move(results), owner_address);
   // Wait for the object to be freed by the owner, which keeps the ref count.
   local_object_manager_.WaitForObjectFree(owner_address, object_ids);

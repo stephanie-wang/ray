@@ -3181,6 +3181,7 @@ void CoreWorker::HandlePreemptObject(const rpc::PreemptObjectRequest &request,
 }
 
 void CoreWorker::PreemptObject(const ObjectID &object_id) {
+  // TODO(memory): Try to pin another copy of the object before preempting?
   // TODO(memory): Check num reconstructions remaining before preempting.
   // Clear pinned location and callback to primary raylet to release the object.
   NodeID pinned_at_raylet_id = reference_counter_->ResetPreemptedObject(object_id);
