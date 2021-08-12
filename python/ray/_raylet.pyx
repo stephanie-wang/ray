@@ -1138,6 +1138,7 @@ cdef class CoreWorker:
         # TODO(suquark): This method does not support put objects to
         # in memory store currently.
         metadata_buf = string_to_buffer(metadata)
+        # TODO(memory): Fill in the priority for restored objects.
         object_already_exists = self._create_put_buffer(
             metadata_buf, data_size, object_ref,
             ObjectRefsToVector([]),

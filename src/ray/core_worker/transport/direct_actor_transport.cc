@@ -322,6 +322,13 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
   // access the task.
   request->mutable_task_spec()->CopyFrom(task_spec.GetMessage());
 
+  const auto &priority = get_task_priority_(task_spec);
+  auto msg_priority = request->mutable_task_spec()->mutable_priority();
+  msg_priority->Clear();
+  for (auto &s : priority.score) {
+    msg_priority->Add(s);
+  }
+
   request->set_intended_worker_id(queue.worker_id);
   RAY_CHECK(task_spec.ActorCounter() >= queue.caller_starts_at)
       << "actor counter " << task_spec.ActorCounter() << " " << queue.caller_starts_at;
@@ -333,7 +340,8 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
   const auto task_skipped = task_spec.GetMessage().skip_execution();
   RAY_LOG(DEBUG) << "Pushing task " << task_id << " to actor " << actor_id
                  << " actor counter " << actor_counter << " seq no "
-                 << request->sequence_number();
+                 << request->sequence_number()
+                 << " priority " << priority;
   rpc::Address addr(queue.rpc_client->Addr());
   queue.rpc_client->PushActorTask(
       std::move(request), skip_queue,

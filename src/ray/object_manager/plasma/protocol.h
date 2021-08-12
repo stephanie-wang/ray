@@ -23,6 +23,7 @@
 #include <vector>
 
 #include "ray/common/status.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/object_manager/plasma/plasma.h"
 #include "ray/object_manager/plasma/plasma_generated.h"
 #include "src/ray/protobuf/common.pb.h"
@@ -77,13 +78,17 @@ Status SendCreateRetryRequest(const std::shared_ptr<StoreConn> &store_conn,
                               ObjectID object_id, uint64_t request_id);
 
 Status SendCreateRequest(const std::shared_ptr<StoreConn> &store_conn, ObjectID object_id,
-                         const ray::rpc::Address &owner_address, int64_t data_size,
+                         const ray::rpc::Address &owner_address,
+                         const ray::Priority &priority,
+                         int64_t data_size,
                          int64_t metadata_size, flatbuf::ObjectSource source,
                          int device_num, bool try_immediately);
 
 void ReadCreateRequest(uint8_t *data, size_t size, ObjectID *object_id,
                        NodeID *owner_raylet_id, std::string *owner_ip_address,
-                       int *owner_port, WorkerID *owner_worker_id, int64_t *data_size,
+                       int *owner_port, WorkerID *owner_worker_id,
+                       ray::Priority *priority,
+                       int64_t *data_size,
                        int64_t *metadata_size, flatbuf::ObjectSource *source,
                        int *device_num);
 

@@ -18,6 +18,7 @@
 #include <string>
 #include <vector>
 
+#include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 
 #include "ray/common/status.h"
@@ -59,7 +60,7 @@ class CreateRequestQueue {
   /// \param create_callback A callback to attempt to create the object.
   /// \param object_size Object size in bytes.
   /// \return A request ID that can be used to get the result.
-  uint64_t AddRequest(const ObjectID &object_id,
+  uint64_t AddRequest(const ray::TaskKey &key, const ObjectID &object_id,
                       const std::shared_ptr<ClientInterface> &client,
                       const CreateObjectCallback &create_callback,
                       const size_t object_size);
@@ -93,6 +94,7 @@ class CreateRequestQueue {
   /// if there are other requests queued or there is not enough space left in
   /// the object store, this will return an out-of-memory error.
   std::pair<PlasmaObject, PlasmaError> TryRequestImmediately(
+      const ray::TaskKey &key,
       const ObjectID &object_id, const std::shared_ptr<ClientInterface> &client,
       const CreateObjectCallback &create_callback, size_t object_size);
 
@@ -117,11 +119,12 @@ class CreateRequestQueue {
 
  private:
   struct CreateRequest {
-    CreateRequest(const ObjectID &object_id, uint64_t request_id,
+    CreateRequest(const ObjectID &object_id,
+                  uint64_t req_id,
                   const std::shared_ptr<ClientInterface> &client,
                   CreateObjectCallback create_callback, size_t object_size)
         : object_id(object_id),
-          request_id(request_id),
+          request_id(req_id),
           client(client),
           create_callback(create_callback),
           object_size(object_size) {}
@@ -129,8 +132,6 @@ class CreateRequestQueue {
     // The ObjectID to create.
     const ObjectID object_id;
 
-    // A request ID that can be returned to the caller to get the result once
-    // ready.
     const uint64_t request_id;
 
     // A pointer to the client, used as a key to delete requests that were made
@@ -155,7 +156,7 @@ class CreateRequestQueue {
                         bool *spilling_required);
 
   /// Finish a queued request and remove it from the queue.
-  void FinishRequest(std::list<std::unique_ptr<CreateRequest>>::iterator request_it);
+  void FinishRequest(absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator request_it);
 
   /// The next request ID to assign, so that the caller can get the results of
   /// a request by retrying. Start at 1 because 0 means "do not retry".
@@ -194,12 +195,14 @@ class CreateRequestQueue {
   /// in the object store. Then, the client does not need to poll on an
   /// OutOfMemory error and we can just respond to them once there is enough
   /// space made, or after a timeout.
-  std::list<std::unique_ptr<CreateRequest>> queue_;
+  absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>> queue_;
 
   /// A buffer of the results of fulfilled requests. The value will be null
   /// while the request is pending and will be set once the request has
   /// finished.
   absl::flat_hash_map<uint64_t, std::unique_ptr<CreateRequest>> fulfilled_requests_;
+
+  absl::flat_hash_map<uint64_t, ray::TaskKey> index_;
 
   /// Last time global gc was invoked in ms.
   uint64_t last_global_gc_ms_;

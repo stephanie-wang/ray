@@ -339,6 +339,7 @@ std::string TaskSpecification::DebugString() const {
   std::ostringstream stream;
   stream << "Type=" << TaskType_Name(message_->type())
          << ", Language=" << Language_Name(message_->language());
+  stream << ", priority=" << GetPriority();
 
   if (required_resources_ != nullptr) {
     stream << ", Resources: {";

@@ -297,8 +297,11 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
   int64_t metadata_size;
   fb::ObjectSource source;
   int device_num;
+  ray::Priority priority;
   ReadCreateRequest(input, input_size, &object_id, &owner_raylet_id, &owner_ip_address,
-                    &owner_port, &owner_worker_id, &data_size, &metadata_size, &source,
+                    &owner_port, &owner_worker_id,
+                    &priority,
+                    &data_size, &metadata_size, &source,
                     &device_num);
   auto error = CreateObject(object_id, owner_raylet_id, owner_ip_address, owner_port,
                             owner_worker_id, data_size, metadata_size, source, device_num,
@@ -826,6 +829,12 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     const auto &object_id = GetCreateRequestObjectId(message);
     const auto &request = flatbuffers::GetRoot<fb::PlasmaCreateRequest>(input);
     const size_t object_size = request->data_size() + request->metadata_size();
+    ray::Priority priority;
+    priority.score.clear();
+    for (size_t i = 0; i < request->priority()->size(); i++) {
+      priority.score.push_back(request->priority()->Get(i));
+    }
+    ray::TaskKey key(priority, object_id.TaskId());
 
     auto handle_create = [this, client, message](bool fallback_allocator,
                                                  PlasmaObject *result,
@@ -836,8 +845,10 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
 
     if (request->try_immediately()) {
       RAY_LOG(DEBUG) << "Received request to create object " << object_id
-                     << " immediately";
+                     << " immediately with priority " << priority;
+      // TODO(memory): Should try request with the given priority.
       auto result_error = create_request_queue_.TryRequestImmediately(
+          key,
           object_id, client, handle_create, object_size);
       const auto &result = result_error.first;
       const auto &error = result_error.second;
@@ -846,11 +857,11 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
         static_cast<void>(client->SendFd(result.store_fd));
       }
     } else {
-      auto req_id =
-          create_request_queue_.AddRequest(object_id, client, handle_create, object_size);
+      auto req_id = create_request_queue_.AddRequest(key, object_id, client, handle_create,
+          object_size);
       RAY_LOG(DEBUG) << "Received create request for object " << object_id
                      << " assigned request ID " << req_id << ", " << object_size
-                     << " bytes";
+                     << " bytes with priority " << priority;
       ProcessCreateRequests();
       ReplyToCreateClient(client, object_id, req_id);
     }

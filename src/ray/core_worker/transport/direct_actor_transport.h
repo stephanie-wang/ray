@@ -69,10 +69,12 @@ class CoreWorkerDirectActorTaskSubmitter
   CoreWorkerDirectActorTaskSubmitter(
       std::shared_ptr<rpc::CoreWorkerClientPool> core_worker_client_pool,
       std::shared_ptr<CoreWorkerMemoryStore> store,
-      std::shared_ptr<TaskFinisherInterface> task_finisher)
+      std::shared_ptr<TaskFinisherInterface> task_finisher,
+      std::function<Priority(const TaskSpecification &spec)> get_task_priority)
       : core_worker_client_pool_(core_worker_client_pool),
         resolver_(store, task_finisher),
-        task_finisher_(task_finisher) {}
+        task_finisher_(task_finisher),
+        get_task_priority_(get_task_priority) {}
 
   /// Add an actor queue. This should be called whenever a reference to an
   /// actor is created in the language frontend.
@@ -268,6 +270,8 @@ class CoreWorkerDirectActorTaskSubmitter
 
   /// Used to complete tasks.
   std::shared_ptr<TaskFinisherInterface> task_finisher_;
+
+  std::function<Priority(const TaskSpecification &spec)> get_task_priority_;
 
   friend class CoreWorkerTest;
 };

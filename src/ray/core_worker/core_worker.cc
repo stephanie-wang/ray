@@ -641,7 +641,10 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
 
   direct_actor_submitter_ = std::shared_ptr<CoreWorkerDirectActorTaskSubmitter>(
       new CoreWorkerDirectActorTaskSubmitter(core_worker_client_pool_, memory_store_,
-                                             task_manager_));
+                                             task_manager_,
+                                              [this](const TaskSpecification &spec) {
+                                                return reference_counter_->GetMinPriority(spec.ReturnIds());
+                                              }));
 
   auto node_addr_factory = [this](const NodeID &node_id) {
     absl::optional<rpc::Address> addr;
@@ -1199,8 +1202,11 @@ Status CoreWorker::CreateOwned(const std::shared_ptr<Buffer> &metadata,
     *data = std::make_shared<LocalMemoryBuffer>(data_size);
   } else {
     if (status.ok()) {
+      // TODO(memory): Fill in this priority? I think it's only for ray.put.
       status = plasma_store_provider_->Create(metadata, data_size, *object_id,
-                                              /* owner_address = */ rpc_address_, data,
+                                              /* owner_address = */ rpc_address_,
+                                              Priority(),
+                                              data,
                                               created_by_worker);
     }
     if (!status.ok() || !data) {
@@ -1224,7 +1230,7 @@ Status CoreWorker::CreateExisting(const std::shared_ptr<Buffer> &metadata,
         "Creating an object with a pre-existing ObjectID is not supported in local "
         "mode");
   } else {
-    return plasma_store_provider_->Create(metadata, data_size, object_id, owner_address,
+    return plasma_store_provider_->Create(metadata, data_size, object_id, owner_address, Priority(),
                                           data, created_by_worker);
   }
 }
@@ -2227,8 +2233,9 @@ Status CoreWorker::AllocateReturnObject(const ObjectID &object_id,
 
   bool object_already_exists = false;
   std::shared_ptr<Buffer> data_buffer;
+  const auto priority = worker_context_.GetCurrentTask()->GetPriority();
   if (data_size > 0) {
-    RAY_LOG(DEBUG) << "Creating return object " << object_id;
+    RAY_LOG(DEBUG) << "Creating return object " << object_id << " with priority " << priority;
     // Mark this object as containing other object IDs. The ref counter will
     // keep the inner IDs in scope until the outer one is out of scope.
     if (!contained_object_id.empty() && !options_.is_local_mode) {
@@ -2241,9 +2248,9 @@ Status CoreWorker::AllocateReturnObject(const ObjectID &object_id,
         static_cast<int64_t>(data_size) < max_direct_call_object_size_) {
       data_buffer = std::make_shared<LocalMemoryBuffer>(data_size);
     } else {
-      RAY_RETURN_NOT_OK(CreateExisting(metadata, data_size, object_id, owner_address,
-                                       &data_buffer,
-                                       /*created_by_worker=*/true));
+      RAY_RETURN_NOT_OK(plasma_store_provider_->Create(metadata, data_size,
+                                          object_id, owner_address, priority,
+                                          &data_buffer, /*created_by_worker=*/true));
       object_already_exists = !data_buffer;
     }
   }

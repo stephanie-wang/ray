@@ -188,7 +188,9 @@ Status SendCreateRetryRequest(const std::shared_ptr<StoreConn> &store_conn,
 }
 
 Status SendCreateRequest(const std::shared_ptr<StoreConn> &store_conn, ObjectID object_id,
-                         const ray::rpc::Address &owner_address, int64_t data_size,
+                         const ray::rpc::Address &owner_address,
+                         const ray::Priority &priority,
+                         int64_t data_size,
                          int64_t metadata_size, flatbuf::ObjectSource source,
                          int device_num, bool try_immediately) {
   flatbuffers::FlatBufferBuilder fbb;
@@ -196,14 +198,18 @@ Status SendCreateRequest(const std::shared_ptr<StoreConn> &store_conn, ObjectID 
       fbb, fbb.CreateString(object_id.Binary()),
       fbb.CreateString(owner_address.raylet_id()),
       fbb.CreateString(owner_address.ip_address()), owner_address.port(),
-      fbb.CreateString(owner_address.worker_id()), data_size, metadata_size, source,
+      fbb.CreateString(owner_address.worker_id()),
+      fbb.CreateVector(priority.score.data(), priority.score.size()),
+      data_size, metadata_size, source,
       device_num, try_immediately);
   return PlasmaSend(store_conn, MessageType::PlasmaCreateRequest, &fbb, message);
 }
 
 void ReadCreateRequest(uint8_t *data, size_t size, ObjectID *object_id,
                        NodeID *owner_raylet_id, std::string *owner_ip_address,
-                       int *owner_port, WorkerID *owner_worker_id, int64_t *data_size,
+                       int *owner_port, WorkerID *owner_worker_id,
+                       ray::Priority *priority,
+                       int64_t *data_size,
                        int64_t *metadata_size, flatbuf::ObjectSource *source,
                        int *device_num) {
   RAY_DCHECK(data);
@@ -216,6 +222,9 @@ void ReadCreateRequest(uint8_t *data, size_t size, ObjectID *object_id,
   *owner_ip_address = message->owner_ip_address()->str();
   *owner_port = message->owner_port();
   *owner_worker_id = WorkerID::FromBinary(message->owner_worker_id()->str());
+  for (size_t i = 0; i < message->priority()->size(); i++) {
+    priority->score.push_back(message->priority()->Get(i));
+  }
   *source = message->source();
   *device_num = message->device_num();
   return;

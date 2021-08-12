@@ -74,22 +74,24 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
 
   // Add new owned objects for the return values of the task.
   const auto &return_ids = spec.ReturnIds();
-  for (const auto &return_id : return_ids) {
-    // We pass an empty vector for inner IDs because we do not know the return
-    // value of the task yet. If the task returns an ID(s), the worker will
-    // publish the WaitForRefRemoved message that we are now a borrower for
-    // the inner IDs. Note that this message can be received *before* the
-    // PushTaskReply.
-    reference_counter_->AddOwnedObject(return_id,
-                                       /*inner_ids=*/{}, caller_address, call_site, -1,
-                                       /*is_reconstructable=*/true,
-                                       priority,
-                                       depth);
-  }
+  if (!spec.IsActorCreationTask()) {
+    for (const auto &return_id : return_ids) {
+      // We pass an empty vector for inner IDs because we do not know the return
+      // value of the task yet. If the task returns an ID(s), the worker will
+      // publish the WaitForRefRemoved message that we are now a borrower for
+      // the inner IDs. Note that this message can be received *before* the
+      // PushTaskReply.
+      reference_counter_->AddOwnedObject(return_id,
+                                         /*inner_ids=*/{}, caller_address, call_site, -1,
+                                         /*is_reconstructable=*/true,
+                                         priority,
+                                         depth);
+    }
 
-  if (!return_ids.empty()) {
-    for (const auto &dep : task_deps) {
-      reference_counter_->AddDependentObjectIds(dep, return_ids);
+    if (!return_ids.empty()) {
+      for (const auto &dep : task_deps) {
+        reference_counter_->AddDependentObjectIds(dep, return_ids);
+      }
     }
   }
 

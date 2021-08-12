@@ -14,6 +14,22 @@ from ray.test_utils import (
 
 SIGKILL = signal.SIGKILL if sys.platform != "win32" else signal.SIGTERM
 
+@ray.remote
+class Counter:
+    def __init__(self):
+        self.num_executions = 0
+
+    def inc(self):
+        self.num_executions += 1
+
+    def get(self):
+        return self.num_executions
+
+@ray.remote
+def f(c):
+    # TODO(memory): Hangs if we call ray.get here?
+    c.inc.remote()
+
 
 def test_simple(ray_start_cluster):
     config = {
@@ -26,11 +42,8 @@ def test_simple(ray_start_cluster):
 
     ray.init(cluster.address)
 
-    @ray.remote
-    def f():
-        time.sleep(1)
-
-    xs = [f.remote() for _ in range(3)]
+    c = Counter.remote()
+    xs = [f.remote(c) for _ in range(3)]
     ray.get(xs)
     start = time.time()
     ray.get(xs, timeout=0)
@@ -45,7 +58,7 @@ def test_simple(ray_start_cluster):
     print("DONE", end - start)
 
     # Make sure the task actually reran.
-    assert (end - start) >= 1
+    assert ray.get(c.get.remote()) == 4
 
 def test_deps(ray_start_cluster):
     config = {
@@ -60,14 +73,11 @@ def test_deps(ray_start_cluster):
     ray.init(cluster.address)
 
     @ray.remote
-    def f():
-        time.sleep(1)
-
-    @ray.remote
     def g(x):
         return
 
-    x = f.remote()
+    c = Counter.remote()
+    x = f.remote(c)
     ray.get(x)
     start = time.time()
     ray.get(x, timeout=0)
@@ -83,7 +93,7 @@ def test_deps(ray_start_cluster):
     print("DONE", end - start)
 
     # Make sure the task actually reran.
-    assert (end - start) >= 1
+    assert ray.get(c.get.remote()) == 2
 
 def test_deps_pending(ray_start_cluster):
     config = {
@@ -98,10 +108,6 @@ def test_deps_pending(ray_start_cluster):
     ray.init(cluster.address)
 
     @ray.remote
-    def f():
-        time.sleep(1)
-
-    @ray.remote
     def sleep():
         while True:
             pass
@@ -110,7 +116,9 @@ def test_deps_pending(ray_start_cluster):
     def g(x):
         return
 
-    x = f.remote()
+    c = Counter.remote()
+
+    x = f.remote(c)
     ray.get(x)
     start = time.time()
     ray.get(x, timeout=0)
@@ -118,10 +126,12 @@ def test_deps_pending(ray_start_cluster):
     print("first get done", end - start)
 
     s = sleep.remote()
-    time.sleep(1)  # Let sleep task be scheduled.
-    y = g.remote(x)  # Only 1 CPU, so g should now be queued.
-    ready, _ = ray.wait([y], timeout=1)
-    assert not ready
+    y = [None]
+    def schedule_g():
+        y[0] = g.remote(x)  # Only 1 CPU, so g should now be queued.
+        ready, _ = ray.wait(y, timeout=1)
+        return not ready
+    wait_for_condition(schedule_g)
 
     worker = ray.worker.global_worker
     worker.core_worker.preempt(x)
@@ -143,7 +153,9 @@ def test_deps_pending(ray_start_cluster):
     print("DONE", end - start)
 
     # Make sure the task actually reran.
-    assert (end - start) >= 1
+    count = ray.get(c.get.remote())
+    assert count == 2
+
 
 def test_deps_pending_on_remote_node(ray_start_cluster):
     config = {
@@ -157,10 +169,6 @@ def test_deps_pending_on_remote_node(ray_start_cluster):
 
     ray.init(cluster.address)
 
-    @ray.remote(resources={"local": 1})
-    def f():
-        time.sleep(1)
-
     @ray.remote
     def sleep():
         while True:
@@ -170,7 +178,9 @@ def test_deps_pending_on_remote_node(ray_start_cluster):
     def g(x):
         return
 
-    x = f.remote()
+    c = Counter.remote()
+
+    x = f.options(resources={"local": 1}).remote(c)
     ray.get(x)
     start = time.time()
     ray.get(x, timeout=0)
@@ -178,14 +188,15 @@ def test_deps_pending_on_remote_node(ray_start_cluster):
     print("first get done", end - start)
 
     s = [sleep.remote() for _ in range(2)]
-    time.sleep(1)  # Let sleep tasks be scheduled.
-    y = g.remote(x)  # Only 1 CPU, so g should now be queued.
-    ready, _ = ray.wait([y], timeout=1)
-    assert not ready
+    y = [None]
+    def schedule_g():
+        y[0] = g.remote(x)  # Only 1 CPU, so g should now be queued.
+        ready, _ = ray.wait(y, timeout=1)
+        return not ready
+    wait_for_condition(schedule_g)
 
     worker = ray.worker.global_worker
     worker.core_worker.preempt(x)
-    time.sleep(1)
     # Cancel s to give f and g the CPU.
     def cancel(s):
         print("try cancel")
@@ -205,7 +216,8 @@ def test_deps_pending_on_remote_node(ray_start_cluster):
     print("DONE", end - start)
 
     # Make sure the task actually reran.
-    assert (end - start) >= 1
+    count = ray.get(c.get.remote())
+    assert count == 2
 
 if __name__ == "__main__":
     import pytest
