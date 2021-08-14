@@ -137,7 +137,8 @@ class DependencyWaiterInterface {
   /// \param tag Value that will be sent to the core worker via gRPC on completion.
   /// \return ray::Status.
   virtual ray::Status WaitForDirectActorCallArgs(
-      const std::vector<rpc::ObjectReference> &references, int64_t tag) = 0;
+      const std::vector<rpc::ObjectReference> &references,
+      const Priority &priority, int64_t tag) = 0;
 
   virtual ~DependencyWaiterInterface(){};
 };
@@ -276,6 +277,7 @@ class RayletClient : public RayletClientInterface {
   /// \return int 0 means correct, other numbers mean error.
   ray::Status FetchOrReconstruct(const std::vector<ObjectID> &object_ids,
                                  const std::vector<rpc::Address> &owner_addresses,
+                                 const Priority &priority,
                                  bool fetch_only, bool mark_worker_blocked,
                                  const TaskID &current_task_id);
 
@@ -322,7 +324,8 @@ class RayletClient : public RayletClientInterface {
   /// \param tag Value that will be sent to the core worker via gRPC on completion.
   /// \return ray::Status.
   ray::Status WaitForDirectActorCallArgs(
-      const std::vector<rpc::ObjectReference> &references, int64_t tag) override;
+      const std::vector<rpc::ObjectReference> &references,
+      const Priority &priority, int64_t tag) override;
 
   /// Push an error to the relevant driver.
   ///

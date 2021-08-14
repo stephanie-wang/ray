@@ -155,12 +155,13 @@ Status CoreWorkerPlasmaStoreProvider::Release(const ObjectID &object_id) {
 
 Status CoreWorkerPlasmaStoreProvider::FetchAndGetFromPlasmaStore(
     absl::flat_hash_set<ObjectID> &remaining, const std::vector<ObjectID> &batch_ids,
+    const Priority &priority,
     int64_t timeout_ms, bool fetch_only, bool in_direct_call, const TaskID &task_id,
     absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> *results,
     bool *got_exception) {
   const auto owner_addresses = reference_counter_->GetOwnerAddresses(batch_ids);
   RAY_RETURN_NOT_OK(raylet_client_->FetchOrReconstruct(
-      batch_ids, owner_addresses, fetch_only, /*mark_worker_blocked*/ !in_direct_call,
+      batch_ids, owner_addresses, priority, fetch_only, /*mark_worker_blocked*/ !in_direct_call,
       task_id));
 
   std::vector<plasma::ObjectBuffer> plasma_results;
@@ -245,7 +246,9 @@ Status UnblockIfNeeded(const std::shared_ptr<raylet::RayletClient> &client,
 }
 
 Status CoreWorkerPlasmaStoreProvider::Get(
-    const absl::flat_hash_set<ObjectID> &object_ids, int64_t timeout_ms,
+    const absl::flat_hash_set<ObjectID> &object_ids,
+    const Priority &priority,
+    int64_t timeout_ms,
     const WorkerContext &ctx,
     absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> *results,
     bool *got_exception) {
@@ -262,7 +265,7 @@ Status CoreWorkerPlasmaStoreProvider::Get(
       batch_ids.push_back(id_vector[start + i]);
     }
     RAY_RETURN_NOT_OK(
-        FetchAndGetFromPlasmaStore(remaining, batch_ids, /*timeout_ms=*/0,
+        FetchAndGetFromPlasmaStore(remaining, batch_ids, priority, /*timeout_ms=*/0,
                                    /*fetch_only=*/true, ctx.CurrentTaskIsDirectCall(),
                                    ctx.GetCurrentTaskID(), results, got_exception));
   }
@@ -304,7 +307,7 @@ Status CoreWorkerPlasmaStoreProvider::Get(
           /*release_resources_during_plasma_fetch=*/false));
     }
     RAY_RETURN_NOT_OK(
-        FetchAndGetFromPlasmaStore(remaining, batch_ids, batch_timeout,
+        FetchAndGetFromPlasmaStore(remaining, batch_ids, priority, batch_timeout,
                                    /*fetch_only=*/false, ctx.CurrentTaskIsDirectCall(),
                                    ctx.GetCurrentTaskID(), results, got_exception));
     should_break = timed_out || *got_exception;

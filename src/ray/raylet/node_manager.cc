@@ -208,9 +208,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           })),
       object_manager_(
           io_service, self_node_id, object_manager_config, object_directory_.get(),
-          [this](const ObjectID &object_id, const std::string &object_url,
+          [this](const ObjectID &object_id, const Priority &priority, const std::string &object_url,
                  std::function<void(const ray::Status &)> callback) {
-            GetLocalObjectManager().AsyncRestoreSpilledObject(object_id, object_url,
+            GetLocalObjectManager().AsyncRestoreSpilledObject(object_id, priority, object_url,
                                                               callback);
           },
           /*get_spilled_object_url=*/
@@ -1408,6 +1408,13 @@ void NodeManager::ProcessFetchOrReconstructMessage(
   auto message = flatbuffers::GetRoot<protocol::FetchOrReconstruct>(message_data);
   const auto refs =
       FlatbufferToObjectReference(*message->object_ids(), *message->owner_addresses());
+
+  ray::Priority priority;
+  priority.score.clear();
+  for (size_t i = 0; i < message->priority()->size(); i++) {
+    priority.score.push_back(message->priority()->Get(i));
+  }
+
   // TODO(ekl) we should be able to remove the fetch only flag along with the legacy
   // non-direct call support.
   if (message->fetch_only()) {
@@ -1420,7 +1427,7 @@ void NodeManager::ProcessFetchOrReconstructMessage(
     if (worker && !worker->GetAssignedTaskId().IsNil()) {
       // This will start a fetch for the objects that gets canceled once the
       // objects are local, or if the worker dies.
-      dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), refs);
+      dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), refs, priority);
     }
   } else {
     // The values are needed. Add all requested objects to the list to
@@ -1428,7 +1435,7 @@ void NodeManager::ProcessFetchOrReconstructMessage(
     // pulled from remote node managers. If an object's owner dies, an error
     // will be stored as the object's value.
     const TaskID task_id = from_flatbuf<TaskID>(*message->task_id());
-    AsyncResolveObjects(client, refs, task_id, /*ray_get=*/true,
+    AsyncResolveObjects(client, refs, task_id, priority, /*ray_get=*/true,
                         /*mark_worker_blocked*/ message->mark_worker_blocked());
   }
 }
@@ -1469,7 +1476,9 @@ void NodeManager::ProcessWaitRequestMessage(
     // already local. Missing objects will be pulled from remote node managers.
     // If an object's owner dies, an error will be stored as the object's
     // value.
-    AsyncResolveObjects(client, refs, current_task_id, /*ray_get=*/false,
+    // TODO(memory): Fill in priority for ray.wait.
+    Priority priority;
+    AsyncResolveObjects(client, refs, current_task_id, priority, /*ray_get=*/false,
                         /*mark_worker_blocked*/ was_blocked);
   }
   int64_t wait_ms = message->timeout();
@@ -1507,6 +1516,13 @@ void NodeManager::ProcessWaitForDirectActorCallArgsRequestMessage(
   auto message =
       flatbuffers::GetRoot<protocol::WaitForDirectActorCallArgsRequest>(message_data);
   std::vector<ObjectID> object_ids = from_flatbuf<ObjectID>(*message->object_ids());
+
+  ray::Priority priority;
+  priority.score.clear();
+  for (size_t i = 0; i < message->priority()->size(); i++) {
+    priority.score.push_back(message->priority()->Get(i));
+  }
+
   int64_t tag = message->tag();
   // Resolve any missing objects. This will pull the objects from remote node
   // managers or store an error if the objects have failed.
@@ -1516,7 +1532,7 @@ void NodeManager::ProcessWaitForDirectActorCallArgsRequestMessage(
   for (const auto &ref : refs) {
     owner_addresses.emplace(ObjectID::FromBinary(ref.object_id()), ref.owner_address());
   }
-  AsyncResolveObjects(client, refs, TaskID::Nil(), /*ray_get=*/false,
+  AsyncResolveObjects(client, refs, TaskID::Nil(), priority, /*ray_get=*/false,
                       /*mark_worker_blocked*/ false);
   // Reply to the client once a location has been found for all arguments.
   // NOTE(swang): ObjectManager::Wait currently returns as soon as any location
@@ -1825,7 +1841,9 @@ void NodeManager::HandleDirectCallTaskUnblocked(
 void NodeManager::AsyncResolveObjects(
     const std::shared_ptr<ClientConnection> &client,
     const std::vector<rpc::ObjectReference> &required_object_refs,
-    const TaskID &current_task_id, bool ray_get, bool mark_worker_blocked) {
+    const TaskID &current_task_id,
+    const Priority &priority,
+    bool ray_get, bool mark_worker_blocked) {
   std::shared_ptr<WorkerInterface> worker = worker_pool_.GetRegisteredWorker(client);
   if (!worker) {
     // The client is a driver. Drivers do not hold resources, so we simply mark
@@ -1838,10 +1856,10 @@ void NodeManager::AsyncResolveObjects(
   // fetched and/or restarted as necessary, until the objects become local
   // or are unsubscribed.
   if (ray_get) {
-    dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), required_object_refs);
+    dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), required_object_refs, priority);
   } else {
     dependency_manager_.StartOrUpdateWaitRequest(worker->WorkerId(),
-                                                 required_object_refs);
+                                                 required_object_refs, priority);
   }
 }
 
@@ -2018,7 +2036,7 @@ void NodeManager::ProcessSubscribePlasmaReady(
     //    is local at this time but when the core worker was notified, the object is
     //    is evicted. The core worker should be able to handle evicted object in this
     //    case.
-    dependency_manager_.StartOrUpdateWaitRequest(associated_worker->WorkerId(), refs);
+    dependency_manager_.StartOrUpdateWaitRequest(associated_worker->WorkerId(), refs, Priority());
 
     // Add this worker to the listeners for the object ID.
     {

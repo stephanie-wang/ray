@@ -1224,13 +1224,14 @@ Status CoreWorker::CreateOwned(const std::shared_ptr<Buffer> &metadata,
 Status CoreWorker::CreateExisting(const std::shared_ptr<Buffer> &metadata,
                                   const size_t data_size, const ObjectID &object_id,
                                   const rpc::Address &owner_address,
+                                  const Priority &priority,
                                   std::shared_ptr<Buffer> *data, bool created_by_worker) {
   if (options_.is_local_mode) {
     return Status::NotImplemented(
         "Creating an object with a pre-existing ObjectID is not supported in local "
         "mode");
   } else {
-    return plasma_store_provider_->Create(metadata, data_size, object_id, owner_address, Priority(),
+    return plasma_store_provider_->Create(metadata, data_size, object_id, owner_address, priority,
                                           data, created_by_worker);
   }
 }
@@ -1312,7 +1313,8 @@ Status CoreWorker::Get(const std::vector<ObjectID> &ids, const int64_t timeout_m
                                   timeout_ms - (current_time_ms() - start_time));
     }
     RAY_LOG(DEBUG) << "Plasma GET timeout " << local_timeout_ms;
-    RAY_RETURN_NOT_OK(plasma_store_provider_->Get(plasma_object_ids, local_timeout_ms,
+    Priority priority = reference_counter_->GetMinPriority(ids);
+    RAY_RETURN_NOT_OK(plasma_store_provider_->Get(plasma_object_ids, priority, local_timeout_ms,
                                                   worker_context_, &result_map,
                                                   &got_exception));
   }
@@ -2509,7 +2511,7 @@ Status CoreWorker::GetAndPinArgsForExecutor(const TaskSpecification &task,
     RAY_RETURN_NOT_OK(
         memory_store_->Get(by_ref_ids, -1, worker_context_, &result_map, &got_exception));
   } else {
-    RAY_RETURN_NOT_OK(plasma_store_provider_->Get(by_ref_ids, -1, worker_context_,
+    RAY_RETURN_NOT_OK(plasma_store_provider_->Get(by_ref_ids, task.GetPriority(), -1, worker_context_,
                                                   &result_map, &got_exception));
   }
   for (const auto &it : result_map) {
@@ -3096,14 +3098,18 @@ void CoreWorker::HandleRestoreSpilledObjects(
     for (const auto &id_binary : request.object_ids_to_restore()) {
       object_ids_to_restore.push_back(ObjectID::FromBinary(id_binary));
     }
+    RAY_CHECK(object_ids_to_restore.size() == 1) << "Asked to restore " << object_ids_to_restore.size() << " objects";
     // Get a list of spilled_object_urls.
     std::vector<std::string> spilled_objects_url;
     spilled_objects_url.reserve(request.spilled_objects_url_size());
     for (const auto &url : request.spilled_objects_url()) {
       spilled_objects_url.push_back(url);
     }
+    Priority priority;
+    priority.score = VectorFromProtobuf<int>(request.priority());
+    RAY_LOG(DEBUG) << "Restoring object " << object_ids_to_restore[0] << " with priority " << priority;
     auto total =
-        options_.restore_spilled_objects(object_ids_to_restore, spilled_objects_url);
+        options_.restore_spilled_objects(object_ids_to_restore, priority, spilled_objects_url);
     reply->set_bytes_restored_total(total);
     send_reply_callback(Status::OK(), nullptr, nullptr);
   } else {

@@ -247,15 +247,19 @@ def test_spill_objects_automatically(object_spilling_config, shutdown_only):
     solution_buffer = []
     buffer_length = 100
 
+    @ray.remote
+    def put():
+        multiplier = random.choice([1, 2, 3])
+        arr = np.random.rand(multiplier * 1024 * 1024)
+        return arr
+
     # Create objects of more than 800 MiB.
     for _ in range(buffer_length):
         ref = None
         while ref is None:
-            multiplier = random.choice([1, 2, 3])
-            arr = np.random.rand(multiplier * 1024 * 1024)
-            ref = ray.put(arr)
+            ref = put.remote()
             replay_buffer.append(ref)
-            solution_buffer.append(arr)
+            solution_buffer.append(np.copy(ray.get(ref)))
     print("spill done.")
     # randomly sample objects
     for _ in range(1000):

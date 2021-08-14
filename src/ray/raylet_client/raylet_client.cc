@@ -183,13 +183,16 @@ Status raylet::RayletClient::TaskDone() {
 
 Status raylet::RayletClient::FetchOrReconstruct(
     const std::vector<ObjectID> &object_ids,
-    const std::vector<rpc::Address> &owner_addresses, bool fetch_only,
+    const std::vector<rpc::Address> &owner_addresses,
+    const Priority &priority, bool fetch_only,
     bool mark_worker_blocked, const TaskID &current_task_id) {
   RAY_CHECK(object_ids.size() == owner_addresses.size());
   flatbuffers::FlatBufferBuilder fbb;
   auto object_ids_message = to_flatbuf(fbb, object_ids);
   auto message = protocol::CreateFetchOrReconstruct(
-      fbb, object_ids_message, AddressesToFlatbuffer(fbb, owner_addresses), fetch_only,
+      fbb, object_ids_message, AddressesToFlatbuffer(fbb, owner_addresses),
+      fbb.CreateVector(priority.score.data(), priority.score.size()),
+      fetch_only,
       mark_worker_blocked, to_flatbuf(fbb, current_task_id));
   fbb.Finish(message);
   return conn_->WriteMessage(MessageType::FetchOrReconstruct, &fbb);
@@ -247,7 +250,8 @@ Status raylet::RayletClient::Wait(const std::vector<ObjectID> &object_ids,
 }
 
 Status raylet::RayletClient::WaitForDirectActorCallArgs(
-    const std::vector<rpc::ObjectReference> &references, int64_t tag) {
+    const std::vector<rpc::ObjectReference> &references, 
+    const Priority &priority, int64_t tag) {
   flatbuffers::FlatBufferBuilder fbb;
   std::vector<ObjectID> object_ids;
   std::vector<rpc::Address> owner_addresses;
@@ -256,7 +260,9 @@ Status raylet::RayletClient::WaitForDirectActorCallArgs(
     owner_addresses.push_back(ref.owner_address());
   }
   auto message = protocol::CreateWaitForDirectActorCallArgsRequest(
-      fbb, to_flatbuf(fbb, object_ids), AddressesToFlatbuffer(fbb, owner_addresses), tag);
+      fbb, to_flatbuf(fbb, object_ids), AddressesToFlatbuffer(fbb, owner_addresses),
+      fbb.CreateVector(priority.score.data(), priority.score.size()),
+      tag);
   fbb.Finish(message);
   return conn_->WriteMessage(MessageType::WaitForDirectActorCallArgsRequest, &fbb);
 }

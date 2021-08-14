@@ -371,7 +371,7 @@ std::string LocalObjectManager::GetSpilledObjectURL(const ObjectID &object_id) {
 }
 
 void LocalObjectManager::AsyncRestoreSpilledObject(
-    const ObjectID &object_id, const std::string &object_url,
+    const ObjectID &object_id, const Priority &priority, const std::string &object_url,
     std::function<void(const ray::Status &)> callback) {
   if (objects_pending_restore_.count(object_id) > 0) {
     // If the same object is restoring, we dedup here.
@@ -380,13 +380,16 @@ void LocalObjectManager::AsyncRestoreSpilledObject(
 
   RAY_CHECK(objects_pending_restore_.emplace(object_id).second)
       << "Object dedupe wasn't done properly. Please report if you see this issue.";
-  io_worker_pool_.PopRestoreWorker([this, object_id, object_url, callback](
+  io_worker_pool_.PopRestoreWorker([this, object_id, priority, object_url, callback](
                                        std::shared_ptr<WorkerInterface> io_worker) {
     auto start_time = absl::GetCurrentTimeNanos();
     RAY_LOG(DEBUG) << "Sending restore spilled object request";
     rpc::RestoreSpilledObjectsRequest request;
     request.add_spilled_objects_url(std::move(object_url));
     request.add_object_ids_to_restore(object_id.Binary());
+    for (const auto &i : priority.score) {
+      request.add_priority(i);
+    }
     io_worker->rpc_client()->RestoreSpilledObjects(
         request,
         [this, start_time, object_id, callback, io_worker](

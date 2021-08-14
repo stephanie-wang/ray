@@ -42,18 +42,20 @@ void PullManager::Pull(const TaskKey &task_key,
       deduplicated.push_back(ref);
     }
   }
-  Queue::iterator bundle_it;
+  std::pair<Queue::iterator, bool> bundle_inserted;
   if (prio == BundlePriority::GET_REQUEST) {
-    bundle_it =
-        get_request_bundles_.emplace(task_key, std::move(deduplicated)).first;
+    bundle_inserted =
+        get_request_bundles_.emplace(task_key, std::move(deduplicated));
   } else if (prio == BundlePriority::WAIT_REQUEST) {
-    bundle_it =
-        wait_request_bundles_.emplace(task_key, std::move(deduplicated)).first;
+    bundle_inserted =
+        wait_request_bundles_.emplace(task_key, std::move(deduplicated));
   } else {
     RAY_CHECK(prio == BundlePriority::TASK_ARGS);
-    bundle_it =
-        task_argument_bundles_.emplace(task_key, std::move(deduplicated)).first;
+    bundle_inserted =
+        task_argument_bundles_.emplace(task_key, std::move(deduplicated));
   }
+  RAY_CHECK(bundle_inserted.second) << "Duplicate task key requested from PullManager " << task_key;
+  auto bundle_it = bundle_inserted.first;
   RAY_LOG(DEBUG) << "Start pull request " << bundle_it->first
                  << ". Bundle size: " << bundle_it->second.objects.size();
 
@@ -491,7 +493,8 @@ void PullManager::TryToMakeObjectLocal(const ObjectID &object_id) {
       (request.spilled_node_id.IsNil() || request.spilled_node_id == self_node_id_);
   if (can_restore_directly) {
     UpdateRetryTimer(request, object_id);
-    restore_spilled_object_(object_id, request.spilled_url,
+    Priority priority = std::min_element(request.bundle_request_ids.begin(), request.bundle_request_ids.end())->first;
+    restore_spilled_object_(object_id, priority, request.spilled_url,
                             [object_id](const ray::Status &status) {
                               if (!status.ok()) {
                                 RAY_LOG(ERROR) << "Object restore for " << object_id

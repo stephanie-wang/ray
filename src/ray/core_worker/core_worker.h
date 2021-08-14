@@ -157,7 +157,7 @@ struct CoreWorkerOptions {
                                          const std::vector<std::string> &)>
       spill_objects;
   /// Application-language callback to restore objects from external storage.
-  std::function<int64_t(const std::vector<ObjectID> &, const std::vector<std::string> &)>
+  std::function<int64_t(const std::vector<ObjectID> &, const Priority &priority, const std::vector<std::string> &)>
       restore_spilled_objects;
   /// Application-language callback to delete objects from external storage.
   std::function<void(const std::vector<std::string> &, rpc::WorkerType)>
@@ -562,6 +562,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   /// \return Status.
   Status CreateExisting(const std::shared_ptr<Buffer> &metadata, const size_t data_size,
                         const ObjectID &object_id, const rpc::Address &owner_address,
+                        const Priority &priority,
                         std::shared_ptr<Buffer> *data, bool created_by_worker);
 
   /// Finalize placing an object into the object store. This should be called after

@@ -311,7 +311,9 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// \return Void.
   void AsyncResolveObjects(const std::shared_ptr<ClientConnection> &client,
                            const std::vector<rpc::ObjectReference> &required_object_refs,
-                           const TaskID &current_task_id, bool ray_get,
+                           const TaskID &current_task_id,
+                           const Priority &priority,
+                           bool ray_get,
                            bool mark_worker_blocked);
 
   /// Handle end of a blocking object get. This could be a task assigned to a

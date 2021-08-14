@@ -36,11 +36,12 @@ void DependencyManager::RemoveObjectIfNotNeeded(
 
 absl::flat_hash_map<ObjectID, DependencyManager::ObjectDependencies>::iterator
 DependencyManager::GetOrInsertRequiredObject(const ObjectID &object_id,
-                                             const rpc::ObjectReference &ref) {
+                                             const rpc::ObjectReference &ref,
+                                             const Priority &priority) {
   auto it = required_objects_.find(object_id);
   if (it == required_objects_.end()) {
-    const auto key = TaskKey(Priority(), ObjectID::FromRandom().TaskId());
-    // TODO(memory): Fill in priority.
+    // Use a random task ID for each new request to avoid duplication.
+    const auto key = TaskKey(priority, ObjectID::FromRandom().TaskId());
     it = required_objects_.emplace(object_id, ObjectDependencies(key, ref)).first;
   }
   return it;
@@ -48,7 +49,8 @@ DependencyManager::GetOrInsertRequiredObject(const ObjectID &object_id,
 
 void DependencyManager::StartOrUpdateWaitRequest(
     const WorkerID &worker_id,
-    const std::vector<rpc::ObjectReference> &required_objects) {
+    const std::vector<rpc::ObjectReference> &required_objects,
+    const Priority &priority) {
   RAY_LOG(DEBUG) << "Starting wait request for worker " << worker_id;
   auto &wait_request = wait_requests_[worker_id];
   for (const auto &ref : required_objects) {
@@ -61,7 +63,7 @@ void DependencyManager::StartOrUpdateWaitRequest(
     if (wait_request.insert(obj_id).second) {
       RAY_LOG(DEBUG) << "Worker " << worker_id << " called ray.wait on non-local object "
                      << obj_id;
-      auto it = GetOrInsertRequiredObject(obj_id, ref);
+      auto it = GetOrInsertRequiredObject(obj_id, ref, priority);
       it->second.dependent_wait_requests.insert(worker_id);
       if (!it->second.pulling) {
         object_manager_.Pull(it->second.wait_request_id, {ref}, BundlePriority::WAIT_REQUEST);
@@ -97,7 +99,8 @@ void DependencyManager::CancelWaitRequest(const WorkerID &worker_id) {
 
 void DependencyManager::StartOrUpdateGetRequest(
     const WorkerID &worker_id,
-    const std::vector<rpc::ObjectReference> &required_objects) {
+    const std::vector<rpc::ObjectReference> &required_objects,
+    const Priority &priority) {
   RAY_LOG(DEBUG) << "Starting get request for worker " << worker_id;
   auto &get_request = get_requests_[worker_id];
   bool modified = false;
@@ -105,7 +108,7 @@ void DependencyManager::StartOrUpdateGetRequest(
     const auto obj_id = ObjectRefToId(ref);
     if (get_request.first.insert(obj_id).second) {
       RAY_LOG(DEBUG) << "Worker " << worker_id << " called ray.get on object " << obj_id;
-      auto it = GetOrInsertRequiredObject(obj_id, ref);
+      auto it = GetOrInsertRequiredObject(obj_id, ref, priority);
       it->second.dependent_get_requests.insert(worker_id);
       modified = true;
     }
@@ -121,7 +124,7 @@ void DependencyManager::StartOrUpdateGetRequest(
     // Pull the new dependencies before canceling the old request, in case some
     // of the old dependencies are still being fetched.
     // // TODO(memory): Fill in priority.
-    TaskKey new_request_id(Priority(0), ObjectID::FromRandom().TaskId());
+    TaskKey new_request_id(priority, ObjectID::FromRandom().TaskId());
     object_manager_.Pull(new_request_id, refs, BundlePriority::GET_REQUEST);
     if (!get_request.second.second.IsNil()) {
       RAY_LOG(DEBUG) << "Canceling pull for get request from worker " << worker_id
@@ -174,7 +177,7 @@ bool DependencyManager::RequestTaskDependencies(
     const auto obj_id = ObjectRefToId(ref);
     RAY_LOG(DEBUG) << "Task " << task_id << " blocked on object " << obj_id;
 
-    auto it = GetOrInsertRequiredObject(obj_id, ref);
+    auto it = GetOrInsertRequiredObject(obj_id, ref, task_key.first);
     it->second.dependent_tasks.insert(task_id);
   }
 

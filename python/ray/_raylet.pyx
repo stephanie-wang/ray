@@ -55,6 +55,7 @@ from ray.includes.common cimport (
     CTaskArgByValue,
     CTaskType,
     CPlacementStrategy,
+    CPriority,
     CRayFunction,
     CWorkerType,
     CJobConfig,
@@ -746,6 +747,7 @@ cdef c_vector[c_string] spill_objects_handler(
 
 cdef int64_t restore_spilled_objects_handler(
         const c_vector[CObjectID]& object_ids_to_restore,
+        const CPriority &c_priority,
         const c_vector[c_string]& object_urls) nogil:
     cdef:
         int64_t bytes_restored = 0
@@ -760,7 +762,7 @@ cdef int64_t restore_spilled_objects_handler(
                     ray_constants.WORKER_PROCESS_TYPE_RESTORE_WORKER,
                     ray_constants.WORKER_PROCESS_TYPE_RESTORE_WORKER_IDLE):
                 bytes_restored = external_storage.restore_spilled_objects(
-                    object_refs, urls)
+                    object_refs, c_priority.score, urls)
         except Exception:
             exception_str = (
                 "An unexpected internal error occurred while the IO worker "
@@ -1064,6 +1066,7 @@ cdef class CoreWorker:
 
     cdef _create_put_buffer(self, shared_ptr[CBuffer] &metadata,
                             size_t data_size, ObjectRef object_ref,
+                            const CPriority &c_priority,
                             c_vector[CObjectID] contained_ids,
                             CObjectID *c_object_id, shared_ptr[CBuffer] *data,
                             c_bool created_by_worker,
@@ -1089,7 +1092,9 @@ cdef class CoreWorker:
             with nogil:
                 check_status(CCoreWorkerProcess.GetCoreWorker().CreateExisting(
                             metadata, data_size, c_object_id[0],
-                            dereference(c_owner_address), data,
+                            dereference(c_owner_address),
+                            c_priority,
+                            data,
                             created_by_worker))
 
         # If data is nullptr, that means the ObjectRef already existed,
@@ -1115,7 +1120,7 @@ cdef class CoreWorker:
 
     def put_file_like_object(
             self, metadata, data_size, file_like, ObjectRef object_ref,
-            owner_address):
+            owner_address, priority):
         """Directly create a new Plasma Store object from a file like
         object. This avoids extra memory copy.
 
@@ -1135,12 +1140,13 @@ cdef class CoreWorker:
             c_bool put_small_object_in_memory_store
             c_vector[CObjectID] c_object_id_vector
             unique_ptr[CAddress] c_owner_address
+            CPriority c_priority = CPriority(priority)
         # TODO(suquark): This method does not support put objects to
         # in memory store currently.
         metadata_buf = string_to_buffer(metadata)
-        # TODO(memory): Fill in the priority for restored objects.
         object_already_exists = self._create_put_buffer(
             metadata_buf, data_size, object_ref,
+            c_priority,
             ObjectRefsToVector([]),
             &c_object_id, &data_buf, False, owner_address)
         if object_already_exists:
@@ -1180,8 +1186,10 @@ cdef class CoreWorker:
         put_small_object_in_memory_store = (
             RayConfig.instance().put_small_object_in_memory_store())
         total_bytes = serialized_object.total_bytes
+        # TODO(memory): Don't need to fill in this priority?
         object_already_exists = self._create_put_buffer(
             metadata, total_bytes, object_ref,
+            CPriority(),
             ObjectRefsToVector(serialized_object.contained_object_refs),
             &c_object_id, &data, True, owner_address)
 

@@ -106,7 +106,7 @@ class LocalObjectManager {
   /// \param object_url The URL where the object is spilled.
   /// \param callback A callback to call when the restoration is done.
   /// Status will contain the error during restoration, if any.
-  void AsyncRestoreSpilledObject(const ObjectID &object_id, const std::string &object_url,
+  void AsyncRestoreSpilledObject(const ObjectID &object_id, const Priority &priority, const std::string &object_url,
                                  std::function<void(const ray::Status &)> callback);
 
   /// Clear any freed objects. This will trigger the callback for freed

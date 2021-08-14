@@ -137,7 +137,8 @@ class CoreWorkerPlasmaStoreProvider {
   /// argument to Get to retrieve the object data.
   Status Release(const ObjectID &object_id);
 
-  Status Get(const absl::flat_hash_set<ObjectID> &object_ids, int64_t timeout_ms,
+  Status Get(const absl::flat_hash_set<ObjectID> &object_ids,
+             const Priority &priority, int64_t timeout_ms,
              const WorkerContext &ctx,
              absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> *results,
              bool *got_exception);
@@ -189,6 +190,7 @@ class CoreWorkerPlasmaStoreProvider {
   /// \return Status.
   Status FetchAndGetFromPlasmaStore(
       absl::flat_hash_set<ObjectID> &remaining, const std::vector<ObjectID> &batch_ids,
+      const Priority &priority,
       int64_t timeout_ms, bool fetch_only, bool in_direct_call_task,
       const TaskID &task_id,
       absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> *results,

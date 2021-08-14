@@ -82,7 +82,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
   /// \return Void.
   void StartOrUpdateWaitRequest(
       const WorkerID &worker_id,
-      const std::vector<rpc::ObjectReference> &required_objects);
+      const std::vector<rpc::ObjectReference> &required_objects,
+      const Priority &priority);
 
   /// Cancel a worker's `ray.wait` request. We will no longer attempt to fetch
   /// any objects that this worker requested previously, if no other task or
@@ -104,7 +105,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
   /// \param required_objects The objects required by the worker.
   /// \return Void.
   void StartOrUpdateGetRequest(const WorkerID &worker_id,
-                               const std::vector<rpc::ObjectReference> &required_objects);
+                               const std::vector<rpc::ObjectReference> &required_objects,
+                               const Priority &priority);
 
   /// Cancel a worker's `ray.get` request. We will no longer attempt to fetch
   /// any objects that this worker requested previously, if no other task or
@@ -216,7 +218,8 @@ class DependencyManager : public TaskDependencyManagerInterface {
 
   /// Start tracking an object that is needed by a worker and/or queued task.
   absl::flat_hash_map<ObjectID, ObjectDependencies>::iterator GetOrInsertRequiredObject(
-      const ObjectID &object_id, const rpc::ObjectReference &ref);
+      const ObjectID &object_id, const rpc::ObjectReference &ref,
+      const Priority &priority);
 
   /// The object manager, used to fetch required objects from remote nodes.
   ObjectManagerInterface &object_manager_;
