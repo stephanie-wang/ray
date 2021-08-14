@@ -846,7 +846,6 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     if (request->try_immediately()) {
       RAY_LOG(DEBUG) << "Received request to create object " << object_id
                      << " immediately with priority " << priority;
-      // TODO(memory): Should try request with the given priority.
       auto result_error = create_request_queue_.TryRequestImmediately(
           key,
           object_id, client, handle_create, object_size);

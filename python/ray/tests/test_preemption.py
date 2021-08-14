@@ -34,7 +34,7 @@ def f(c):
 def test_simple(ray_start_cluster):
     config = {
         "lineage_pinning_enabled": True,
-        "max_direct_call_object_size": 10,
+        "max_direct_call_object_size": 0,
     }
     cluster = ray_start_cluster
     # Head node with no resources.
@@ -63,7 +63,7 @@ def test_simple(ray_start_cluster):
 def test_deps(ray_start_cluster):
     config = {
         "lineage_pinning_enabled": True,
-        "max_direct_call_object_size": 10,
+        "max_direct_call_object_size": 0,
         "worker_lease_timeout_milliseconds": 0,
     }
     cluster = ray_start_cluster
@@ -98,7 +98,7 @@ def test_deps(ray_start_cluster):
 def test_deps_pending(ray_start_cluster):
     config = {
         "lineage_pinning_enabled": True,
-        "max_direct_call_object_size": 10,
+        "max_direct_call_object_size": 0,
         "worker_lease_timeout_milliseconds": 0,
     }
     cluster = ray_start_cluster
@@ -160,7 +160,7 @@ def test_deps_pending(ray_start_cluster):
 def test_deps_pending_on_remote_node(ray_start_cluster):
     config = {
         "lineage_pinning_enabled": True,
-        "max_direct_call_object_size": 10,
+        "max_direct_call_object_size": 0,
         "worker_lease_timeout_milliseconds": 0,
     }
     cluster = ray_start_cluster

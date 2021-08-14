@@ -637,9 +637,18 @@ void PullManager::UnpinObject(const ObjectID &object_id) {
 
 int PullManager::NumActiveRequests() const { return object_pull_requests_.size(); }
 
-bool PullManager::IsObjectActive(const ObjectID &object_id) const {
+bool PullManager::IsObjectActive(const ObjectID &object_id, Priority *priority) const {
   absl::MutexLock lock(&active_objects_mu_);
-  return active_object_pull_requests_.count(object_id) == 1;
+  auto it = active_object_pull_requests_.find(object_id);
+  if (it == active_object_pull_requests_.end()) {
+    return false;
+  }
+  if (priority) {
+    // Pulled objects are assigned priority according to the highest priority
+    // task that requires it.
+    *priority = std::min_element(it->second.begin(), it->second.end())->first;
+  }
+  return true;
 }
 
 bool PullManager::PullRequestActiveOrWaitingForMetadata(const TaskKey &request_id) const {

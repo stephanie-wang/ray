@@ -104,7 +104,7 @@ class ObjectBufferPool {
   /// An IOError status is returned if object creation on the store client fails,
   /// or if create is invoked consecutively on the same chunk
   /// (with no intermediate AbortCreateChunk).
-  ray::Status CreateChunk(const ObjectID &object_id, const rpc::Address &owner_address,
+  ray::Status CreateChunk(const ObjectID &object_id, const Priority &priority, const rpc::Address &owner_address,
                           uint64_t data_size, uint64_t metadata_size,
                           uint64_t chunk_index);
 

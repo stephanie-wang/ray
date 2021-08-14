@@ -770,12 +770,13 @@ bool ObjectManager::ReceiveObjectChunk(const NodeID &node_id, const ObjectID &ob
                  << ", chunk data size: " << data.size()
                  << ", object size: " << data_size;
 
-  if (!pull_manager_->IsObjectActive(object_id)) {
+  Priority priority;
+  if (!pull_manager_->IsObjectActive(object_id, &priority)) {
     num_chunks_received_cancelled_++;
     // This object is no longer being actively pulled. Do not create the object.
     return false;
   }
-  auto chunk_status = buffer_pool_.CreateChunk(object_id, owner_address, data_size,
+  auto chunk_status = buffer_pool_.CreateChunk(object_id, priority, owner_address, data_size,
                                                metadata_size, chunk_index);
   if (!pull_manager_->IsObjectActive(object_id)) {
     num_chunks_received_cancelled_++;

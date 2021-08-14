@@ -129,7 +129,8 @@ class PullManager {
   /// node (but may not be actively pulled due to throttling).
   ///
   /// This method (and this method only) is thread-safe.
-  bool IsObjectActive(const ObjectID &object_id) const;
+  bool IsObjectActive(const ObjectID &object_id,
+      Priority *priority = nullptr) const;
 
   /// Check whether the pull request is currently active or waiting for object
   /// size information. If this returns false, then the pull request is most
