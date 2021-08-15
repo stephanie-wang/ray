@@ -59,7 +59,8 @@ class PlasmaStore {
               std::function<void()> object_store_full_callback,
               ray::AddObjectCallback add_object_callback,
               ray::DeleteObjectCallback delete_object_callback,
-              std::function<void(const ObjectID &oid)> release_object_references_callback);
+              std::function<void(const ObjectID &oid)> release_object_references_callback,
+              const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued);
 
   ~PlasmaStore();
 
@@ -224,6 +225,8 @@ class PlasmaStore {
                                         bool fallback_allocator, PlasmaObject *object,
                                         bool *spilling_required);
 
+  PlasmaError HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size);
+
   void ReplyToCreateClient(const std::shared_ptr<Client> &client,
                            const ObjectID &object_id, uint64_t req_id);
 
@@ -350,9 +353,10 @@ class PlasmaStore {
   /// A running total of the objects that have ever been created on this node.
   size_t num_bytes_created_total_ = 0;
 
-  /// Callback to the raylet to:
-  /// - TODO(memory): release any copies that are being held for object transfer?
   const std::function<void(const ObjectID &object_id)> release_object_references_;
+
+  /// Callback to the raylet to:
+  const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued_;
 };
 
 }  // namespace plasma

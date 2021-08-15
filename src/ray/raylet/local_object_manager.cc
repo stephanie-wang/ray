@@ -160,9 +160,9 @@ bool LocalObjectManager::SpillObjectsOfSize(int64_t num_bytes_to_spill) {
     auto start_time = absl::GetCurrentTimeNanos();
     SpillObjectsInternal(objects_to_spill, [this, bytes_to_spill, objects_to_spill,
                                             start_time](const Status &status) {
-      if (!status.ok()) {
-        RAY_LOG(DEBUG) << "Failed to spill objects: " << status.ToString();
-      } else {
+      //if (!status.ok()) {
+      //  RAY_LOG(DEBUG) << "Failed to spill objects: " << status.ToString();
+      //} else {
         auto now = absl::GetCurrentTimeNanos();
         RAY_LOG(DEBUG) << "Spilled " << bytes_to_spill << " bytes in "
                        << (now - start_time) / 1e6 << "ms";
@@ -181,7 +181,7 @@ bool LocalObjectManager::SpillObjectsOfSize(int64_t num_bytes_to_spill) {
                         << " MiB/s";
         }
         last_spill_finish_ns_ = now;
-      }
+      //}
     });
     return true;
   }

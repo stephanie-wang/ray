@@ -168,6 +168,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// Calculate normal task resources.
   ResourceSet CalcNormalTaskResources() const override;
 
+  bool HasHigherPriorityTaskQueued(const Priority &priority) const override;
+
  private:
   /// (Step 2) For each task in tasks_to_schedule_, pick a node in the system
   /// (local or remote) that has enough resources available to run the task, if

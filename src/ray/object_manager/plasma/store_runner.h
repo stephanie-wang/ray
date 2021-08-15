@@ -18,7 +18,8 @@ class PlasmaStoreRunner {
              std::function<void()> object_store_full_callback,
              ray::AddObjectCallback add_object_callback,
              ray::DeleteObjectCallback delete_object_callback,
-             std::function<void(const ObjectID &object_id)> release_object_refs_callback);
+             std::function<void(const ObjectID &object_id)> release_object_refs_callback,
+             const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued);
   void Stop();
 
   bool IsPlasmaObjectSpillable(const ObjectID &object_id);

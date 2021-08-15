@@ -139,7 +139,8 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, std::string dire
                          std::function<void()> object_store_full_callback,
                          ray::AddObjectCallback add_object_callback,
                          ray::DeleteObjectCallback delete_object_callback,
-                         std::function<void(const ObjectID &oid)> release_object_references_callback)
+                         std::function<void(const ObjectID &oid)> release_object_references_callback,
+                         const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued)
     : io_context_(main_service),
       socket_name_(socket_name),
       acceptor_(main_service, ParseUrlEndpoint(socket_name)),
@@ -158,7 +159,8 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, std::string dire
           /*get_time=*/
           []() { return absl::GetCurrentTimeNanos(); },
           [this]() { return GetDebugDump(); }),
-      release_object_references_(release_object_references_callback) {
+      release_object_references_(release_object_references_callback),
+      check_higher_priority_tasks_queued_(check_higher_priority_tasks_queued) {
   store_info_.directory = directory;
   store_info_.fallback_directory = fallback_directory;
   store_info_.hugepages_enabled = hugepages_enabled;
@@ -309,6 +311,9 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
   if (error == PlasmaError::OutOfMemory) {
     RAY_LOG(DEBUG) << "Not enough memory to create the object " << object_id
                    << ", data_size=" << data_size << ", metadata_size=" << metadata_size;
+
+
+
   }
 
   // Trigger object spilling if current usage is above the specified threshold.
@@ -326,6 +331,27 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
     }
   }
   return error;
+}
+
+PlasmaError PlasmaStore::HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t size) {
+  //int64_t required_space =
+  //    PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
+
+  // TODO(memory): Try to find a lower priority local object that we can
+  // forcibly evict to make room for this one.
+
+  // TODO(memory): If there is a higher priority ready task in the local task
+  // queue that could run instead, preempt the task is trying to create this
+  // object.
+  bool should_preempt = check_higher_priority_tasks_queued_(priority);
+  if (should_preempt) {
+    RAY_LOG(DEBUG) << "There is at least one ready task with a higher priority than object " << object_id << " " << priority;
+  }
+  // TODO(memory): We should only preempt this object if we know that this
+  // object is created by a task, not object transfer, etc.
+
+  // Otherwise, we should spill existing objects to make room for this object.
+  return PlasmaError::OutOfMemory;
 }
 
 PlasmaError PlasmaStore::CreateObject(const ObjectID &object_id,

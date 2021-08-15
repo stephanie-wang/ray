@@ -1182,5 +1182,10 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
   return total_normal_task_resources;
 }
 
+bool ClusterTaskManager::HasHigherPriorityTaskQueued(const Priority &priority) const {
+  // TODO(memory)
+  return false;
+}
+
 }  // namespace raylet
 }  // namespace ray

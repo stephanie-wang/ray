@@ -123,6 +123,8 @@ class ClusterTaskManagerInterface {
 
   /// Calculate normal task resources.
   virtual ResourceSet CalcNormalTaskResources() const = 0;
+
+  virtual bool HasHigherPriorityTaskQueued(const Priority &priority) const = 0;
 };
 }  // namespace raylet
 }  // namespace ray

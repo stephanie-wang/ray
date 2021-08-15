@@ -252,6 +252,10 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             io_service_.post(
                 [this, object_id]() { GetLocalObjectManager().PreemptObject(object_id); },
                 "NodeManager.PreemptObject");
+          },
+          /*check_higher_priority_tasks_queued=*/
+          [this](const Priority &priority) {
+            return cluster_task_manager_->HasHigherPriorityTaskQueued(priority);
           }),
       periodical_runner_(io_service),
       report_resources_period_ms_(config.report_resources_period_ms),
