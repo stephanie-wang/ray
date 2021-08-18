@@ -6,6 +6,7 @@
 
 #include "ray/common/id.h"
 #include "ray/common/task/task_priority.h"
+#include "src/ray/protobuf/common.pb.h"
 
 namespace ray {
 
@@ -40,5 +41,7 @@ using AddObjectCallback = std::function<void(const ObjectInfo &)>;
 
 // A callback to call when an object is removed from the shared memory store.
 using DeleteObjectCallback = std::function<void(const ObjectID &)>;
+
+using PreemptObjectCallback = std::function<void(const rpc::ObjectReference &object_ref, std::function<void(bool)>)>;
 
 }  // namespace ray

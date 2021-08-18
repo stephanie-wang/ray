@@ -302,6 +302,8 @@ class ObjectID : public BaseID<ObjectID> {
   /// \return The computed object ID.
   static ObjectID ForActorHandle(const ActorID &actor_id);
 
+  bool IsActorHandleId() const;
+
   MSGPACK_DEFINE(id_);
 
  private:

@@ -10,7 +10,9 @@ import ray
 from ray.test_utils import (
     wait_for_condition,
     wait_for_pid_to_exit,
+    SignalActor
 )
+from ray.internal.internal_api import memory_summary
 
 SIGKILL = signal.SIGKILL if sys.platform != "win32" else signal.SIGTERM
 
@@ -218,6 +220,43 @@ def test_deps_pending_on_remote_node(ray_start_cluster):
     # Make sure the task actually reran.
     count = ray.get(c.get.remote())
     assert count == 2
+
+
+def test_automatic_simple(ray_start_cluster):
+    config = {
+        "lineage_pinning_enabled": True,
+    }
+    cluster = ray_start_cluster
+    # Head node with no resources.
+    cluster.add_node(num_cpus=2, _system_config=config,
+            object_store_memory=10 ** 8)
+
+    ray.init(cluster.address)
+
+    s = SignalActor.remote()
+
+    @ray.remote
+    def f(c, s=None):
+        c.inc.remote()
+        if s is not None:
+            ray.get(s.wait.remote())
+        return np.zeros(8 * 10**7, dtype=np.uint8)
+
+    @ray.remote
+    def consume(x):
+        return
+
+    c = Counter.remote()
+    long_task = consume.remote(f.remote(c, s))
+    short_task = f.remote(c)
+
+    ray.get(short_task)
+    s.send.remote(clear=True)
+    ray.get(long_task)
+    ray.get(short_task)
+
+    print(memory_summary(stats_only=True))
+
 
 if __name__ == "__main__":
     import pytest

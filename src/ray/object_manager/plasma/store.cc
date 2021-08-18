@@ -42,6 +42,7 @@
 #include <unordered_set>
 #include <utility>
 #include <vector>
+#include <queue>
 
 #include "absl/container/flat_hash_set.h"
 #include "ray/common/asio/asio_util.h"
@@ -139,7 +140,7 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, std::string dire
                          std::function<void()> object_store_full_callback,
                          ray::AddObjectCallback add_object_callback,
                          ray::DeleteObjectCallback delete_object_callback,
-                         std::function<void(const ObjectID &oid)> release_object_references_callback,
+                         const ray::PreemptObjectCallback &release_object_references_callback,
                          const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued)
     : io_context_(main_service),
       socket_name_(socket_name),
@@ -306,14 +307,12 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
                     &data_size, &metadata_size, &source,
                     &device_num);
   auto error = CreateObject(object_id, owner_raylet_id, owner_ip_address, owner_port,
-                            owner_worker_id, data_size, metadata_size, source, device_num,
+                            owner_worker_id, priority, data_size, metadata_size, source, device_num,
                             client, fallback_allocator, object);
   if (error == PlasmaError::OutOfMemory) {
     RAY_LOG(DEBUG) << "Not enough memory to create the object " << object_id
                    << ", data_size=" << data_size << ", metadata_size=" << metadata_size;
-
-
-
+    return HandleObjectOom(object_id, priority, data_size + metadata_size);
   }
 
   // Trigger object spilling if current usage is above the specified threshold.
@@ -334,15 +333,30 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
 }
 
 PlasmaError PlasmaStore::HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t size) {
-  //int64_t required_space =
-  //    PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
+  int64_t required_space =
+      PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
 
-  // TODO(memory): Try to find a lower priority local object that we can
-  // forcibly evict to make room for this one.
+  // Try to find a lower priority local object that we can forcibly evict to
+  // make room for this one.
+  std::vector<ObjectID> candidates;
+  int64_t max_preemptible_bytes = 0;
+  for (const auto &entry : store_info_.objects) {
+    RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
+    if (priority < entry.second->priority && !entry.second->preemption_failed) {
+      candidates.push_back(entry.first);
+      max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
+    }
+  }
 
-  // TODO(memory): If there is a higher priority ready task in the local task
-  // queue that could run instead, preempt the task is trying to create this
-  // object.
+  if (max_preemptible_bytes >= required_space) {
+    for (const auto &object_id : candidates) {
+      PreemptObject(object_id);
+    }
+    return PlasmaError::SpacePending;
+  }
+
+  // If there is a higher priority ready task in the local task queue that
+  // could run instead, preempt the task is trying to create this object.
   bool should_preempt = check_higher_priority_tasks_queued_(priority);
   if (should_preempt) {
     RAY_LOG(DEBUG) << "There is at least one ready task with a higher priority than object " << object_id << " " << priority;
@@ -357,12 +371,14 @@ PlasmaError PlasmaStore::HandleObjectOom(const ObjectID &object_id, const ray::P
 PlasmaError PlasmaStore::CreateObject(const ObjectID &object_id,
                                       const NodeID &owner_raylet_id,
                                       const std::string &owner_ip_address, int owner_port,
-                                      const WorkerID &owner_worker_id, int64_t data_size,
+                                      const WorkerID &owner_worker_id,
+                                      const ray::Priority &priority,
+                                      int64_t data_size,
                                       int64_t metadata_size, fb::ObjectSource source,
                                       int device_num,
                                       const std::shared_ptr<Client> &client,
                                       bool fallback_allocator, PlasmaObject *result) {
-  RAY_LOG(DEBUG) << "attempting to create object " << object_id << " size " << data_size;
+  RAY_LOG(DEBUG) << "attempting to create object " << object_id << " size " << data_size << " priority " << priority;
 
   auto entry = GetObjectTableEntry(&store_info_, object_id);
   if (entry != nullptr) {
@@ -408,6 +424,7 @@ PlasmaError PlasmaStore::CreateObject(const ObjectID &object_id,
   entry->create_time = std::time(nullptr);
   entry->construct_duration = -1;
   entry->source = source;
+  entry->priority = priority;
 
   result->store_fd = fd;
   result->data_offset = offset;
@@ -1050,10 +1067,35 @@ void PlasmaStore::PreemptObject(const ObjectID &object_id) {
     return;
   }
 
+  RAY_LOG(DEBUG) << "Preempting object " << object_id << " with priority " << entry->priority << " size " << entry->data_size;
   // Future Get requests will not be served if this flag is set.
   entry->preempted = true;
 
-  release_object_references_(object_id);
+  ray::rpc::ObjectReference ref;
+  ref.set_object_id(object_id.Binary());
+  auto addr = ref.mutable_owner_address();
+  addr->set_raylet_id(entry->owner_raylet_id.Binary());
+  addr->set_ip_address(entry->owner_ip_address);
+  addr->set_port(entry->owner_port);
+  addr->set_worker_id(entry->owner_worker_id.Binary());
+  auto callback = [this, object_id](bool success) {
+      io_context_.post([this, object_id, success]() {
+          HandleObjectPreempted(object_id, success);
+          });
+      };
+  release_object_references_(ref, callback);
+}
+
+void PlasmaStore::HandleObjectPreempted(const ObjectID &object_id, bool success) {
+  auto entry = GetObjectTableEntry(&store_info_, object_id);
+  if (entry == nullptr) {
+    return;
+  }
+
+  if (!success) {
+    entry->preempted = false;
+    entry->preemption_failed = true;
+  }
 }
 
 std::string PlasmaStore::GetDebugDump() const {

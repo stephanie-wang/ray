@@ -234,6 +234,14 @@ ObjectID ObjectID::ForActorHandle(const ActorID &actor_id) {
                              /*return_index=*/1);
 }
 
+bool ObjectID::IsActorHandleId() const {
+  static std::string nil_data(TaskID::kLength - ActorID::kLength, 0);
+  FillNil(&nil_data);
+  return (std::memcmp(id_, nil_data.data(), nil_data.size()) == 0);
+
+
+}
+
 ObjectID ObjectID::GenerateObjectId(const std::string &task_id_binary,
                                     ObjectIDIndexType object_index) {
   RAY_CHECK(task_id_binary.size() == TaskID::Size());

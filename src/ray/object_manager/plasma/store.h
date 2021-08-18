@@ -59,7 +59,7 @@ class PlasmaStore {
               std::function<void()> object_store_full_callback,
               ray::AddObjectCallback add_object_callback,
               ray::DeleteObjectCallback delete_object_callback,
-              std::function<void(const ObjectID &oid)> release_object_references_callback,
+              const ray::PreemptObjectCallback &release_object_references_callback,
               const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued);
 
   ~PlasmaStore();
@@ -101,7 +101,9 @@ class PlasmaStore {
   ///    plasma_release.
   PlasmaError CreateObject(const ObjectID &object_id, const NodeID &owner_raylet_id,
                            const std::string &owner_ip_address, int owner_port,
-                           const WorkerID &owner_worker_id, int64_t data_size,
+                           const WorkerID &owner_worker_id,
+                           const ray::Priority &priority,
+                           int64_t data_size,
                            int64_t metadata_size, plasma::flatbuf::ObjectSource source,
                            int device_num, const std::shared_ptr<Client> &client,
                            bool fallback_allocator, PlasmaObject *result);
@@ -258,6 +260,8 @@ class PlasmaStore {
 
   void PreemptObject(const ObjectID &object_id);
 
+  void HandleObjectPreempted(const ObjectID &object_id, bool success);
+
   // Start listening for clients.
   void DoAccept();
 
@@ -353,7 +357,7 @@ class PlasmaStore {
   /// A running total of the objects that have ever been created on this node.
   size_t num_bytes_created_total_ = 0;
 
-  const std::function<void(const ObjectID &object_id)> release_object_references_;
+  const ray::PreemptObjectCallback release_object_references_;
 
   /// Callback to the raylet to:
   const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued_;

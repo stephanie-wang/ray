@@ -248,9 +248,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return result;
           },
           /*release_refs_callback=*/
-          [this](const ObjectID &object_id) {
+          [this](const rpc::ObjectReference &ref, std::function<void(bool)> callback) {
             io_service_.post(
-                [this, object_id]() { GetLocalObjectManager().PreemptObject(object_id); },
+                [this, ref, callback]() { GetLocalObjectManager().PreemptObject(ref, callback); },
                 "NodeManager.PreemptObject");
           },
           /*check_higher_priority_tasks_queued=*/
@@ -2302,6 +2302,8 @@ rpc::ObjectStoreStats AccumulateStoreStats(
                                       cur_store.num_local_objects());
     store_stats.set_consumed_bytes(store_stats.consumed_bytes() +
                                    cur_store.consumed_bytes());
+    store_stats.set_num_preempted_objects(store_stats.num_preempted_objects() +
+        cur_store.num_preempted_objects());
   }
   return store_stats;
 }

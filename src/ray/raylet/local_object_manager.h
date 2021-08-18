@@ -143,7 +143,7 @@ class LocalObjectManager {
   /// Return the spilled object URL or the empty string.
   std::string GetSpilledObjectURL(const ObjectID &object_id);
 
-  void PreemptObject(const ObjectID &object_id);
+  void PreemptObject(const rpc::ObjectReference &object_ref, const std::function<void(bool)> &callback);
 
   std::string DebugString() const;
 
@@ -321,6 +321,8 @@ class LocalObjectManager {
 
   /// The last time a restore log finished.
   int64_t last_restore_log_ns_ = 0;
+
+  int64_t num_preempted_objects_ = 0;
 };
 
 };  // namespace raylet

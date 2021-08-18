@@ -29,7 +29,7 @@ ObjectStoreRunner::ObjectStoreRunner(const ObjectManagerConfig &config,
                                      std::function<void()> object_store_full_callback,
                                      AddObjectCallback add_object_callback,
                                      DeleteObjectCallback delete_object_callback,
-                                     std::function<void(const ObjectID &oid)> release_object_refs_callback,
+                                     const PreemptObjectCallback &release_object_refs_callback,
                                      const std::function<bool(const Priority &priority)> check_higher_priority_tasks_queued) {
   plasma::plasma_store_runner.reset(new plasma::PlasmaStoreRunner(
       config.store_socket_name, config.object_store_memory, config.huge_pages,
@@ -60,7 +60,7 @@ ObjectManager::ObjectManager(
     std::function<void()> object_store_full_callback,
     AddObjectCallback add_object_callback, DeleteObjectCallback delete_object_callback,
     std::function<std::unique_ptr<RayObject>(const ObjectID &object_id)> pin_object,
-    std::function<void(const ObjectID &oid)> release_object_refs_callback,
+    const PreemptObjectCallback &release_object_refs_callback,
     const std::function<bool(const Priority &priority)> check_higher_priority_tasks_queued)
     : main_service_(&main_service),
       self_node_id_(self_node_id),

@@ -82,7 +82,7 @@ void PlasmaStoreRunner::Start(ray::SpillObjectsCallback spill_objects_callback,
                               std::function<void()> object_store_full_callback,
                               ray::AddObjectCallback add_object_callback,
                               ray::DeleteObjectCallback delete_object_callback,
-                              std::function<void(const ObjectID &oid)> release_object_refs_callback,
+                              const ray::PreemptObjectCallback &release_object_refs_callback,
                               const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued) {
   SetThreadName("store.io");
   RAY_LOG(DEBUG) << "starting server listening on " << socket_name_;

@@ -82,6 +82,8 @@ enum PlasmaError:int {
   // the result of the same request twice. This is most likely due to a system
   // bug in the plasma store or caller.
   UnexpectedError,
+  // We are trying to make space for this object.
+  SpacePending,
 }
 
 // Plasma store messages

@@ -19,6 +19,10 @@
 namespace ray {
 
 bool ObjectRecoveryManager::RecoverObject(const ObjectID &object_id) {
+  if (object_id.IsActorHandleId()) {
+    return true;
+  }
+
   // Check the ReferenceCounter to see if there is a location for the object.
   bool owned_by_us = false;
   NodeID pinned_at;

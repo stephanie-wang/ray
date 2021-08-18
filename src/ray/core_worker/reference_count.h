@@ -593,7 +593,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
     const bool is_reconstructable = false;
 
     // ObjectIDs that depend on this object.
-    std::vector<ObjectID> dependent_obj_ids = {};
+    std::unordered_set<ObjectID> dependent_obj_ids = {};
 
     /// The local ref count for the ObjectID in the language frontend.
     size_t local_ref_count = 0;

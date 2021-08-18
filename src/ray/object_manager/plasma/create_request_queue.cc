@@ -103,6 +103,8 @@ Status CreateRequestQueue::ProcessRequest(bool fallback_allocator,
       request->create_callback(fallback_allocator, &request->result, spilling_required);
   if (request->error == PlasmaError::OutOfMemory) {
     return Status::ObjectStoreFull("");
+  } else if (request->error == PlasmaError::SpacePending) {
+    return Status::TransientObjectStoreFull("");
   } else {
     return Status::OK();
   }
@@ -124,6 +126,8 @@ Status CreateRequestQueue::ProcessRequests() {
       FinishRequest(request_it);
       // Reset the oom start time since the creation succeeds.
       oom_start_time_ns_ = -1;
+    } else if (status.IsTransientObjectStoreFull()) {
+      return status;
     } else {
       if (trigger_global_gc_) {
         trigger_global_gc_();

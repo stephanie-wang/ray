@@ -505,6 +505,7 @@ void LocalObjectManager::FillObjectSpillingStats(rpc::GetNodeStatsReply *reply) 
   stats->set_restored_bytes_total(restored_bytes_total_);
   stats->set_restored_objects_total(restored_objects_total_);
   stats->set_object_store_bytes_primary_copy(pinned_objects_size_);
+  stats->set_num_preempted_objects(num_preempted_objects_);
 }
 
 void LocalObjectManager::RecordObjectSpillingStats() const {
@@ -518,20 +519,31 @@ void LocalObjectManager::RecordObjectSpillingStats() const {
   }
 }
 
-void LocalObjectManager::PreemptObject(const ObjectID &object_id) {
+void LocalObjectManager::PreemptObject(const rpc::ObjectReference &object_ref, const std::function<void(bool)> &callback) {
+  const auto object_id = ObjectID::FromBinary(object_ref.object_id());
   auto it = pinned_objects_.find(object_id);
   // TODO(memory): Preemption currently assumes that every object copy is the
   // primary. Also it's possible for objects to go out of scope before we can
   // preempt.
-  RAY_CHECK(it != pinned_objects_.end());
+  if (it == pinned_objects_.end()) {
+    RAY_LOG(INFO) << "Tried to preempt object that is not pinned " << object_id;
+    callback(false);
+    return;
+  }
 
-  RAY_LOG(DEBUG) << "Sending request to preempt object " << object_id << " to owner " << it->second.second.worker_id();
+  num_preempted_objects_++;
+
+  // TODO(memory): Send owner another RPC once object has been released, instead of
+  // waiting for the location to be removed from the object table.
+  // TODO(memory): Do not evict LRU-cached copies of the object.
+  RAY_LOG(DEBUG) << "Sending request to preempt object " << object_id << " to owner";
   rpc::PreemptObjectRequest request;
   request.set_object_id(object_id.Binary());
   request.set_owner_worker_id(it->second.second.worker_id());
   auto owner_client = owner_client_pool_.GetOrConnect(it->second.second);
   owner_client->PreemptObject(
-      request, [](Status status, const rpc::PreemptObjectReply &reply) {
+      request, [callback](Status status, const rpc::PreemptObjectReply &reply) {
+      callback(true);
       });
 }
 

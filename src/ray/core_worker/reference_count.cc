@@ -1281,6 +1281,9 @@ int64_t ReferenceCounter::GetMaxDepth(const std::vector<ObjectID> &obj_ids) cons
   absl::MutexLock lock(&mutex_);
   int64_t max_depth = -1;
   for (const ObjectID &obj_id : obj_ids) {
+    if (obj_id.IsActorHandleId()) {
+      continue;
+    }
     auto it = object_id_refs_.find(obj_id);
     if (it != object_id_refs_.end()) {
       if (it->second.depth > max_depth) {
@@ -1295,6 +1298,9 @@ Priority ReferenceCounter::GetMinPriority(const std::vector<ObjectID> &obj_ids) 
   absl::MutexLock lock(&mutex_);
   Priority min_priority(0);
   for (const auto &obj_id : obj_ids) {
+    if (obj_id.IsActorHandleId()) {
+      continue;
+    }
     auto it = object_id_refs_.find(obj_id);
     if (it != object_id_refs_.end()) {
       if (it->second.priority < min_priority) {
@@ -1318,6 +1324,11 @@ std::vector<Priority> ReferenceCounter::PropagatePriority(const std::vector<Obje
     while (!queue.empty()) {
       auto obj_id = std::move(queue.front());
       queue.pop_front();
+
+      if (obj_id.IsActorHandleId()) {
+        continue;
+      }
+
       auto it = object_id_refs_.find(obj_id);
       if (it != object_id_refs_.end()) {
         if (it->second.priority.GetScore(depth) <= score) {
@@ -1394,10 +1405,12 @@ void ReferenceCounter::AddDependentObjectIds(const ObjectID &obj_id, const std::
   absl::MutexLock lock(&mutex_);
   auto it = object_id_refs_.find(obj_id);
   RAY_CHECK(it != object_id_refs_.end());
-  it->second.dependent_obj_ids.insert(
-      it->second.dependent_obj_ids.end(),
-      dependent_obj_ids.begin(),
-      dependent_obj_ids.end());
+  for (auto &dependent_id : dependent_obj_ids) {
+    if (dependent_id.IsActorHandleId()) {
+      continue;
+    }
+    it->second.dependent_obj_ids.insert(dependent_id);
+  }
 }
 
 std::unordered_set<TaskID> ReferenceCounter::GetDependentTaskIds(const ObjectID &object_id) const {

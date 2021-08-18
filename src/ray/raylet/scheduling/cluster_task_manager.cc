@@ -1183,7 +1183,10 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
 }
 
 bool ClusterTaskManager::HasHigherPriorityTaskQueued(const Priority &priority) const {
-  // TODO(memory)
+  // TODO(memory): Check whether this task could be spilled back to a different
+  // node. Attach object store memory requirement to task description.
+  // TODO(memory): Check whether there is a higher priority ready task in the local task
+  // queue that could run instead.
   return false;
 }
 

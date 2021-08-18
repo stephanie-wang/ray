@@ -222,6 +222,7 @@ void ReadCreateRequest(uint8_t *data, size_t size, ObjectID *object_id,
   *owner_ip_address = message->owner_ip_address()->str();
   *owner_port = message->owner_port();
   *owner_worker_id = WorkerID::FromBinary(message->owner_worker_id()->str());
+  priority->score.clear();
   for (size_t i = 0; i < message->priority()->size(); i++) {
     priority->score.push_back(message->priority()->Get(i));
   }

@@ -24,11 +24,11 @@
 #include <unordered_map>
 
 #include "ray/common/id.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/object_manager/plasma/compat.h"
 #include "ray/object_manager/plasma/plasma_generated.h"
 
 namespace plasma {
-
 using ray::NodeID;
 using ray::ObjectID;
 using ray::WorkerID;
@@ -84,8 +84,10 @@ struct ObjectTableEntry {
   ObjectState state;
   /// The source of the object. Used for debugging purposes.
   plasma::flatbuf::ObjectSource source;
+  ray::Priority priority;
 
   bool preempted = false;
+  bool preemption_failed = false;
 };
 
 /// Mapping from ObjectIDs to information about the object.
