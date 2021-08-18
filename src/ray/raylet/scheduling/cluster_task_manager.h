@@ -26,6 +26,9 @@ typedef std::tuple<Task, rpc::RequestWorkerLeaseReply *, std::function<void(void
 typedef std::function<boost::optional<rpc::GcsNodeInfo>(const NodeID &node_id)>
     NodeInfoGetter;
 
+using LeasedWorkerPool = std::unordered_map<WorkerID, std::pair<std::shared_ptr<WorkerInterface>, Priority>>;
+
+
 /// Manages the queuing and dispatching of tasks. The logic is as follows:
 /// 1. Queue tasks for scheduling.
 /// 2. Pick a node on the cluster which has the available resources to run a
@@ -62,7 +65,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
       NodeInfoGetter get_node_info,
       std::function<void(const Task &)> announce_infeasible_task,
       WorkerPoolInterface &worker_pool,
-      std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers,
+      LeasedWorkerPool &leased_workers,
       std::function<bool(const std::vector<ObjectID> &object_ids,
                          std::vector<std::unique_ptr<RayObject>> *results)>
           get_task_arguments,
@@ -168,7 +171,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// Calculate normal task resources.
   ResourceSet CalcNormalTaskResources() const override;
 
-  bool HasHigherPriorityTaskQueued(const Priority &priority) const override;
+  std::pair<bool, bool> HasHigherPriorityTaskQueued(const Priority &priority) const override;
 
  private:
   /// (Step 2) For each task in tasks_to_schedule_, pick a node in the system
@@ -187,7 +190,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// different node.
   void DispatchScheduledTasksToWorkers(
       WorkerPoolInterface &worker_pool,
-      std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers);
+      LeasedWorkerPool &leased_workers);
 
   /// Helper method when the current node does not have the available resources to run a
   /// task.
@@ -272,7 +275,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// TODO(Shanly): Remove `worker_pool_` and `leased_workers_` and make them as
   /// parameters of methods if necessary once we remove the legacy scheduler.
   WorkerPoolInterface &worker_pool_;
-  std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers_;
+  
+  LeasedWorkerPool &leased_workers_;
 
   /// Callback to get references to task arguments. These will be pinned while
   /// the task is running.
@@ -312,7 +316,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   void Dispatch(
       std::shared_ptr<WorkerInterface> worker,
-      std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers_,
+      LeasedWorkerPool &leased_workers_,
       std::shared_ptr<TaskResourceInstances> &allocated_instances, const Task &task,
       rpc::RequestWorkerLeaseReply *reply, std::function<void(void)> send_reply_callback);
 

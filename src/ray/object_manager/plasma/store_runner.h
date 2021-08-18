@@ -19,7 +19,8 @@ class PlasmaStoreRunner {
              ray::AddObjectCallback add_object_callback,
              ray::DeleteObjectCallback delete_object_callback,
              const ray::PreemptObjectCallback &release_object_refs_callback,
-             const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued);
+             const ray::ScheduleRemoteMemoryCallback &schedule_remote_memory,
+             const ray::CheckTaskQueuesCallback &check_higher_priority_tasks_queued);
   void Stop();
 
   bool IsPlasmaObjectSpillable(const ObjectID &object_id);

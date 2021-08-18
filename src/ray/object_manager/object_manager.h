@@ -94,7 +94,8 @@ class ObjectStoreRunner {
                     AddObjectCallback add_object_callback,
                     DeleteObjectCallback delete_object_callback,
                     const PreemptObjectCallback &release_object_refs_callback,
-                    const std::function<bool(const Priority &priority)> check_higher_priority_tasks_queued);
+                    const ScheduleRemoteMemoryCallback &schedule_remote_memory,
+                    const CheckTaskQueuesCallback &check_higher_priority_tasks_queued);
   ~ObjectStoreRunner();
 
  private:
@@ -210,7 +211,8 @@ class ObjectManager : public ObjectManagerInterface,
       AddObjectCallback add_object_callback, DeleteObjectCallback delete_object_callback,
       std::function<std::unique_ptr<RayObject>(const ObjectID &object_id)> pin_object,
       const PreemptObjectCallback &release_object_refs_callback,
-      const std::function<bool(const Priority &priority)> check_higher_priority_tasks_queued);
+      const ScheduleRemoteMemoryCallback &schedule_remote_memory,
+      const CheckTaskQueuesCallback &check_higher_priority_tasks_queued);
 
   ~ObjectManager();
 

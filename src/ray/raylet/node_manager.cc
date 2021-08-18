@@ -81,13 +81,11 @@ namespace raylet {
 
 // A helper function to print the leased workers.
 std::string LeasedWorkersSring(
-    const std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>>
-        &leased_workers) {
+    const LeasedWorkerPool &leased_workers) {
   std::stringstream buffer;
   buffer << "  @leased_workers: (";
   for (const auto &pair : leased_workers) {
-    auto &worker = pair.second;
-    buffer << worker->WorkerId() << ", ";
+    buffer << pair.first << ", ";
   }
   buffer << ")";
   return buffer.str();
@@ -252,6 +250,11 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             io_service_.post(
                 [this, ref, callback]() { GetLocalObjectManager().PreemptObject(ref, callback); },
                 "NodeManager.PreemptObject");
+          },
+          /*schedule_remote_memory=*/
+          [this](int64_t space_needed) {
+            // TODO(memory).
+            return NodeID::Nil();
           },
           /*check_higher_priority_tasks_queued=*/
           [this](const Priority &priority) {
@@ -692,7 +695,7 @@ void NodeManager::HandleReleaseUnusedBundles(
   // `workers_associated_with_unused_bundles` separately.
   std::vector<std::shared_ptr<WorkerInterface>> workers_associated_with_unused_bundles;
   for (const auto &worker_it : leased_workers_) {
-    auto &worker = worker_it.second;
+    auto &worker = worker_it.second.first;
     const auto &bundle_id = worker->GetBundleId();
     // We need to filter out the workers used by placement group.
     if (!bundle_id.first.IsNil() && 0 == in_use_bundles.count(bundle_id)) {
@@ -890,7 +893,7 @@ void NodeManager::HandleUnexpectedWorkerFailure(const rpc::WorkerDeltaData &data
   // infeasible, since requests that are fulfilled will get canceled during
   // dispatch.
   for (const auto &pair : leased_workers_) {
-    auto &worker = pair.second;
+    auto &worker = pair.second.first;
     const auto owner_worker_id =
         WorkerID::FromBinary(worker->GetOwnerAddress().worker_id());
     const auto owner_node_id = NodeID::FromBinary(worker->GetOwnerAddress().raylet_id());
@@ -1694,7 +1697,7 @@ void NodeManager::HandleCancelResourceReserve(
   // `workers_associated_with_pg` separately.
   std::vector<std::shared_ptr<WorkerInterface>> workers_associated_with_pg;
   for (const auto &worker_it : leased_workers_) {
-    auto &worker = worker_it.second;
+    auto &worker = worker_it.second.first;
     if (worker->GetBundleId().first == bundle_spec.PlacementGroupId()) {
       workers_associated_with_pg.emplace_back(worker);
     }
@@ -1721,7 +1724,7 @@ void NodeManager::HandleReturnWorker(const rpc::ReturnWorkerRequest &request,
                                      rpc::SendReplyCallback send_reply_callback) {
   // Read the resource spec submitted by the client.
   auto worker_id = WorkerID::FromBinary(request.worker_id());
-  std::shared_ptr<WorkerInterface> worker = leased_workers_[worker_id];
+  std::shared_ptr<WorkerInterface> worker = leased_workers_[worker_id].first;
 
   Status status;
   leased_workers_.erase(worker_id);
@@ -1757,7 +1760,7 @@ void NodeManager::HandleReleaseUnusedWorkers(
   for (auto &iter : leased_workers_) {
     // We need to exclude workers used by common tasks.
     // Because they are not used by GCS.
-    if (!iter.second->GetActorId().IsNil() && !in_use_worker_ids.count(iter.first)) {
+    if (!iter.second.first->GetActorId().IsNil() && !in_use_worker_ids.count(iter.first)) {
       unused_worker_ids.emplace_back(iter.first);
     }
   }

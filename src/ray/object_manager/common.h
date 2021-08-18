@@ -44,4 +44,9 @@ using DeleteObjectCallback = std::function<void(const ObjectID &)>;
 
 using PreemptObjectCallback = std::function<void(const rpc::ObjectReference &object_ref, std::function<void(bool)>)>;
 
+using ScheduleRemoteMemoryCallback = std::function<NodeID(int64_t space_needed)>;
+
+// Returns <higher_priority_ready_task, higher_priority_running_task>.
+using CheckTaskQueuesCallback = std::function<std::pair<bool, bool>(const Priority &priority)>;
+
 }  // namespace ray

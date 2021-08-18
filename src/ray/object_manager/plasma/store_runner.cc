@@ -83,7 +83,8 @@ void PlasmaStoreRunner::Start(ray::SpillObjectsCallback spill_objects_callback,
                               ray::AddObjectCallback add_object_callback,
                               ray::DeleteObjectCallback delete_object_callback,
                               const ray::PreemptObjectCallback &release_object_refs_callback,
-                              const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued) {
+                              const ray::ScheduleRemoteMemoryCallback &schedule_remote_memory,
+                              const ray::CheckTaskQueuesCallback &check_higher_priority_tasks_queued) {
   SetThreadName("store.io");
   RAY_LOG(DEBUG) << "starting server listening on " << socket_name_;
   {
@@ -94,6 +95,7 @@ void PlasmaStoreRunner::Start(ray::SpillObjectsCallback spill_objects_callback,
         RayConfig::instance().object_spilling_threshold(), spill_objects_callback,
         object_store_full_callback, add_object_callback, delete_object_callback,
         release_object_refs_callback,
+        schedule_remote_memory,
         check_higher_priority_tasks_queued));
     plasma_config = store_->GetPlasmaStoreInfo();
 

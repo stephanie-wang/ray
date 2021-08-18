@@ -60,7 +60,8 @@ class PlasmaStore {
               ray::AddObjectCallback add_object_callback,
               ray::DeleteObjectCallback delete_object_callback,
               const ray::PreemptObjectCallback &release_object_references_callback,
-              const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued);
+              const ray::ScheduleRemoteMemoryCallback &schedule_remote_memory,
+              const ray::CheckTaskQueuesCallback &check_higher_priority_tasks_queued);
 
   ~PlasmaStore();
 
@@ -227,7 +228,7 @@ class PlasmaStore {
                                         bool fallback_allocator, PlasmaObject *object,
                                         bool *spilling_required);
 
-  PlasmaError HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size);
+  PlasmaError HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size, bool created_by_worker);
 
   void ReplyToCreateClient(const std::shared_ptr<Client> &client,
                            const ObjectID &object_id, uint64_t req_id);
@@ -359,8 +360,9 @@ class PlasmaStore {
 
   const ray::PreemptObjectCallback release_object_references_;
 
-  /// Callback to the raylet to:
-  const std::function<bool(const ray::Priority &priority)> check_higher_priority_tasks_queued_;
+  ray::ScheduleRemoteMemoryCallback schedule_remote_memory_;
+
+  ray::CheckTaskQueuesCallback check_higher_priority_tasks_queued_;
 };
 
 }  // namespace plasma

@@ -22,7 +22,7 @@ ClusterTaskManager::ClusterTaskManager(
     NodeInfoGetter get_node_info,
     std::function<void(const Task &)> announce_infeasible_task,
     WorkerPoolInterface &worker_pool,
-    std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers,
+    LeasedWorkerPool &leased_workers,
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
@@ -142,7 +142,7 @@ bool ClusterTaskManager::WaitForTaskArgsRequests(Work work) {
 
 void ClusterTaskManager::DispatchScheduledTasksToWorkers(
     WorkerPoolInterface &worker_pool,
-    std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers) {
+    LeasedWorkerPool &leased_workers) {
   using job_id_runtime_env_hash_pair = std::pair<size_t, int>;
   // TODO(simon): blocked_runtime_env_to_skip is added as a hack to make sure tasks
   // requiring different runtime env doesn't block each other. We need to find a
@@ -888,7 +888,7 @@ void ClusterTaskManager::TryLocalInfeasibleTaskScheduling() {
 
 void ClusterTaskManager::Dispatch(
     std::shared_ptr<WorkerInterface> worker,
-    std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers,
+    LeasedWorkerPool &leased_workers,
     std::shared_ptr<TaskResourceInstances> &allocated_instances, const Task &task,
     rpc::RequestWorkerLeaseReply *reply, std::function<void(void)> send_reply_callback) {
   metric_tasks_dispatched_++;
@@ -913,7 +913,7 @@ void ClusterTaskManager::Dispatch(
   reply->mutable_worker_address()->set_raylet_id(self_node_id_.Binary());
 
   RAY_CHECK(leased_workers.find(worker->WorkerId()) == leased_workers.end());
-  leased_workers[worker->WorkerId()] = worker;
+  leased_workers[worker->WorkerId()] = std::make_pair<>(worker, task_spec.GetPriority());
   RemoveFromBacklogTracker(task);
 
   // Update our internal view of the cluster state.
@@ -1151,7 +1151,7 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
   std::unordered_map<std::string, FixedPoint> total_normal_task_resources;
   const auto &string_id_map = cluster_resource_scheduler_->GetStringIdMap();
   for (auto &entry : leased_workers_) {
-    std::shared_ptr<WorkerInterface> worker = entry.second;
+    std::shared_ptr<WorkerInterface> worker = entry.second.first;
     auto &task_spec = worker->GetAssignedTask().GetTaskSpecification();
     if (!task_spec.PlacementGroupBundleId().first.IsNil()) {
       continue;
@@ -1182,12 +1182,12 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
   return total_normal_task_resources;
 }
 
-bool ClusterTaskManager::HasHigherPriorityTaskQueued(const Priority &priority) const {
+std::pair<bool, bool> ClusterTaskManager::HasHigherPriorityTaskQueued(const Priority &priority) const {
   // TODO(memory): Check whether this task could be spilled back to a different
   // node. Attach object store memory requirement to task description.
   // TODO(memory): Check whether there is a higher priority ready task in the local task
   // queue that could run instead.
-  return false;
+  return std::make_pair<>(false, false);
 }
 
 }  // namespace raylet
