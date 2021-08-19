@@ -200,6 +200,12 @@ const ResourceSet &TaskSpecification::GetRequiredResources() const {
   return *required_resources_;
 }
 
+void TaskSpecification::SetRequiredResource(const std::string &resource_name, int64_t amount) {
+  (*message_->mutable_required_resources())[resource_name] = amount;
+  //RAY_CHECK(message_->required_resources().at(resource_name) == amount);
+  ComputeResources();
+}
+
 std::vector<ObjectID> TaskSpecification::GetDependencyIds() const {
   std::vector<ObjectID> dependencies;
   for (size_t i = 0; i < NumArgs(); ++i) {

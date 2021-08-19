@@ -508,7 +508,7 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   // Subtract 1 so we don't double count the task we are requesting for.
   int64_t queue_size = task_priority_queue.size() - 1;
 
-  RAY_LOG(DEBUG) << "Requesting worker lease " << task_id << " with priority " << head->first;
+  RAY_LOG(DEBUG) << "Requesting worker lease " << task_id << " with priority " << head->first << ", requires object store memory:" << resource_spec.GetRequiredResources().GetResource("object_store_memory");
   lease_client->RequestWorkerLease(
       resource_spec,
       [this, scheduling_key](const Status &status,

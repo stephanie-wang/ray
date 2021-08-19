@@ -255,7 +255,10 @@ def test_automatic_simple(ray_start_cluster):
     ray.get(long_task)
     ray.get(short_task)
 
-    print(memory_summary(stats_only=True))
+    summary = memory_summary(stats_only=True)
+    print(summary)
+    assert "Spill" not in summary
+    assert "1 objects preempted" in summary
 
 
 if __name__ == "__main__":

@@ -32,6 +32,8 @@ class PlasmaStoreRunner {
                        "PlasmaStoreRunner.GetAvailableMemory");
   }
 
+  int64_t GetAvailableMemorySync() const { return store_->GetAvailableMemorySync(); }
+
  private:
   void Shutdown();
   absl::Mutex store_runner_mutex_;

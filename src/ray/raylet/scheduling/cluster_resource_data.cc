@@ -212,6 +212,9 @@ bool NodeResources::IsAvailable(const ResourceRequest &resource_request) const {
 
     const auto &resource = this->predefined_resources[i].available;
     const auto &demand = resource_request.predefined_resources[i];
+    if (i == OBJECT_STORE_MEM) {
+      RAY_LOG(DEBUG) << "object store memory available: " << resource << ", request requires: " << demand;
+    }
 
     if (resource < demand) {
       return false;

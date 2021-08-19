@@ -42,7 +42,7 @@ ClusterResourceScheduler::ClusterResourceScheduler(
 ClusterResourceScheduler::ClusterResourceScheduler(
     const std::string &local_node_id,
     const std::unordered_map<std::string, double> &local_node_resources,
-    std::function<int64_t(void)> get_used_object_store_memory)
+    std::function<int64_t(void)> get_available_object_store_memory)
     : hybrid_spillback_(RayConfig::instance().scheduler_hybrid_scheduling()),
       spread_threshold_(RayConfig::instance().scheduler_spread_threshold()) {
   local_node_id_ = string_to_int_map_.Insert(local_node_id);
@@ -52,7 +52,7 @@ ClusterResourceScheduler::ClusterResourceScheduler(
   InitResourceUnitInstanceInfo();
   AddOrUpdateNode(local_node_id_, node_resources);
   InitLocalResources(node_resources);
-  get_used_object_store_memory_ = get_used_object_store_memory;
+  get_available_object_store_memory_ = get_available_object_store_memory;
 }
 
 void ClusterResourceScheduler::InitResourceUnitInstanceInfo() {
@@ -308,6 +308,14 @@ int64_t ClusterResourceScheduler::GetBestSchedulableNodeSimpleBinPack(
 int64_t ClusterResourceScheduler::GetBestSchedulableNode(
     const ResourceRequest &resource_request, bool actor_creation, bool force_spillback,
     int64_t *total_violations, bool *is_infeasible) {
+  if (get_available_object_store_memory_ != nullptr) {
+    auto it_local_node = nodes_.find(local_node_id_);
+    RAY_CHECK(it_local_node != nodes_.end());
+    auto local_view = it_local_node->second.GetMutableLocalView();
+    auto &capacity = local_view->predefined_resources[OBJECT_STORE_MEM];
+    capacity.available = get_available_object_store_memory_();
+  }
+
   // The zero cpu actor is a special case that must be handled the same way by all
   // scheduling policies.
   if (actor_creation && resource_request.IsEmpty()) {
@@ -451,6 +459,10 @@ void ClusterResourceScheduler::AddLocalResourceInstances(
         std::max(node_instances->total[i], node_instances->available[i]);
   }
   UpdateLocalAvailableResourcesFromResourceInstances();
+
+  if (kObjectStoreMemory_ResourceLabel == resource_name) {
+    RAY_LOG(DEBUG) << node_instances->total.size() << " total " << node_instances->available.size() << " available " << node_instances->total[0] << " total bytes " << node_instances->available[0];
+  }
 }
 
 bool ClusterResourceScheduler::IsAvailableResourceEmpty(
@@ -810,13 +822,22 @@ bool ClusterResourceScheduler::AllocateTaskResourceInstances(
   task_allocation->predefined_resources.resize(PredefinedResources_MAX);
   for (size_t i = 0; i < PredefinedResources_MAX; i++) {
     if (resource_request.predefined_resources[i] > 0) {
+      if (i == OBJECT_STORE_MEM) {
+        local_resources_.predefined_resources[i].available[0] = get_available_object_store_memory_();
+      }
       if (!AllocateResourceInstances(resource_request.predefined_resources[i],
                                      local_resources_.predefined_resources[i].available,
                                      &task_allocation->predefined_resources[i])) {
+        if (i == OBJECT_STORE_MEM) {
+          RAY_LOG(DEBUG) << "Require " << resource_request.predefined_resources[i] << " object store memory, availability is now only: " << local_resources_.predefined_resources[i].available[0];
+        }
         // Allocation failed. Restore node's local resources by freeing the resources
         // of the failed allocation.
         FreeTaskResourceInstances(task_allocation);
         return false;
+      }
+      if (i == OBJECT_STORE_MEM) {
+        RAY_LOG(DEBUG) << "Acquired " << resource_request.predefined_resources[i] << " object store memory, availability is now: " << local_resources_.predefined_resources[i].available[0];
       }
     }
   }
@@ -1046,10 +1067,9 @@ void ClusterResourceScheduler::FillResourceUsage(rpc::ResourcesData &resources_d
   // Automatically report object store usage.
   // XXX: this MUTATES the resources field, which is needed since we are storing
   // it in last_report_resources_.
-  if (get_used_object_store_memory_ != nullptr) {
+  if (get_available_object_store_memory_ != nullptr) {
     auto &capacity = resources.predefined_resources[OBJECT_STORE_MEM];
-    double used = get_used_object_store_memory_();
-    capacity.available = FixedPoint(capacity.total.Double() - used);
+    capacity.available = get_available_object_store_memory_();
   }
 
   for (int i = 0; i < PredefinedResources_MAX; i++) {

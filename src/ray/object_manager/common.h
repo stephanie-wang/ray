@@ -46,7 +46,13 @@ using PreemptObjectCallback = std::function<void(const rpc::ObjectReference &obj
 
 using ScheduleRemoteMemoryCallback = std::function<NodeID(int64_t space_needed)>;
 
+using TaskQueueInfoCallback = std::function<void(
+    const NodeID &remote_node_id,
+    bool higher_priority_ready_task,
+    bool higher_priority_running_task
+    )>;
+
 // Returns <higher_priority_ready_task, higher_priority_running_task>.
-using CheckTaskQueuesCallback = std::function<std::pair<bool, bool>(const Priority &priority)>;
+using CheckTaskQueuesCallback = std::function<void(int64_t space_needed, const Priority &priority, TaskQueueInfoCallback callback)>;
 
 }  // namespace ray

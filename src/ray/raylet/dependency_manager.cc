@@ -123,7 +123,6 @@ void DependencyManager::StartOrUpdateGetRequest(
     }
     // Pull the new dependencies before canceling the old request, in case some
     // of the old dependencies are still being fetched.
-    // // TODO(memory): Fill in priority.
     TaskKey new_request_id(priority, ObjectID::FromRandom().TaskId());
     object_manager_.Pull(new_request_id, refs, BundlePriority::GET_REQUEST);
     if (!get_request.second.second.IsNil()) {

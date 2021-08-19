@@ -289,7 +289,8 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
                                                    const std::vector<uint8_t> &message,
                                                    bool fallback_allocator,
                                                    PlasmaObject *object,
-                                                   bool *spilling_required) {
+                                                   bool *spilling_required,
+                                                  std::function<void(PlasmaError error)> callback) {
   uint8_t *input = (uint8_t *)message.data();
   size_t input_size = message.size();
   ObjectID object_id;
@@ -311,11 +312,11 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
   auto error = CreateObject(object_id, owner_raylet_id, owner_ip_address, owner_port,
                             owner_worker_id, priority, data_size, metadata_size, source, device_num,
                             client, fallback_allocator, object);
-  if (error == PlasmaError::OutOfMemory) {
+  if (error == PlasmaError::OutOfMemory && callback) {
     RAY_LOG(DEBUG) << "Not enough memory to create the object " << object_id
                    << ", data_size=" << data_size << ", metadata_size=" << metadata_size;
-    return HandleObjectOom(object_id, priority, data_size + metadata_size,
-        /*created_by_worker=*/source == fb::ObjectSource::CreatedByWorker);
+    return HandleObjectOomAsync(object_id, priority, data_size + metadata_size,
+        /*created_by_worker=*/source == fb::ObjectSource::CreatedByWorker, callback);
   }
 
   // Trigger object spilling if current usage is above the specified threshold.
@@ -335,47 +336,49 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
   return error;
 }
 
-PlasmaError PlasmaStore::HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t size,
-    bool created_by_worker) {
+PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const ray::Priority &priority, int64_t size,
+    bool created_by_worker, std::function<void(PlasmaError error)> callback) {
   int64_t required_space =
       PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
 
-  // Try to find a lower priority local object that we can forcibly evict to
-  // make room for this one.
-  std::vector<ObjectID> candidates;
-  int64_t max_preemptible_bytes = 0;
-  for (const auto &entry : store_info_.objects) {
-    RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
-    if (priority < entry.second->priority && !entry.second->preemption_failed) {
-      candidates.push_back(entry.first);
-      max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
-    }
-  }
-
-  if (max_preemptible_bytes >= required_space) {
-    for (const auto &object_id : candidates) {
-      PreemptObject(object_id);
-    }
-    return PlasmaError::SpacePending;
-  }
-
   // If there is a higher priority ready task in the local task queue that
   // could run instead, preempt the task is trying to create this object.
-  auto result = check_higher_priority_tasks_queued_(priority);
-  bool higher_priority_ready_task = result.first;
-  bool higher_priority_running_task = result.second;
+  check_higher_priority_tasks_queued_(required_space, priority, [this, object_id, required_space, priority, created_by_worker, callback](const NodeID &remote_node_id, bool higher_priority_ready_task, bool higher_priority_running_task) {
+      io_context_.post([this, object_id, required_space, priority, created_by_worker, callback, remote_node_id, higher_priority_ready_task, higher_priority_running_task]() {
+        // TODO(memory): Preempt if we can schedule to a remote node.
 
-  if (created_by_worker && higher_priority_ready_task) {
-    // TODO(memory): preempt this task.
-    RAY_LOG(DEBUG) << "There is at least one ready task with a higher priority than object " << object_id << " " << priority << ", TODO";
-    return PlasmaError::OutOfMemory;
-  } else if (higher_priority_running_task) {
-    RAY_LOG(DEBUG) << "There is at least one running task with a higher priority than object " << object_id << " " << priority << ", waiting for this task to finish";
-    return PlasmaError::SpacePending;
-  } else {
-    // Otherwise, we should spill existing objects to make room for this object.
-    return PlasmaError::OutOfMemory;
-  }
+        // Try to find a lower priority local object that we can forcibly evict to
+        // make room for this one.
+        std::vector<ObjectID> candidates;
+        int64_t max_preemptible_bytes = 0;
+        for (const auto &entry : store_info_.objects) {
+          RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
+          if (priority < entry.second->priority && !entry.second->preemption_failed) {
+            candidates.push_back(entry.first);
+            max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
+          }
+        }
+
+        if (max_preemptible_bytes >= required_space) {
+          for (const auto &candidate : candidates) {
+            PreemptObject(candidate);
+          }
+          callback(PlasmaError::SpacePending);
+        } else if (created_by_worker && higher_priority_ready_task) {
+          // TODO(memory): preempt this task.
+          RAY_LOG(DEBUG) << "There is at least one ready task with a higher priority than object " << object_id << " " << priority << ", TODO";
+          callback(PlasmaError::OutOfMemory);
+        } else if (higher_priority_running_task) {
+          RAY_LOG(DEBUG) << "There is at least one running task with a higher priority than object " << object_id << " " << priority << ", waiting for this task to finish";
+          callback(PlasmaError::SpacePending);
+        } else {
+          // Otherwise, we should spill existing objects to make room for this object.
+          callback(PlasmaError::OutOfMemory);
+        }
+      });
+  });
+
+  return PlasmaError::SpacePending;
 }
 
 PlasmaError PlasmaStore::CreateObject(const ObjectID &object_id,
@@ -891,9 +894,10 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
 
     auto handle_create = [this, client, message](bool fallback_allocator,
                                                  PlasmaObject *result,
-                                                 bool *spilling_required) {
+                                                 bool *spilling_required,
+      std::function<void(PlasmaError error)> callback) {
       return HandleCreateObjectRequest(client, message, fallback_allocator, result,
-                                       spilling_required);
+                                       spilling_required, callback);
     };
 
     if (request->try_immediately()) {
@@ -1187,6 +1191,21 @@ std::string PlasmaStore::GetDebugDump() const {
   buffer << "- objects errored: " << num_objects_errored << "\n";
   buffer << "- bytes errored: " << num_bytes_errored << "\n";
   return buffer.str();
+}
+
+int64_t PlasmaStore::GetAvailableMemorySync() const {
+  std::lock_guard<std::recursive_mutex> guard(mutex_);
+  // Num bytes in use includes unsealed objects.
+  //if (!RayConfig::instance().plasma_unlimited()) {
+  //  RAY_CHECK(PlasmaAllocator::GetFootprintLimit() >= num_bytes_in_use_);
+  //}
+  int64_t available = static_cast<int64_t>(PlasmaAllocator::GetFootprintLimit());
+  available -= static_cast<int64_t>(num_bytes_in_use_);
+  available -= create_request_queue_.NumPendingBytes();
+  if (available < 0) {
+    available = 0;
+  }
+  return available;
 }
 
 }  // namespace plasma

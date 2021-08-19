@@ -211,7 +211,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
     /// the worker fails. We could avoid this by either not caching the full
     /// TaskSpec for tasks that cannot be retried (e.g., actor tasks), or by
     /// storing a shared_ptr to a PushTaskRequest protobuf for all tasks.
-    const TaskSpecification spec;
+    TaskSpecification spec;
     // Number of times this task may be resubmitted. If this reaches 0, then
     // the task entry may be erased.
     int num_retries_left;

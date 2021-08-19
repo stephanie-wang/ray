@@ -300,7 +300,7 @@ class ObjectManager : public ObjectManagerInterface,
   void Tick(const boost::system::error_code &e);
 
   /// Get the current object store memory usage.
-  int64_t GetUsedMemory() const { return used_memory_; }
+  int64_t GetAvailableMemory() const { return plasma::plasma_store_runner->GetAvailableMemorySync(); }
 
   int64_t GetMemoryCapacity() const { return config_.object_store_memory; }
 

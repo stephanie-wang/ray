@@ -175,6 +175,8 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
       }
 
       bool args_missing = false;
+      // TODO(memory): This can deadlock if we do this before trying to acquire
+      // the other resources and a worker.
       bool success = PinTaskArgsIfMemoryAvailable(spec, &args_missing);
       // An argument was evicted since this task was added to the dispatch
       // queue. Move it back to the waiting queue. The caller is responsible
@@ -1183,11 +1185,28 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
 }
 
 std::pair<bool, bool> ClusterTaskManager::HasHigherPriorityTaskQueued(const Priority &priority) const {
-  // TODO(memory): Check whether this task could be spilled back to a different
-  // node. Attach object store memory requirement to task description.
-  // TODO(memory): Check whether there is a higher priority ready task in the local task
+  // Check whether this task could be spilled back to a different node. Attach
+  // object store memory requirement to task description.
+  bool has_higher_priority_ready_task = false;
+  for (const auto &queue : tasks_to_dispatch_) {
+    auto &top_priority = queue.second.begin()->first.first;
+    if (top_priority < priority) {
+      has_higher_priority_ready_task = true;
+      break;
+    }
+  }
+
+  // Check whether there is a higher priority ready task in the local task
   // queue that could run instead.
-  return std::make_pair<>(false, false);
+  bool has_higher_priority_running_task = false;
+  for (const auto leased_worker : leased_workers_) {
+    const auto &running_task_priority = leased_worker.second.second;
+    if (running_task_priority < priority) {
+      has_higher_priority_running_task = true;
+      break;
+    }
+  }
+  return std::make_pair<>(has_higher_priority_ready_task, has_higher_priority_running_task);
 }
 
 }  // namespace raylet

@@ -95,18 +95,17 @@ ObjectManager::ObjectManager(
           },
           release_object_refs_callback,
           [this, schedule_remote_memory](int64_t space_needed) {
-            auto ready_promise = std::make_shared<std::promise<NodeID>>();
-            main_service_->post([this, schedule_remote_memory, space_needed, ready_promise]() {
-              ready_promise->set_value(schedule_remote_memory(space_needed));
-              });
-            return ready_promise->get_future().get();
+            return NodeID::Nil();
+            //auto ready_promise = std::make_shared<std::promise<NodeID>>();
+            //main_service_->post([this, schedule_remote_memory, space_needed, ready_promise]() {
+            //  ready_promise->set_value(schedule_remote_memory(space_needed));
+            //  });
+            //return ready_promise->get_future().get();
           },
-          [this, check_higher_priority_tasks_queued](const Priority &priority) {
-            auto ready_promise = std::make_shared<std::promise<std::pair<bool, bool>>>();
-            main_service_->post([this, check_higher_priority_tasks_queued, priority, ready_promise]() {
-              ready_promise->set_value(check_higher_priority_tasks_queued(priority));
+          [this, check_higher_priority_tasks_queued](int64_t space_needed, const Priority &priority, const TaskQueueInfoCallback &callback) {
+            main_service_->post([this, check_higher_priority_tasks_queued, space_needed, priority, callback]() {
+                check_higher_priority_tasks_queued(space_needed, priority, callback);
               });
-            return ready_promise->get_future().get();
           }),
       buffer_pool_(config_.store_socket_name, config_.object_chunk_size),
       rpc_work_(rpc_service_),
@@ -194,7 +193,7 @@ void ObjectManager::HandleObjectAdded(const ObjectInfo &object_info) {
   RAY_LOG(DEBUG) << "Object added " << object_id;
   RAY_CHECK(local_objects_.count(object_id) == 0);
   local_objects_[object_id].object_info = object_info;
-  used_memory_ += object_info.data_size + object_info.metadata_size;
+  //used_memory_ += object_info.data_size + object_info.metadata_size;
   ray::Status status =
       object_directory_->ReportObjectAdded(object_id, self_node_id_, object_info);
 
@@ -223,8 +222,8 @@ void ObjectManager::HandleObjectDeleted(const ObjectID &object_id) {
   RAY_CHECK(it != local_objects_.end());
   auto object_info = it->second.object_info;
   local_objects_.erase(it);
-  used_memory_ -= object_info.data_size + object_info.metadata_size;
-  RAY_CHECK(!local_objects_.empty() || used_memory_ == 0);
+  //used_memory_ -= object_info.data_size + object_info.metadata_size;
+  //RAY_CHECK(!local_objects_.empty() || used_memory_ == 0);
   ray::Status status =
       object_directory_->ReportObjectRemoved(object_id, self_node_id_, object_info);
 
@@ -978,6 +977,7 @@ void ObjectManager::Tick(const boost::system::error_code &e) {
   plasma::plasma_store_runner->GetAvailableMemoryAsync([this](size_t available_memory) {
     main_service_->post(
         [this, available_memory]() {
+          used_memory_ = config_.object_store_memory - available_memory;
           pull_manager_->UpdatePullsBasedOnAvailableMemory(available_memory);
         },
         "ObjectManager.UpdateAvailableMemory");

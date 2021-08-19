@@ -383,7 +383,6 @@ Status PlasmaClient::Impl::TryCreateImmediately(
 
   RAY_LOG(DEBUG) << "called plasma_create on conn " << store_conn_ << " with size "
                  << data_size << " and metadata size " << metadata_size;
-  // TODO(memory): Fill in priority.
   RAY_RETURN_NOT_OK(SendCreateRequest(store_conn_, object_id, owner_address, ray::Priority(), data_size,
                                       metadata_size, source, device_num,
                                       /*try_immediately=*/true));

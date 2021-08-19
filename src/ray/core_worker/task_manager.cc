@@ -209,6 +209,7 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
 
   std::vector<ObjectID> direct_return_ids;
   std::vector<ObjectID> plasma_return_ids;
+  int64_t required_object_store_memory_bytes = 0;
   for (int i = 0; i < reply.return_objects_size(); i++) {
     const auto &return_object = reply.return_objects(i);
     ObjectID object_id = ObjectID::FromBinary(return_object.object_id());
@@ -228,6 +229,7 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
                        << " in plasma on a dead node, attempting to recover.";
         reconstruct_object_callback_(object_id);
       }
+      required_object_store_memory_bytes += return_object.size();
     } else {
       // NOTE(swang): If a direct object was promoted to plasma, then we do not
       // record the node ID that it was pinned at, which means that we will not
@@ -289,6 +291,11 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
     if (task_retryable) {
       // Pin the task spec if it may be retried again.
       release_lineage = false;
+      if (required_object_store_memory_bytes > 0) {
+        RAY_LOG(DEBUG) << "Updating object store memory requirement for task " << task_id << " to " << required_object_store_memory_bytes;
+        it->second.spec.SetRequiredResource("object_store_memory", required_object_store_memory_bytes);
+        RAY_LOG(DEBUG) << "Task now requires " << it->second.spec.GetRequiredResources().GetResource("object_store_memory");
+      }
     } else {
       submissible_tasks_.erase(it);
     }

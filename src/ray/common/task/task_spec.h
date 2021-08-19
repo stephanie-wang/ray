@@ -121,6 +121,8 @@ class TaskSpecification : public MessageWrapper<rpc::TaskSpec> {
   /// task.
   const ResourceSet &GetRequiredResources() const;
 
+  void SetRequiredResource(const std::string &resource_name, int64_t amount);
+
   /// Return the resources that are required for a task to be placed on a node.
   /// This will typically be the same as the resources acquired during execution
   /// and will always be a superset of those resources. However, they may

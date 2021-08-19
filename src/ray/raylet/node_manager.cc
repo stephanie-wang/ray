@@ -253,12 +253,15 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           },
           /*schedule_remote_memory=*/
           [this](int64_t space_needed) {
-            // TODO(memory).
             return NodeID::Nil();
           },
           /*check_higher_priority_tasks_queued=*/
-          [this](const Priority &priority) {
-            return cluster_task_manager_->HasHigherPriorityTaskQueued(priority);
+          [this](int64_t space_needed, const Priority &priority, const TaskQueueInfoCallback &callback) {
+            auto result = cluster_task_manager_->HasHigherPriorityTaskQueued(priority);
+            bool higher_priority_ready_task = result.first;
+            bool higher_priority_running_task = result.second;
+            // TODO(memory).
+            callback(NodeID::Nil(), higher_priority_ready_task, higher_priority_running_task);
           }),
       periodical_runner_(io_service),
       report_resources_period_ms_(config.report_resources_period_ms),
@@ -306,7 +309,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
   cluster_resource_scheduler_ =
       std::shared_ptr<ClusterResourceScheduler>(new ClusterResourceScheduler(
           self_node_id_.Binary(), local_resources.GetTotalResources().GetResourceMap(),
-          [this]() { return object_manager_.GetUsedMemory(); }));
+          [this]() { return object_manager_.GetAvailableMemory(); }));
 
   auto get_node_info_func = [this](const NodeID &node_id) {
     return gcs_client_->Nodes().Get(node_id);

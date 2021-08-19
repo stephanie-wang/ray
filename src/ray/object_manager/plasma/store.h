@@ -216,6 +216,10 @@ class PlasmaStore {
     callback(available);
   }
 
+  /// Get the available memory for new objects to be created. This includes
+  /// memory that is currently being used for created but unsealed objects.
+  int64_t GetAvailableMemorySync() const;
+
   void PrintDebugDump() const;
 
   // NOTE(swang): This will iterate through all objects in the
@@ -226,9 +230,10 @@ class PlasmaStore {
   PlasmaError HandleCreateObjectRequest(const std::shared_ptr<Client> &client,
                                         const std::vector<uint8_t> &message,
                                         bool fallback_allocator, PlasmaObject *object,
-                                        bool *spilling_required);
+                                        bool *spilling_required,
+                                        std::function<void(PlasmaError error)> callback);
 
-  PlasmaError HandleObjectOom(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size, bool created_by_worker);
+  PlasmaError HandleObjectOomAsync(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size, bool created_by_worker, std::function<void(PlasmaError error)> callback);
 
   void ReplyToCreateClient(const std::shared_ptr<Client> &client,
                            const ObjectID &object_id, uint64_t req_id);
@@ -334,7 +339,7 @@ class PlasmaStore {
   /// deadlock while we keep the simplest possible change. NOTE(sang): Avoid adding more
   /// interface that node manager or object manager can access the plasma store with this
   /// mutex if it is not absolutely necessary.
-  std::recursive_mutex mutex_;
+  mutable std::recursive_mutex mutex_;
 
   /// Total number of bytes allocated to objects that are in use by any client.
   /// This includes objects that are being created and objects that a client

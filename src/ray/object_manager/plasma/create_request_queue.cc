@@ -69,7 +69,8 @@ std::pair<PlasmaObject, PlasmaError> CreateRequestQueue::TryRequestImmediately(
   // Immediately fulfill it using the fallback allocator.
   if (RayConfig::instance().plasma_unlimited()) {
     PlasmaError error = create_callback(/*fallback_allocator=*/true, &result,
-                                        /*spilling_required=*/nullptr);
+                                        /*spilling_required=*/nullptr,
+                                        /*callback=*/nullptr);
     return {result, error};
   }
 
@@ -98,9 +99,10 @@ std::pair<PlasmaObject, PlasmaError> CreateRequestQueue::TryRequestImmediately(
 
 Status CreateRequestQueue::ProcessRequest(bool fallback_allocator,
                                           std::unique_ptr<CreateRequest> &request,
-                                          bool *spilling_required) {
+                                          bool *spilling_required,
+                                          std::function<void(PlasmaError error)> callback) {
   request->error =
-      request->create_callback(fallback_allocator, &request->result, spilling_required);
+      request->create_callback(fallback_allocator, &request->result, spilling_required, callback);
   if (request->error == PlasmaError::OutOfMemory) {
     return Status::ObjectStoreFull("");
   } else if (request->error == PlasmaError::SpacePending) {
@@ -110,64 +112,90 @@ Status CreateRequestQueue::ProcessRequest(bool fallback_allocator,
   }
 }
 
+void CreateRequestQueue::HandleCreateReply(const ray::TaskKey &task_key, PlasmaError error) {
+  auto request_it = queue_.find(task_key);
+  if (request_it == queue_.end()) {
+    return;
+  }
+  request_it->second->error = error;
+
+  Status status;
+  if (error == PlasmaError::OutOfMemory) {
+    status = Status::ObjectStoreFull("");
+  } else if (error == PlasmaError::SpacePending) {
+    status = Status::TransientObjectStoreFull("");
+  } else {
+    RAY_CHECK(false);
+  }
+
+  auto now = get_time_();
+  if (status.IsTransientObjectStoreFull()) {
+    return;
+  }
+
+  if (trigger_global_gc_) {
+    trigger_global_gc_();
+  }
+
+  if (oom_start_time_ns_ == -1) {
+    oom_start_time_ns_ = now;
+  }
+  auto grace_period_ns = oom_grace_period_ns_;
+  auto spill_pending = spill_objects_callback_();
+  if (spill_pending) {
+    RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
+    oom_start_time_ns_ = -1;
+  } else if (now - oom_start_time_ns_ < grace_period_ns) {
+    // We need a grace period since (1) global GC takes a bit of time to
+    // kick in, and (2) there is a race between spilling finishing and space
+    // actually freeing up in the object store.
+    RAY_LOG(DEBUG) << "In grace period before fallback allocation / oom.";
+  } else {
+    if (plasma_unlimited_) {
+      // Trigger the fallback allocator.
+      status = ProcessRequest(/*fallback_allocator=*/true, request_it->second,
+                              /*spilling_required=*/nullptr, /*callback=*/nullptr);
+    }
+    if (!status.ok()) {
+      std::string dump = "";
+      if (dump_debug_info_callback_) {
+        dump = dump_debug_info_callback_();
+      }
+      RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
+                    << request_it->second->object_id << " of size "
+                    << request_it->second->object_size / 1024 / 1024 << "MB\n"
+                    << dump;
+    }
+    FinishRequest(request_it);
+  }
+}
+
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
-  bool logged_oom = false;
-  while (!queue_.empty()) {
+  while (!queue_.empty() && !request_pending_) {
     auto request_it = queue_.begin();
     bool spilling_required = false;
+    auto &task_key = request_it->first;
     auto status =
-        ProcessRequest(/*fallback_allocator=*/false, request_it->second, &spilling_required);
+        ProcessRequest(/*fallback_allocator=*/false, request_it->second, &spilling_required,
+            [this, task_key](PlasmaError error) {
+              request_pending_ = false;
+              HandleCreateReply(task_key, error);
+            });
     if (spilling_required) {
       spill_objects_callback_();
     }
-    auto now = get_time_();
-    if (status.ok()) {
+    if (status.ok() || status.IsObjectStoreFull()) {
       FinishRequest(request_it);
       // Reset the oom start time since the creation succeeds.
       oom_start_time_ns_ = -1;
-    } else if (status.IsTransientObjectStoreFull()) {
-      return status;
     } else {
-      if (trigger_global_gc_) {
-        trigger_global_gc_();
-      }
-
-      if (oom_start_time_ns_ == -1) {
-        oom_start_time_ns_ = now;
-      }
-      auto grace_period_ns = oom_grace_period_ns_;
-      auto spill_pending = spill_objects_callback_();
-      if (spill_pending) {
-        RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
-        oom_start_time_ns_ = -1;
-        return Status::TransientObjectStoreFull("Waiting for objects to spill.");
-      } else if (now - oom_start_time_ns_ < grace_period_ns) {
-        // We need a grace period since (1) global GC takes a bit of time to
-        // kick in, and (2) there is a race between spilling finishing and space
-        // actually freeing up in the object store.
-        RAY_LOG(DEBUG) << "In grace period before fallback allocation / oom.";
-        return Status::ObjectStoreFull("Waiting for grace period.");
-      } else {
-        if (plasma_unlimited_) {
-          // Trigger the fallback allocator.
-          status = ProcessRequest(/*fallback_allocator=*/true, request_it->second,
-                                  /*spilling_required=*/nullptr);
-        }
-        if (!status.ok()) {
-          std::string dump = "";
-          if (dump_debug_info_callback_ && !logged_oom) {
-            dump = dump_debug_info_callback_();
-            logged_oom = true;
-          }
-          RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
-                        << request_it->second->object_id << " of size "
-                        << request_it->second->object_size / 1024 / 1024 << "MB\n"
-                        << dump;
-        }
-        FinishRequest(request_it);
-      }
+      request_pending_ = true;
     }
+  }
+
+  if (request_pending_) {
+    return Status::TransientObjectStoreFull("");
   }
   return Status::OK();
 }

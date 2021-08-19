@@ -522,9 +522,8 @@ void LocalObjectManager::RecordObjectSpillingStats() const {
 void LocalObjectManager::PreemptObject(const rpc::ObjectReference &object_ref, const std::function<void(bool)> &callback) {
   const auto object_id = ObjectID::FromBinary(object_ref.object_id());
   auto it = pinned_objects_.find(object_id);
-  // TODO(memory): Preemption currently assumes that every object copy is the
-  // primary. Also it's possible for objects to go out of scope before we can
-  // preempt.
+  // Preemption currently assumes that every object copy is the primary. Also
+  // it's possible for objects to go out of scope before we can preempt.
   if (it == pinned_objects_.end()) {
     RAY_LOG(INFO) << "Tried to preempt object that is not pinned " << object_id;
     callback(false);
