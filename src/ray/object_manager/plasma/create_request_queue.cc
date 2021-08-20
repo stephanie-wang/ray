@@ -20,6 +20,7 @@
 
 #include "ray/common/asio/instrumented_io_context.h"
 #include "ray/object_manager/plasma/common.h"
+#include "ray/object_manager/plasma/plasma_generated.h"
 #include "ray/util/util.h"
 
 namespace plasma {
@@ -118,18 +119,18 @@ void CreateRequestQueue::HandleCreateReply(const ray::TaskKey &task_key, PlasmaE
     return;
   }
   request_it->second->error = error;
-
-  Status status;
-  if (error == PlasmaError::OutOfMemory) {
-    status = Status::ObjectStoreFull("");
-  } else if (error == PlasmaError::SpacePending) {
-    status = Status::TransientObjectStoreFull("");
-  } else {
-    RAY_CHECK(false);
-  }
+  RAY_CHECK(error == PlasmaError::OutOfMemory ||
+      error == PlasmaError::SpacePending ||
+      error == PlasmaError::PreemptTask) << "Unexpected error: " << flatbuf::EnumNamePlasmaError(error);
 
   auto now = get_time_();
-  if (status.IsTransientObjectStoreFull()) {
+  if (error == PlasmaError::SpacePending) {
+    return;
+  }
+
+  if (error == PlasmaError::PreemptTask) {
+    // Return an error to the client. They should retry this task.
+    FinishRequest(request_it);
     return;
   }
 
@@ -143,7 +144,7 @@ void CreateRequestQueue::HandleCreateReply(const ray::TaskKey &task_key, PlasmaE
   auto grace_period_ns = oom_grace_period_ns_;
   auto spill_pending = spill_objects_callback_();
   if (spill_pending) {
-    RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
+    RAY_LOG(DEBUG) << "Reset grace period, spilling in progress";
     oom_start_time_ns_ = -1;
   } else if (now - oom_start_time_ns_ < grace_period_ns) {
     // We need a grace period since (1) global GC takes a bit of time to
@@ -153,18 +154,18 @@ void CreateRequestQueue::HandleCreateReply(const ray::TaskKey &task_key, PlasmaE
   } else {
     if (plasma_unlimited_) {
       // Trigger the fallback allocator.
-      status = ProcessRequest(/*fallback_allocator=*/true, request_it->second,
-                              /*spilling_required=*/nullptr, /*callback=*/nullptr);
-    }
-    if (!status.ok()) {
-      std::string dump = "";
-      if (dump_debug_info_callback_) {
-        dump = dump_debug_info_callback_();
+      auto status = ProcessRequest(/*fallback_allocator=*/true, request_it->second,
+                                   /*spilling_required=*/nullptr, /*callback=*/nullptr);
+      if (!status.ok()) {
+        std::string dump = "";
+        if (dump_debug_info_callback_) {
+          dump = dump_debug_info_callback_();
+        }
+        RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
+                      << request_it->second->object_id << " of size "
+                      << request_it->second->object_size / 1024 / 1024 << "MB\n"
+                      << dump;
       }
-      RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
-                    << request_it->second->object_id << " of size "
-                    << request_it->second->object_size / 1024 / 1024 << "MB\n"
-                    << dump;
     }
     FinishRequest(request_it);
   }

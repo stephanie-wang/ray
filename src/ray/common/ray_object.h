@@ -40,12 +40,14 @@ class RayObject {
   /// \param[in] nested_ids ObjectIDs that were serialized in data.
   /// \param[in] copy_data Whether this class should hold a copy of data.
   RayObject(const std::shared_ptr<Buffer> &data, const std::shared_ptr<Buffer> &metadata,
-            const std::vector<ObjectID> &nested_ids, bool copy_data = false)
+            const std::vector<ObjectID> &nested_ids, bool copy_data = false,
+            int64_t preempted_task_size = -1)
       : data_(data),
         metadata_(metadata),
         nested_ids_(nested_ids),
         has_data_copy_(copy_data),
-        creation_time_nanos_(absl::GetCurrentTimeNanos()) {
+        creation_time_nanos_(absl::GetCurrentTimeNanos()),
+        preempted_task_size_(preempted_task_size) {
     if (has_data_copy_) {
       // If this object is required to hold a copy of the data,
       // make a copy if the passed in buffers don't already have a copy.
@@ -70,6 +72,8 @@ class RayObject {
   RayObject(rpc::ErrorType error_type, const uint8_t *append_data,
             size_t append_data_size);
 
+  RayObject(rpc::ErrorType error_type, int64_t preempted_task_size);
+
   /// Return the data of the ray object.
   const std::shared_ptr<Buffer> &GetData() const { return data_; }
 
@@ -80,6 +84,9 @@ class RayObject {
   const std::vector<ObjectID> &GetNestedIds() const { return nested_ids_; }
 
   uint64_t GetSize() const {
+    if (preempted_task_size_ >= 0) {
+      return static_cast<uint64_t>(preempted_task_size_);
+    }
     uint64_t size = 0;
     size += (data_ != nullptr) ? data_->Size() : 0;
     size += (metadata_ != nullptr) ? metadata_->Size() : 0;
@@ -118,6 +125,9 @@ class RayObject {
   bool accessed_ = false;
   /// The timestamp at which this object was created locally.
   int64_t creation_time_nanos_;
+  /// The size of the data.
+  /// Only used for tasks which were preempted (ErrorType == TaskPreempted).
+  const int64_t preempted_task_size_ = -1;
 };
 
 }  // namespace ray

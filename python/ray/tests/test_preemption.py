@@ -222,7 +222,13 @@ def test_deps_pending_on_remote_node(ray_start_cluster):
     assert count == 2
 
 
-def test_automatic_simple(ray_start_cluster):
+def test_automatic_preempt_local_object(ray_start_cluster):
+    # A <- B
+    # C
+    # C finishes first and consumes memory.
+    # C gets preempted by A because A needs memory and has higher priority.  C
+    # does not get scheduled again until after B finishes and releases A's
+    # memory, since C's resource requirement now includes object store memory.
     config = {
         "lineage_pinning_enabled": True,
     }
@@ -247,18 +253,87 @@ def test_automatic_simple(ray_start_cluster):
         return
 
     c = Counter.remote()
+    # Submit  A <- B.
     long_task = consume.remote(f.remote(c, s))
+    # Submit C.
     short_task = f.remote(c)
 
+    # C finishes first.
     ray.get(short_task)
+    # C get preempted by A.
     s.send.remote(clear=True)
     ray.get(long_task)
+    # C gets reconstructed after preemption.
     ray.get(short_task)
 
     summary = memory_summary(stats_only=True)
     print(summary)
     assert "Spill" not in summary
     assert "1 objects preempted" in summary
+    assert "0 tasks preempted" in summary
+
+
+def test_automatic_preempt_running_task(ray_start_cluster):
+    # A <- B
+    # C
+    # 1 CPU.
+    # A finishes first and consumes memory.
+    # C starts, acquires CPU.
+    # B is submitted with higher priority than C.
+    # When C finishes and tries to acquire memory held by A, we preempt C in
+    # favor of running B.
+    config = {
+        "lineage_pinning_enabled": True,
+        "task_retry_delay_ms": 100,
+        "worker_lease_timeout_milliseconds": 0,
+    }
+    cluster = ray_start_cluster
+    # Head node with no resources.
+    cluster.add_node(num_cpus=1, _system_config=config,
+            object_store_memory=10 ** 8)
+
+    ray.init(cluster.address)
+
+    s = SignalActor.remote()
+
+    @ray.remote
+    def f(c, s=None):
+        c.inc.remote()
+        if s is not None:
+            # Let the driver know that we've been scheduled.
+            s.send.remote()
+            time.sleep(1)
+        return np.zeros(8 * 10**7, dtype=np.uint8)
+
+    @ray.remote
+    def consume(x):
+        return
+
+    counter = Counter.remote()
+    # Submit A and wait for it to complete.
+    a = f.remote(counter)
+    print("A", a)
+    ray.get(a)
+
+    # Submit C and wait for it to start running.
+    c = f.remote(counter, s)
+    print("C", c)
+    ray.get(s.wait.remote())
+
+    # Submit B.
+    b = consume.remote(a)
+    print("B", b)
+    del a
+
+    ray.get(b)
+    ray.get(c)
+
+    summary = memory_summary(stats_only=True)
+    print(summary)
+    # Should expect 1 preempted task, no spilling.
+    assert "Spill" not in summary
+    assert "0 objects preempted" in summary
+    assert "1 tasks preempted" in summary
 
 
 if __name__ == "__main__":

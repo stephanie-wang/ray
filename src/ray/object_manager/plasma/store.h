@@ -191,6 +191,12 @@ class PlasmaStore {
   /// Return the plasma object bytes that are consumed by core workers.
   int64_t GetConsumedBytes();
 
+  size_t GetNumTasksPreempted() const {
+    std::lock_guard<std::recursive_mutex> guard(mutex_);
+    return num_tasks_preempted_;
+  }
+
+
   /// Process queued requests to create an object.
   void ProcessCreateRequests();
 
@@ -362,6 +368,8 @@ class PlasmaStore {
 
   /// A running total of the objects that have ever been created on this node.
   size_t num_bytes_created_total_ = 0;
+
+  size_t num_tasks_preempted_ = 0;
 
   const ray::PreemptObjectCallback release_object_references_;
 

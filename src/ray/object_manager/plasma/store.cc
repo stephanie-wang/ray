@@ -352,8 +352,8 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
         std::vector<ObjectID> candidates;
         int64_t max_preemptible_bytes = 0;
         for (const auto &entry : store_info_.objects) {
-          RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
           if (priority < entry.second->priority && !entry.second->preemption_failed) {
+            RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
             candidates.push_back(entry.first);
             max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
           }
@@ -365,11 +365,23 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
           }
           callback(PlasmaError::SpacePending);
         } else if (created_by_worker && higher_priority_ready_task) {
-          // TODO(memory): preempt this task.
-          RAY_LOG(DEBUG) << "There is at least one ready task with a higher priority than object " << object_id << " " << priority << ", TODO";
-          callback(PlasmaError::OutOfMemory);
+          // The resources held by the task trying to create this object could
+          // be used to execute the higher priority ready task. Preempt the
+          // task that is trying to create this object to allow the higher
+          // priority task to run.
+          RAY_LOG(DEBUG) << "There is at least one ready task with a higher priority than object " << object_id
+                         << " " << priority << ", preempting the current task";
+          callback(PlasmaError::PreemptTask);
+          {
+            std::lock_guard<std::recursive_mutex> guard(mutex_);
+            num_tasks_preempted_++;
+          }
         } else if (higher_priority_running_task) {
-          RAY_LOG(DEBUG) << "There is at least one running task with a higher priority than object " << object_id << " " << priority << ", waiting for this task to finish";
+          // There is a higher priority task that is currently running. Wait
+          // for that task to finish to see if it will release memory once it
+          // is finished.
+          RAY_LOG(DEBUG) << "There is at least one running task with a higher priority than object " << object_id
+                         << " " << priority << ", waiting for the higher priority task to finish";
           callback(PlasmaError::SpacePending);
         } else {
           // Otherwise, we should spill existing objects to make room for this object.

@@ -2310,6 +2310,8 @@ rpc::ObjectStoreStats AccumulateStoreStats(
                                    cur_store.consumed_bytes());
     store_stats.set_num_preempted_objects(store_stats.num_preempted_objects() +
         cur_store.num_preempted_objects());
+    store_stats.set_num_preempted_tasks(store_stats.num_preempted_tasks() +
+        cur_store.num_preempted_tasks());
   }
   return store_stats;
 }

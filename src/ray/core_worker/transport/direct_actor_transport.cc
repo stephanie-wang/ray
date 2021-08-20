@@ -354,7 +354,7 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
           // reply for a previously completed task. We are not calling CompletePendingTask
           // because the tasks are pushed directly to the actor, not placed on any queues
           // in task_finisher_.
-        } else if (status.ok()) {
+        } else if (status.ok() && !reply.preempted()) {
           task_finisher_->CompletePendingTask(task_id, reply, addr);
         } else {
           // push task failed due to network error. For example, actor is dead
@@ -507,18 +507,23 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
         // The object is nullptr if it already existed in the object store.
         const auto &result = return_objects[i];
         return_object->set_size(result->GetSize());
-        if (result->GetData() != nullptr && result->GetData()->IsPlasmaBuffer()) {
-          return_object->set_in_plasma(true);
+        rpc::ErrorType error;
+        if (result->IsException(&error) && error == rpc::ErrorType::TASK_PREEMPTED) {
+          reply->set_preempted(true);
         } else {
-          if (result->GetData() != nullptr) {
-            return_object->set_data(result->GetData()->Data(), result->GetData()->Size());
-          }
-          if (result->GetMetadata() != nullptr) {
-            return_object->set_metadata(result->GetMetadata()->Data(),
-                                        result->GetMetadata()->Size());
-          }
-          for (const auto &nested_id : result->GetNestedIds()) {
-            return_object->add_nested_inlined_ids(nested_id.Binary());
+          if (result->GetData() != nullptr && result->GetData()->IsPlasmaBuffer()) {
+            return_object->set_in_plasma(true);
+          } else {
+            if (result->GetData() != nullptr) {
+              return_object->set_data(result->GetData()->Data(), result->GetData()->Size());
+            }
+            if (result->GetMetadata() != nullptr) {
+              return_object->set_metadata(result->GetMetadata()->Data(),
+                                          result->GetMetadata()->Size());
+            }
+            for (const auto &nested_id : result->GetNestedIds()) {
+              return_object->add_nested_inlined_ids(nested_id.Binary());
+            }
           }
         }
       }

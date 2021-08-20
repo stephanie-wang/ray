@@ -149,6 +149,7 @@ message ObjectStoreStats {
   // The number of plasma object bytes that are consumed by core workers.
   int64 consumed_bytes = 12;
   int64 num_preempted_objects = 13;
+  int64 num_preempted_tasks = 14;
 }
 
 message GetNodeStatsReply {

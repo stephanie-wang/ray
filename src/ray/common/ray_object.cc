@@ -45,6 +45,10 @@ RayObject::RayObject(rpc::ErrorType error_type, const uint8_t *append_data,
     : RayObject(MakeBufferFromString(append_data, append_data_size),
                 MakeErrorMetadataBuffer(error_type), {}) {}
 
+RayObject::RayObject(rpc::ErrorType error_type, int64_t preempted_task_size)
+    : RayObject(nullptr, MakeErrorMetadataBuffer(error_type), {}, /*copy_data=*/false,
+        preempted_task_size) {}
+
 bool RayObject::IsException(rpc::ErrorType *error_type) const {
   if (metadata_ == nullptr) {
     return false;

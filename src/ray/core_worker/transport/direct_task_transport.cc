@@ -655,7 +655,7 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
                          /*error=*/!status.ok(), assigned_resources);
           }
         }
-        if (!status.ok()) {
+        if (!status.ok() || reply.preempted()) {
           if (!preempted_tasks_.erase(task_id)) {
             // TODO: It'd be nice to differentiate here between process vs node
             // failure (e.g., by contacting the raylet). If it was a process

@@ -127,6 +127,8 @@ message PushTaskReply {
   uint64 start_time_us = 5;
   uint64 finish_time_us = 6;
   uint64 objects_stored_time_us = 7;
+  // This task was preempted.
+  bool preempted = 8;
 }
 
 message DirectActorCallArgWaitCompleteRequest {

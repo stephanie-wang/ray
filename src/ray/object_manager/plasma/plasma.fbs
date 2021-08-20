@@ -84,6 +84,8 @@ enum PlasmaError:int {
   UnexpectedError,
   // We are trying to make space for this object.
   SpacePending,
+  // Should preempt this task.
+  PreemptTask,
 }
 
 // Plasma store messages

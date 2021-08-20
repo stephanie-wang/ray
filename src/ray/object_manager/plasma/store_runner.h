@@ -27,6 +27,10 @@ class PlasmaStoreRunner {
 
   int64_t GetConsumedBytes();
 
+  size_t GetNumTasksPreempted() const {
+    return store_->GetNumTasksPreempted();
+  }
+
   void GetAvailableMemoryAsync(std::function<void(size_t)> callback) const {
     main_service_.post([this, callback]() { store_->GetAvailableMemory(callback); },
                        "PlasmaStoreRunner.GetAvailableMemory");

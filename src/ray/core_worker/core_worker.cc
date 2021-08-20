@@ -2250,9 +2250,18 @@ Status CoreWorker::AllocateReturnObject(const ObjectID &object_id,
         static_cast<int64_t>(data_size) < max_direct_call_object_size_) {
       data_buffer = std::make_shared<LocalMemoryBuffer>(data_size);
     } else {
-      RAY_RETURN_NOT_OK(plasma_store_provider_->Create(metadata, data_size,
+      auto status = plasma_store_provider_->Create(metadata, data_size,
                                           object_id, owner_address, priority,
-                                          &data_buffer, /*created_by_worker=*/true));
+                                          &data_buffer, /*created_by_worker=*/true);
+      if (!status.ok()) {
+        RAY_LOG(ERROR) << "Plasma store returned " << status << " while trying to create " << object_id;
+      }
+      if (status.IsTaskPreempted()) {
+        *return_object = std::make_shared<RayObject>(rpc::ErrorType::TASK_PREEMPTED,
+            /*preempted_task_size=*/data_size);
+        status = Status::OK();
+      }
+      RAY_RETURN_NOT_OK(status);
       object_already_exists = !data_buffer;
     }
   }

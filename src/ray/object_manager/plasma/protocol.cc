@@ -148,6 +148,9 @@ Status PlasmaErrorStatus(fb::PlasmaError plasma_error) {
   case fb::PlasmaError::UnexpectedError:
     return Status::UnknownError(
         "an unexpected error occurred, likely due to a bug in the system or caller");
+  case fb::PlasmaError::PreemptTask:
+    return Status::TaskPreempted(
+        "This task has been preempted due to lack of memory. Caller should try again");
   default:
     RAY_LOG(FATAL) << "unknown plasma error code " << static_cast<int>(plasma_error);
   }

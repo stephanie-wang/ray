@@ -101,6 +101,7 @@ enum class StatusCode : char {
   ObjectAlreadySealed = 23,
   ObjectStoreFull = 24,
   TransientObjectStoreFull = 25,
+  TaskPreempted = 26,
 };
 
 #if defined(__clang__)
@@ -205,6 +206,10 @@ class RAY_EXPORT Status {
     return Status(StatusCode::TransientObjectStoreFull, msg);
   }
 
+  static Status TaskPreempted(const std::string &msg) {
+    return Status(StatusCode::TaskPreempted, msg);
+  }
+
   // Returns true iff the status indicates success.
   bool ok() const { return (state_ == NULL); }
 
@@ -238,6 +243,9 @@ class RAY_EXPORT Status {
   bool IsObjectStoreFull() const { return code() == StatusCode::ObjectStoreFull; }
   bool IsTransientObjectStoreFull() const {
     return code() == StatusCode::TransientObjectStoreFull;
+  }
+  bool IsTaskPreempted() const {
+    return code() == StatusCode::TaskPreempted;
   }
 
   // Return a string representation of this status suitable for printing.
