@@ -26,7 +26,8 @@ ClusterTaskManager::ClusterTaskManager(
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
-    size_t max_pinned_task_arguments_bytes)
+    size_t max_pinned_task_arguments_bytes,
+    const SpillObjectsCallback &global_spill_objects)
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
@@ -42,7 +43,8 @@ ClusterTaskManager::ClusterTaskManager(
       max_pinned_task_arguments_bytes_(max_pinned_task_arguments_bytes),
       metric_tasks_queued_(0),
       metric_tasks_dispatched_(0),
-      metric_tasks_spilled_(0) {}
+      metric_tasks_spilled_(0),
+      global_spill_objects_(global_spill_objects) {}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
@@ -225,12 +227,18 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
 
       // Check if the node is still schedulable. It may not be if dependency resolution
       // took a long time.
+      // TODO(memory): Should spill if we have no tasks running and cannot
+      // schedule task due to lack of object store memory. How to make sure
+      // that we still spread tasks to other nodes?
       auto allocated_instances = std::make_shared<TaskResourceInstances>();
+      PredefinedResources unavailable_resource = PredefinedResources_MAX;
       bool schedulable = cluster_resource_scheduler_->AllocateLocalTaskResources(
-          spec.GetRequiredResources().GetResourceMap(), allocated_instances);
+          spec.GetRequiredResources().GetResourceMap(), allocated_instances,
+          &unavailable_resource);
 
       if (!schedulable) {
         ReleaseTaskArgs(task_id);
+
         // The local node currently does not have the resources to run the task, so we
         // should try spilling to another node.
         bool did_spill = TrySpillback(work, is_infeasible);
@@ -238,6 +246,20 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
           // There must not be any other available nodes in the cluster, so the task
           // should stay on this node. We can skip the reest of the shape because the
           // scheduler will make the same decision.
+
+          if (unavailable_resource == OBJECT_STORE_MEM) {
+            // This task is blocked by lack of memory.
+            if (!HasHigherPriorityTaskRunning(work_it->first.first)) {
+              // There is no higher priority task that is currently running and
+              // no other node has the available object store memory either.
+              // Therefore, we should spill to make room. We spill on all nodes
+              // instead of just this one because there is a high chance that
+              // other tasks are also blocked by lack of memory.
+              RAY_LOG(INFO) << "No object store memory available to schedule task " << task_id << ", triggering global spill";
+              global_spill_objects_();
+            }
+          }
+
           break;
         }
       } else {
@@ -1184,6 +1206,21 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
   return total_normal_task_resources;
 }
 
+bool ClusterTaskManager::HasHigherPriorityTaskRunning(const Priority &priority) const {
+  // Check whether there is a higher priority currently running task for which
+  // we should wait to finish.
+  for (const auto leased_worker : leased_workers_) {
+    const auto &running_task_priority = leased_worker.second.second;
+    if (running_task_priority < priority) {
+      const auto &task_id = leased_worker.second.first->GetAssignedTask().GetTaskSpecification().TaskId();
+      RAY_LOG(DEBUG) << "Running task " << task_id << " has higher priority " << running_task_priority << " than " << priority;
+      return true;;
+      break;
+    }
+  }
+  return false;
+}
+
 void ClusterTaskManager::HasHigherPriorityTaskQueued(int64_t space_needed,
     const Priority &priority, NodeID *remote_node_id,
     bool *has_higher_priority_ready_task,
@@ -1214,18 +1251,7 @@ void ClusterTaskManager::HasHigherPriorityTaskQueued(int64_t space_needed,
       break;
     }
   }
-
-  // Check whether there is a higher priority currently running task for which
-  // we should wait to finish.
-  for (const auto leased_worker : leased_workers_) {
-    const auto &running_task_priority = leased_worker.second.second;
-    if (running_task_priority < priority) {
-      const auto &task_id = leased_worker.second.first->GetAssignedTask().GetTaskSpecification().TaskId();
-      RAY_LOG(DEBUG) << "Running task " << task_id << " has higher priority " << running_task_priority << " than " << priority;
-      *has_higher_priority_running_task = true;
-      break;
-    }
-  }
+  *has_higher_priority_running_task = HasHigherPriorityTaskRunning(priority);
 }
 
 }  // namespace raylet

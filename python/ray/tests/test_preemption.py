@@ -346,6 +346,9 @@ def test_spillback_scheduling(ray_start_cluster):
         "lineage_pinning_enabled": True,
         "task_retry_delay_ms": 100,
         "worker_lease_timeout_milliseconds": 0,
+        # This is needed to make sure that the scheduler respects
+        # locality-based scheduling.
+        "scheduler_spread_threshold": 1.0,
     }
     cluster = ray_start_cluster
     # Head node with no resources.
@@ -365,18 +368,62 @@ def test_spillback_scheduling(ray_start_cluster):
         return
 
     xs = [f.remote() for _ in range(10)]
-    for x in xs:
-        ref = done.remote(x)
-        print(ref, "depends on", x)
-        ray.get(ref)
-    #ray.get([done.remote(x) for x in xs])
+    #for x in xs:
+    #    ref = done.remote(x)
+    #    print(ref, "depends on", x)
+    #    ray.get(ref)
+    ray.get([done.remote(x) for x in xs])
+
+    summary = memory_summary(stats_only=True)
+    print(summary)
+    # Should expect 1 preempted task, no spilling.
+    assert "Spill" not in summary
+    assert "0 objects preempted" in summary
+
+
+def test_spillback_scheduling_oom(ray_start_cluster):
+    # Submit many tasks that each require 1 CPU and produce a lot of memory.
+    # Unlike the above test, the total memory capacity will exceed the
+    # cluster's capacity.
+    # Check that the preemption based policy will still spill on each node.
+    config = {
+        "lineage_pinning_enabled": True,
+        "task_retry_delay_ms": 100,
+        "worker_lease_timeout_milliseconds": 0,
+        # This is needed to make sure that the scheduler respects
+        # locality-based scheduling.
+        "scheduler_spread_threshold": 1.0,
+    }
+    cluster = ray_start_cluster
+    # Head node with no resources.
+    cluster.add_node(num_cpus=2, _system_config=config,
+            object_store_memory=10 ** 8)
+    for _ in range(4):
+        cluster.add_node(num_cpus=2, object_store_memory=10 ** 8)
+
+    ray.init(cluster.address)
+
+    @ray.remote
+    def f():
+        return np.zeros(int(3.5 * 10**7), dtype=np.uint8)
+
+    @ray.remote
+    def done(x):
+        return
+
+    xs = [f.remote() for _ in range(20)]
+    #for x in xs:
+    #    ref = done.remote(x)
+    #    print(ref, "depends on", x)
+    #    ray.get(ref)
+    ray.get([done.remote(x) for x in xs])
 
     summary = memory_summary(stats_only=True)
     print(summary)
     # Should expect 1 preempted task, no spilling.
     #assert "Spill" not in summary
     #assert "0 objects preempted" in summary
-    #assert "1 tasks preempted" in summary
+
 
 if __name__ == "__main__":
     import pytest

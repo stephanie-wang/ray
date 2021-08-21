@@ -220,7 +220,10 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             // This callback is called from the plasma store thread.
             // NOTE: It means the local object manager should be thread-safe.
             io_service_.post(
-                [this]() { GetLocalObjectManager().SpillObjectUptoMaxThroughput(); },
+                [this]() {
+                should_global_spill_ = true;
+                GetLocalObjectManager().SpillObjectUptoMaxThroughput();
+                },
                 "NodeManager.SpillObjects");
             return GetLocalObjectManager().IsSpillingInProgress();
           },
@@ -346,7 +349,12 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
              std::vector<std::unique_ptr<RayObject>> *results) {
         return GetObjectsFromPlasma(object_ids, results);
       },
-      max_task_args_memory));
+      max_task_args_memory,
+      [this]() {
+        should_global_spill_ = true;
+        GetLocalObjectManager().SpillObjectUptoMaxThroughput();
+        return true;
+      }));
   placement_group_resource_manager_ = std::make_shared<NewPlacementGroupResourceManager>(
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),
       // TODO (Alex): Ideally we could do these in a more robust way (retry
@@ -607,6 +615,11 @@ void NodeManager::FillResourceReport(rpc::ResourcesData &resources_data) {
     global_gc_throttler_.RunNow();
   }
 
+  if (should_global_spill_) {
+    resources_data.set_should_global_spill(true);
+    should_global_spill_ = false;
+  }
+
   // Trigger local GC if needed. This throttles the frequency of local GC calls
   // to at most once per heartbeat interval.
   if ((should_local_gc_ ||
@@ -638,7 +651,9 @@ void NodeManager::ReportResourceUsage() {
 
   if (resources_data->resources_total_size() > 0 ||
       resources_data->resources_available_changed() ||
-      resources_data->resource_load_changed() || resources_data->should_global_gc()) {
+      resources_data->resource_load_changed() ||
+      resources_data->should_global_gc() ||
+      resources_data->should_global_spill()) {
     RAY_CHECK_OK(gcs_client_->NodeResources().AsyncReportResourceUsage(resources_data,
                                                                        /*done*/ nullptr));
   }
@@ -977,6 +992,10 @@ void NodeManager::UpdateResourceUsage(const NodeID &node_id,
   // Trigger local GC at the next heartbeat interval.
   if (resource_data.should_global_gc()) {
     should_local_gc_ = true;
+  }
+
+  if (resource_data.should_global_spill()) {
+    local_object_manager_.SpillObjectUptoMaxThroughput();
   }
 
   // If light resource usage report enabled, we update remote resources only when related

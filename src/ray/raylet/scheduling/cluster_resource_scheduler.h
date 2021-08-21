@@ -296,7 +296,8 @@ class ClusterResourceScheduler : public ClusterResourceSchedulerInterface {
   /// allocated resources, i.e., task_allocation.
   bool AllocateTaskResourceInstances(
       const ResourceRequest &resource_request,
-      std::shared_ptr<TaskResourceInstances> task_allocation);
+      std::shared_ptr<TaskResourceInstances> task_allocation,
+      PredefinedResources *unavailable_resource);
 
   /// Free resources which were allocated with a task. The freed resources are
   /// added back to the node's local available resources.
@@ -373,10 +374,12 @@ class ClusterResourceScheduler : public ClusterResourceSchedulerInterface {
   /// False otherwise.
   bool AllocateLocalTaskResources(
       const std::unordered_map<std::string, double> &task_resources,
-      std::shared_ptr<TaskResourceInstances> task_allocation);
+      std::shared_ptr<TaskResourceInstances> task_allocation,
+      PredefinedResources *unavailable_resource = nullptr);
 
   bool AllocateLocalTaskResources(const ResourceRequest &resource_request,
-                                  std::shared_ptr<TaskResourceInstances> task_allocation);
+                                  std::shared_ptr<TaskResourceInstances> task_allocation,
+                                  PredefinedResources *unavailable_resource = nullptr);
 
   /// Subtract the resources required by a given resource request (resource_request) from
   /// a given remote node.

@@ -814,7 +814,8 @@ bool ClusterResourceScheduler::AllocateResourceInstances(
 
 bool ClusterResourceScheduler::AllocateTaskResourceInstances(
     const ResourceRequest &resource_request,
-    std::shared_ptr<TaskResourceInstances> task_allocation) {
+    std::shared_ptr<TaskResourceInstances> task_allocation,
+    PredefinedResources *unavailable_resource) {
   RAY_CHECK(task_allocation != nullptr);
   if (nodes_.find(local_node_id_) == nodes_.end()) {
     return false;
@@ -828,8 +829,8 @@ bool ClusterResourceScheduler::AllocateTaskResourceInstances(
       if (!AllocateResourceInstances(resource_request.predefined_resources[i],
                                      local_resources_.predefined_resources[i].available,
                                      &task_allocation->predefined_resources[i])) {
-        if (i == OBJECT_STORE_MEM) {
-          RAY_LOG(DEBUG) << "Require " << resource_request.predefined_resources[i] << " object store memory, availability is now only: " << local_resources_.predefined_resources[i].available[0];
+        if (unavailable_resource) {
+          *unavailable_resource = OBJECT_STORE_MEM;
         }
         // Allocation failed. Restore node's local resources by freeing the resources
         // of the failed allocation.
@@ -982,8 +983,9 @@ std::vector<double> ClusterResourceScheduler::SubtractGPUResourceInstances(
 
 bool ClusterResourceScheduler::AllocateLocalTaskResources(
     const ResourceRequest &resource_request,
-    std::shared_ptr<TaskResourceInstances> task_allocation) {
-  if (AllocateTaskResourceInstances(resource_request, task_allocation)) {
+    std::shared_ptr<TaskResourceInstances> task_allocation,
+    PredefinedResources *unavailable_resource) {
+  if (AllocateTaskResourceInstances(resource_request, task_allocation, unavailable_resource)) {
     UpdateLocalAvailableResourcesFromResourceInstances();
     return true;
   }
@@ -992,11 +994,12 @@ bool ClusterResourceScheduler::AllocateLocalTaskResources(
 
 bool ClusterResourceScheduler::AllocateLocalTaskResources(
     const std::unordered_map<std::string, double> &task_resources,
-    std::shared_ptr<TaskResourceInstances> task_allocation) {
+    std::shared_ptr<TaskResourceInstances> task_allocation,
+    PredefinedResources *unavailable_resource) {
   RAY_CHECK(task_allocation != nullptr);
   ResourceRequest resource_request =
       ResourceMapToResourceRequest(string_to_int_map_, task_resources);
-  return AllocateLocalTaskResources(resource_request, task_allocation);
+  return AllocateLocalTaskResources(resource_request, task_allocation, unavailable_resource);
 }
 
 std::string ClusterResourceScheduler::GetResourceNameFromIndex(int64_t res_idx) {

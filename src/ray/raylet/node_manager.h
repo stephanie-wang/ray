@@ -706,6 +706,8 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// on all local workers of this raylet.
   bool should_local_gc_ = false;
 
+  bool should_global_spill_ = false;
+
   /// When plasma storage usage is high, we'll run gc to reduce it.
   double high_plasma_storage_usage_ = 1.0;
 

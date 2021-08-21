@@ -359,6 +359,10 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
         if (created_by_worker && !remote_node_id.IsNil()) {
           RAY_LOG(DEBUG) << "Preempting task that creates object " << object_id << ", should reschedule at " << remote_node_id;
           callback(PlasmaError::PreemptTask);
+          {
+            std::lock_guard<std::recursive_mutex> guard(mutex_);
+            num_tasks_preempted_++;
+          }
           return;
         }
 

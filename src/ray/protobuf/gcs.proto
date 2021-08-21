@@ -463,6 +463,7 @@ message ResourcesData {
   // Indicates whether resource normal task is changed. Only used when
   // light heartbeat enabled.
   bool resources_normal_task_changed = 11;
+  bool should_global_spill = 12;
 }
 
 message ResourceUsageBatchData {
