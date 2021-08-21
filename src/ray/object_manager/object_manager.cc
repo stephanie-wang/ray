@@ -541,6 +541,11 @@ void ObjectManager::SendObjectChunk(const UniqueID &push_id, const ObjectID &obj
   }
   push_request.set_data(std::move(optional_chunk.value()));
 
+  {
+    std::lock_guard<std::mutex> lock(profile_mutex_);
+    num_bytes_pushed_ += push_request.data().size();
+  }
+
   // record the time cost between send chunk and receive reply
   rpc::ClientCallback<rpc::PushReply> callback =
       [this, start_time, object_id, node_id, chunk_index, on_complete](
@@ -788,6 +793,10 @@ bool ObjectManager::ReceiveObjectChunk(const NodeID &node_id, const ObjectID &ob
                  << " of object " << object_id << " chunk index: " << chunk_index
                  << ", chunk data size: " << data.size()
                  << ", object size: " << data_size;
+  {
+    std::lock_guard<std::mutex> lock(profile_mutex_);
+    num_bytes_pulled_ += data.size();
+  }
 
   Priority priority;
   if (!pull_manager_->IsObjectActive(object_id, &priority)) {
@@ -966,6 +975,8 @@ void ObjectManager::FillObjectStoreStats(rpc::GetNodeStatsReply *reply) const {
   stats->set_num_local_objects(local_objects_.size());
   stats->set_consumed_bytes(plasma::plasma_store_runner->GetConsumedBytes());
   stats->set_num_preempted_tasks(plasma::plasma_store_runner->GetNumTasksPreempted());
+  stats->set_num_bytes_pushed(num_bytes_pushed_);
+  stats->set_num_bytes_pulled(num_bytes_pulled_);
 }
 
 void ObjectManager::Tick(const boost::system::error_code &e) {

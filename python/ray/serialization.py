@@ -226,6 +226,8 @@ class SerializationContext:
                 return ObjectLostError(object_ref.hex())
             elif error_type == ErrorType.Value("RUNTIME_ENV_SETUP_FAILED"):
                 return RuntimeEnvSetupError()
+            elif error_type == ErrorType.Value("TASK_PREEMPTED"):
+                return TaskCancelledError()
             else:
                 assert error_type != ErrorType.Value("OBJECT_IN_PLASMA"), \
                     "Tried to get object that has been promoted to plasma."

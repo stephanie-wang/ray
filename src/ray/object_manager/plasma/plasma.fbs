@@ -86,6 +86,7 @@ enum PlasmaError:int {
   SpacePending,
   // Should preempt this task.
   PreemptTask,
+  FallbackAllocate,
 }
 
 // Plasma store messages

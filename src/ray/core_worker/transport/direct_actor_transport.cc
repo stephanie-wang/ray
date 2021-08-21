@@ -111,6 +111,7 @@ Status CoreWorkerDirectActorTaskSubmitter::SubmitTask(TaskSpecification task_spe
     // No need to increment the number of completed tasks since the actor is
     // dead.
     RAY_UNUSED(!task_finisher_->PendingTaskFailed(task_id, rpc::ErrorType::ACTOR_DIED,
+                                                  rpc::PushTaskReply(),
                                                   &status, creation_task_exception));
   }
 
@@ -217,7 +218,8 @@ void CoreWorkerDirectActorTaskSubmitter::DisconnectActor(
       // No need to increment the number of completed tasks since the actor is
       // dead.
       RAY_UNUSED(!task_finisher_->PendingTaskFailed(task_spec.TaskId(),
-                                                    rpc::ErrorType::ACTOR_DIED, &status,
+                                                    rpc::ErrorType::ACTOR_DIED,
+                                                    rpc::PushTaskReply(), &status,
                                                     creation_task_exception));
       head = requests.erase(head);
     }
@@ -366,7 +368,7 @@ void CoreWorkerDirectActorTaskSubmitter::PushActorTask(const ClientQueue &queue,
 
           bool immediately_mark_object_fail = (queue.state == rpc::ActorTableData::DEAD);
           bool will_retry = task_finisher_->PendingTaskFailed(
-              task_id, rpc::ErrorType::ACTOR_DIED, &status, queue.creation_task_exception,
+              task_id, rpc::ErrorType::ACTOR_DIED, reply, &status, queue.creation_task_exception,
               immediately_mark_object_fail);
           if (will_retry) {
             increment_completed_tasks = false;

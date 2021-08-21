@@ -229,7 +229,6 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
                        << " in plasma on a dead node, attempting to recover.";
         reconstruct_object_callback_(object_id);
       }
-      required_object_store_memory_bytes += return_object.size();
     } else {
       // NOTE(swang): If a direct object was promoted to plasma, then we do not
       // record the node ID that it was pinned at, which means that we will not
@@ -258,6 +257,7 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
         direct_return_ids.push_back(object_id);
       }
     }
+    required_object_store_memory_bytes += return_object.size();
   }
 
   TaskSpecification spec;
@@ -307,13 +307,24 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
 }
 
 bool TaskManager::PendingTaskFailed(
-    const TaskID &task_id, rpc::ErrorType error_type, Status *status,
+    const TaskID &task_id, rpc::ErrorType error_type,
+    const rpc::PushTaskReply &reply,
+    Status *status,
     const std::shared_ptr<rpc::RayException> &creation_task_exception,
     bool immediately_mark_object_fail) {
   // Note that this might be the __ray_terminate__ task, so we don't log
   // loudly with ERROR here.
   RAY_LOG(DEBUG) << "Task " << task_id << " failed with error "
                  << rpc::ErrorType_Name(error_type);
+
+  int64_t required_object_store_memory_bytes = 0;
+  if (error_type == rpc::ErrorType::TASK_PREEMPTED) {
+    for (int i = 0; i < reply.return_objects_size(); i++) {
+      const auto &return_object = reply.return_objects(i);
+      required_object_store_memory_bytes += return_object.size();
+    }
+  }
+
   int num_retries_left = 0;
   TaskSpecification spec;
   bool release_lineage = true;
@@ -324,6 +335,13 @@ bool TaskManager::PendingTaskFailed(
         << "Tried to complete task that was not pending " << task_id;
     RAY_CHECK(it->second.pending)
         << "Tried to complete task that was not pending " << task_id;
+
+    if (required_object_store_memory_bytes > 0) {
+      RAY_LOG(DEBUG) << "Updating object store memory requirement for task " << task_id << " to " << required_object_store_memory_bytes;
+      it->second.spec.SetRequiredResource("object_store_memory", required_object_store_memory_bytes);
+      RAY_LOG(DEBUG) << "Task now requires " << it->second.spec.GetRequiredResources().GetResource("object_store_memory");
+    }
+
     spec = it->second.spec;
     num_retries_left = it->second.num_retries_left;
     if (num_retries_left == 0) {

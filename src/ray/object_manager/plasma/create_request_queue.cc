@@ -121,15 +121,35 @@ void CreateRequestQueue::HandleCreateReply(const ray::TaskKey &task_key, PlasmaE
   request_it->second->error = error;
   RAY_CHECK(error == PlasmaError::OutOfMemory ||
       error == PlasmaError::SpacePending ||
-      error == PlasmaError::PreemptTask) << "Unexpected error: " << flatbuf::EnumNamePlasmaError(error);
+      error == PlasmaError::PreemptTask ||
+      error == PlasmaError::FallbackAllocate) << "Unexpected error: " << flatbuf::EnumNamePlasmaError(error);
 
   auto now = get_time_();
   if (error == PlasmaError::SpacePending) {
+    RAY_LOG(DEBUG) << "Waiting for space to become available before retrying " << task_key.second;
     return;
   }
 
   if (error == PlasmaError::PreemptTask) {
     // Return an error to the client. They should retry this task.
+    FinishRequest(request_it);
+    return;
+  }
+
+  if (error == PlasmaError::FallbackAllocate) {
+    // Trigger the fallback allocator.
+    auto status = ProcessRequest(/*fallback_allocator=*/true, request_it->second,
+                                 /*spilling_required=*/nullptr, /*callback=*/nullptr);
+    if (!status.ok()) {
+      std::string dump = "";
+      if (dump_debug_info_callback_) {
+        dump = dump_debug_info_callback_();
+      }
+      RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
+                    << request_it->second->object_id << " of size "
+                    << request_it->second->object_size / 1024 / 1024 << "MB\n"
+                    << dump;
+    }
     FinishRequest(request_it);
     return;
   }

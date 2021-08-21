@@ -31,7 +31,9 @@ class TaskFinisherInterface {
                                    const rpc::Address &actor_addr) = 0;
 
   virtual bool PendingTaskFailed(
-      const TaskID &task_id, rpc::ErrorType error_type, Status *status,
+      const TaskID &task_id, rpc::ErrorType error_type,
+      const rpc::PushTaskReply &reply,
+      Status *status,
       const std::shared_ptr<rpc::RayException> &creation_task_exception = nullptr,
       bool immediately_mark_object_fail = true) = 0;
 
@@ -134,7 +136,9 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// result object as failed.
   /// \return Whether the task will be retried or not.
   bool PendingTaskFailed(
-      const TaskID &task_id, rpc::ErrorType error_type, Status *status = nullptr,
+      const TaskID &task_id, rpc::ErrorType error_type,
+      const rpc::PushTaskReply &reply,
+      Status *status = nullptr,
       const std::shared_ptr<rpc::RayException> &creation_task_exception = nullptr,
       bool immediately_mark_object_fail = true) override;
 

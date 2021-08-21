@@ -140,6 +140,8 @@ def store_stats_summary(reply):
                     reply.store_stats.restore_time_total_s)))
     store_summary += ("{} objects preempted.\n".format(reply.store_stats.num_preempted_objects))
     store_summary += ("{} tasks preempted.\n".format(reply.store_stats.num_preempted_tasks))
+    store_summary += ("{} bytes pushed.\n".format(reply.store_stats.num_bytes_pushed))
+    store_summary += ("{} bytes pulled.\n".format(reply.store_stats.num_bytes_pulled))
     if reply.store_stats.consumed_bytes > 0:
         store_summary += ("Objects consumed by Ray tasks: {} MiB.".format(
             int(reply.store_stats.consumed_bytes / (1024 * 1024))))

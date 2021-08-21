@@ -171,7 +171,10 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// Calculate normal task resources.
   ResourceSet CalcNormalTaskResources() const override;
 
-  std::pair<bool, bool> HasHigherPriorityTaskQueued(const Priority &priority) const override;
+  void HasHigherPriorityTaskQueued(int64_t space_needed,
+      const Priority &priority, NodeID *remote_node_id,
+      bool *has_higher_priority_ready_task,
+      bool *has_higher_priority_running_task) const override;
 
  private:
   /// (Step 2) For each task in tasks_to_schedule_, pick a node in the system

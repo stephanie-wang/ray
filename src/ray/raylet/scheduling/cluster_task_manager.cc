@@ -1184,29 +1184,48 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
   return total_normal_task_resources;
 }
 
-std::pair<bool, bool> ClusterTaskManager::HasHigherPriorityTaskQueued(const Priority &priority) const {
+void ClusterTaskManager::HasHigherPriorityTaskQueued(int64_t space_needed,
+    const Priority &priority, NodeID *remote_node_id,
+    bool *has_higher_priority_ready_task,
+    bool *has_higher_priority_running_task) const {
   // Check whether this task could be spilled back to a different node. Attach
   // object store memory requirement to task description.
-  bool has_higher_priority_ready_task = false;
-  for (const auto &queue : tasks_to_dispatch_) {
-    auto &top_priority = queue.second.begin()->first.first;
-    if (top_priority < priority) {
-      has_higher_priority_ready_task = true;
-      break;
-    }
+  std::unordered_map<std::string, double> required_resources;
+  required_resources["object_store_memory"] = space_needed;
+  int64_t _unused;
+  bool is_infeasible;
+  std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
+      required_resources,
+      /*is_actor_creation_task=*/false,
+      /*force_spillback=*/false, &_unused, &is_infeasible);
+
+  if (!node_id_string.empty() && node_id_string != self_node_id_.Binary()) {
+    *remote_node_id = NodeID::FromBinary(node_id_string);
   }
 
   // Check whether there is a higher priority ready task in the local task
   // queue that could run instead.
-  bool has_higher_priority_running_task = false;
-  for (const auto leased_worker : leased_workers_) {
-    const auto &running_task_priority = leased_worker.second.second;
-    if (running_task_priority < priority) {
-      has_higher_priority_running_task = true;
+  for (const auto &queue : tasks_to_dispatch_) {
+    const auto &key = queue.second.begin()->first;
+    auto &top_priority = key.first;
+    if (top_priority < priority) {
+      RAY_LOG(DEBUG) << "Task " << key.second << " has higher priority " << top_priority << " than " << priority;
+      *has_higher_priority_ready_task = true;
       break;
     }
   }
-  return std::make_pair<>(has_higher_priority_ready_task, has_higher_priority_running_task);
+
+  // Check whether there is a higher priority currently running task for which
+  // we should wait to finish.
+  for (const auto leased_worker : leased_workers_) {
+    const auto &running_task_priority = leased_worker.second.second;
+    if (running_task_priority < priority) {
+      const auto &task_id = leased_worker.second.first->GetAssignedTask().GetTaskSpecification().TaskId();
+      RAY_LOG(DEBUG) << "Running task " << task_id << " has higher priority " << running_task_priority << " than " << priority;
+      *has_higher_priority_running_task = true;
+      break;
+    }
+  }
 }
 
 }  // namespace raylet

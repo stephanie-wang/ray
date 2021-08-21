@@ -55,7 +55,7 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
               RAY_LOG(ERROR) << "Failed to create actor " << actor_id
                              << " with status: " << status.ToString();
               RAY_UNUSED(task_finisher_->PendingTaskFailed(
-                  task_id, rpc::ErrorType::ACTOR_CREATION_FAILED, &status));
+                  task_id, rpc::ErrorType::ACTOR_CREATION_FAILED, rpc::PushTaskReply(), &status));
             }
           }));
       return;
@@ -116,7 +116,7 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
     }
     if (!keep_executing) {
       RAY_UNUSED(task_finisher_->PendingTaskFailed(
-          task_spec.TaskId(), rpc::ErrorType::TASK_CANCELLED, nullptr));
+          task_spec.TaskId(), rpc::ErrorType::TASK_CANCELLED, rpc::PushTaskReply(), nullptr));
     }
   });
   return Status::OK();
@@ -616,6 +616,7 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
       [this, task_spec, task_id, is_actor, is_actor_creation, scheduling_key, addr,
        assigned_resources](Status status, const rpc::PushTaskReply &reply) {
         {
+          RAY_LOG(DEBUG) << "PushTaskReply for task " << task_id;
           absl::MutexLock lock(&mu_);
           executing_tasks_.erase(task_id);
 
@@ -655,21 +656,24 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
                          /*error=*/!status.ok(), assigned_resources);
           }
         }
-        if (!status.ok() || reply.preempted()) {
-          if (!preempted_tasks_.erase(task_id)) {
-            // TODO: It'd be nice to differentiate here between process vs node
-            // failure (e.g., by contacting the raylet). If it was a process
-            // failure, it may have been an application-level error and it may
-            // not make sense to retry the task.
-            RAY_UNUSED(task_finisher_->PendingTaskFailed(
-                task_id,
-                is_actor ? rpc::ErrorType::ACTOR_DIED : rpc::ErrorType::WORKER_DIED,
-                &status));
-          } else {
-            // Task cancellation succeeded. Resubmit the preempted task so that
-            // it has to resolve dependencies again.
-            SubmitTask(task_spec);
-          }
+
+        if (preempted_tasks_.erase(task_id)) {
+          // Task cancellation succeeded. Resubmit the preempted task so that
+          // it has to resolve dependencies again.
+          SubmitTask(task_spec);
+        } else if (reply.preempted()) {
+          RAY_UNUSED(task_finisher_->PendingTaskFailed(
+              task_id, rpc::ErrorType::TASK_PREEMPTED, reply, &status));
+        } else if (!status.ok()) {
+          // TODO: It'd be nice to differentiate here between process vs node
+          // failure (e.g., by contacting the raylet). If it was a process
+          // failure, it may have been an application-level error and it may
+          // not make sense to retry the task.
+          RAY_UNUSED(task_finisher_->PendingTaskFailed(
+              task_id,
+              is_actor ? rpc::ErrorType::ACTOR_DIED : rpc::ErrorType::WORKER_DIED,
+              reply,
+              &status));
         } else {
           task_finisher_->CompletePendingTask(task_id, reply, addr.ToProto());
         }
@@ -752,7 +756,7 @@ Status CoreWorkerDirectTaskSubmitter::CancelTask(TaskSpecification task_spec,
       RAY_LOG(DEBUG) << "Cancelled task removed from queue, failing " << task_spec.TaskId();
       RAY_CHECK(cancelled_tasks_.erase(task_spec.TaskId()));
       RAY_UNUSED(task_finisher_->PendingTaskFailed(
-          task_spec.TaskId(), rpc::ErrorType::TASK_CANCELLED, nullptr));
+          task_spec.TaskId(), rpc::ErrorType::TASK_CANCELLED, rpc::PushTaskReply(), nullptr));
     }
   }
 

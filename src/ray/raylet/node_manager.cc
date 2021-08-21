@@ -257,11 +257,13 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           },
           /*check_higher_priority_tasks_queued=*/
           [this](int64_t space_needed, const Priority &priority, const TaskQueueInfoCallback &callback) {
-            auto result = cluster_task_manager_->HasHigherPriorityTaskQueued(priority);
-            bool higher_priority_ready_task = result.first;
-            bool higher_priority_running_task = result.second;
-            // TODO(memory).
-            callback(NodeID::Nil(), higher_priority_ready_task, higher_priority_running_task);
+            NodeID node_id;
+            bool has_higher_priority_ready_task = false;
+            bool has_higher_priority_running_task = false;
+            cluster_task_manager_->HasHigherPriorityTaskQueued(space_needed,
+                priority, &node_id, &has_higher_priority_ready_task,
+                &has_higher_priority_running_task);
+            callback(node_id, has_higher_priority_ready_task, has_higher_priority_running_task);
           }),
       periodical_runner_(io_service),
       report_resources_period_ms_(config.report_resources_period_ms),
@@ -2312,6 +2314,10 @@ rpc::ObjectStoreStats AccumulateStoreStats(
         cur_store.num_preempted_objects());
     store_stats.set_num_preempted_tasks(store_stats.num_preempted_tasks() +
         cur_store.num_preempted_tasks());
+    store_stats.set_num_bytes_pushed(store_stats.num_bytes_pushed() +
+        cur_store.num_bytes_pushed());
+    store_stats.set_num_bytes_pulled(store_stats.num_bytes_pulled() +
+        cur_store.num_bytes_pulled());
   }
   return store_stats;
 }

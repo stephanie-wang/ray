@@ -338,14 +338,29 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
 
 PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const ray::Priority &priority, int64_t size,
     bool created_by_worker, std::function<void(PlasmaError error)> callback) {
-  int64_t required_space =
-      PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
-
   // If there is a higher priority ready task in the local task queue that
   // could run instead, preempt the task is trying to create this object.
-  check_higher_priority_tasks_queued_(required_space, priority, [this, object_id, required_space, priority, created_by_worker, callback](const NodeID &remote_node_id, bool higher_priority_ready_task, bool higher_priority_running_task) {
-      io_context_.post([this, object_id, required_space, priority, created_by_worker, callback, remote_node_id, higher_priority_ready_task, higher_priority_running_task]() {
-        // TODO(memory): Preempt if we can schedule to a remote node.
+  check_higher_priority_tasks_queued_(size, priority, [this, object_id, size, priority, created_by_worker, callback](const NodeID &remote_node_id, bool higher_priority_ready_task, bool higher_priority_running_task) {
+      io_context_.post([this, size, object_id, priority, created_by_worker, callback, remote_node_id, higher_priority_ready_task, higher_priority_running_task]() {
+        RAY_LOG(DEBUG) << "HandleObjectOomAsync " << object_id << " spillback_at_node_id: "
+                       << remote_node_id << " has_higher_priority_ready_task? " << higher_priority_ready_task
+                       << " has_higher_priority_running_task? " << higher_priority_running_task;
+        int64_t required_space =
+            PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
+        if (required_space <= 0) {
+          // We have enough space but can't allocate the object. This must be
+          // due to fragmentation.
+          callback(PlasmaError::FallbackAllocate);
+          return;
+        }
+        // Preempt if we can schedule to a remote node. The task will get
+        // scheduled again, this time taking its object store memory
+        // requirement into account.
+        if (created_by_worker && !remote_node_id.IsNil()) {
+          RAY_LOG(DEBUG) << "Preempting task that creates object " << object_id << ", should reschedule at " << remote_node_id;
+          callback(PlasmaError::PreemptTask);
+          return;
+        }
 
         // Try to find a lower priority local object that we can forcibly evict to
         // make room for this one.
@@ -359,7 +374,7 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
           }
         }
 
-        if (max_preemptible_bytes >= required_space) {
+        if (max_preemptible_bytes >= required_space && max_preemptible_bytes > 0) {
           for (const auto &candidate : candidates) {
             PreemptObject(candidate);
           }
@@ -384,6 +399,7 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
                          << " " << priority << ", waiting for the higher priority task to finish";
           callback(PlasmaError::SpacePending);
         } else {
+          RAY_LOG(DEBUG) << "Out of memory and nothing to preempt, spilling to make room for object " << object_id;
           // Otherwise, we should spill existing objects to make room for this object.
           callback(PlasmaError::OutOfMemory);
         }
@@ -902,7 +918,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     for (size_t i = 0; i < request->priority()->size(); i++) {
       priority.score.push_back(request->priority()->Get(i));
     }
-    ray::TaskKey key(priority, object_id.TaskId());
+    ray::TaskKey key(priority, ObjectID::FromRandom().TaskId());
 
     auto handle_create = [this, client, message](bool fallback_allocator,
                                                  PlasmaObject *result,

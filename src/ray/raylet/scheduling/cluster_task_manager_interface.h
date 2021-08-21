@@ -124,7 +124,11 @@ class ClusterTaskManagerInterface {
   /// Calculate normal task resources.
   virtual ResourceSet CalcNormalTaskResources() const = 0;
 
-  virtual std::pair<bool, bool> HasHigherPriorityTaskQueued(const Priority &priority) const = 0;
+  virtual void HasHigherPriorityTaskQueued(int64_t space_needed,
+      const Priority &priority, NodeID *remote_node_id,
+      bool *has_higher_priority_ready_task,
+      bool *has_higher_priority_running_task) const = 0;
+
 };
 }  // namespace raylet
 }  // namespace ray

@@ -150,6 +150,8 @@ message ObjectStoreStats {
   int64 consumed_bytes = 12;
   int64 num_preempted_objects = 13;
   int64 num_preempted_tasks = 14;
+  int64 num_bytes_pushed = 15;
+  int64 num_bytes_pulled = 16;
 }
 
 message GetNodeStatsReply {

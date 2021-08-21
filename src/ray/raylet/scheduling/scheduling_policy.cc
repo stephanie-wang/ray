@@ -37,6 +37,7 @@ int64_t HybridPolicy(const ResourceRequest &resource_request, const int64_t loca
   }
   for (; round_it != round.end(); round_it++) {
     const auto &node_id = *round_it;
+    RAY_LOG(DEBUG) << "Scheduling policy checking node " << node_id;
     const auto &it = nodes.find(node_id);
     RAY_CHECK(it != nodes.end());
     const auto &node = it->second;
