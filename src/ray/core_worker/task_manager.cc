@@ -54,23 +54,12 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
     task_deps.push_back(actor_creation_return_id);
   }
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
-  auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
 
-  // Propagate priorities.
-  const auto task_dep_priorities = reference_counter_->PropagatePriority(
-      task_deps, depth, num_tasks_submitted_);
-  // Scores propagate downstream, so inherit score from directly upstream
-  // tasks.
-  Priority priority(depth);
-  priority.SetScore(depth, num_tasks_submitted_);
-  for (const auto &p : task_dep_priorities) {
-    for (int64_t i = depth; i < static_cast<int64_t>(p.score.size()); i++) {
-      auto s = p.GetScore(i);
-      if (s < priority.GetScore(i)) {
-        priority.SetScore(i, s);
-      }
-    }
-  }
+  ObjectID min_arg;
+  auto priority = reference_counter_->GetMinPriority(task_deps, &min_arg);
+  auto task_index = reference_counter_->GetDependentTaskIds(min_arg).size();
+  auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
+  priority.SetScore(depth, task_index);
 
   // Add new owned objects for the return values of the task.
   const auto &return_ids = spec.ReturnIds();

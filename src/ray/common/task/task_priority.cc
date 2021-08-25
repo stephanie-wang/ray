@@ -11,6 +11,21 @@ void Priority::extend(int64_t size) const {
   }
 }
 
+bool Priority::operator<(const Priority &rhs) const {
+  rhs.extend(score.size());
+  extend(rhs.score.size());
+
+  return score < rhs.score;
+}
+
+bool Priority::operator<=(const Priority &rhs) const {
+  rhs.extend(score.size());
+  extend(rhs.score.size());
+
+  return score <= rhs.score;
+}
+
+
 std::ostream &operator<<(std::ostream &os, const Priority &p) {
   os << "[ ";
   for (const auto &i : p.score) {

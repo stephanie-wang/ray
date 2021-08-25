@@ -33,37 +33,9 @@ struct Priority {
     return !(*this == rhs);
   }
 
-  bool operator<(const Priority &rhs) const {
-    rhs.extend(score.size());
-    extend(rhs.score.size());
+  bool operator<(const Priority &rhs) const;
 
-    for (int64_t i = score.size() - 1; i >= 0; i--) {
-      if (score[i] < rhs.score[i]) {
-        return true;
-      }
-      if (score[i] > rhs.score[i]) {
-        return false;
-      }
-    }
-    // All indices equal.
-    return false;
-  }
-
-  bool operator<=(const Priority &rhs) const {
-    rhs.extend(score.size());
-    extend(rhs.score.size());
-
-    for (int64_t i = score.size() - 1; i >= 0; i--) {
-      if (score[i] < rhs.score[i]) {
-        return true;
-      }
-      if (score[i] > rhs.score[i]) {
-        return false;
-      }
-    }
-    // All indices equal.
-    return true;
-  }
+  bool operator<=(const Priority &rhs) const;
 
   int GetScore(int64_t depth) const {
     extend(depth + 1);

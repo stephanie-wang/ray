@@ -482,9 +482,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
   void AddBorrowerAddress(const ObjectID &object_id, const rpc::Address &borrower_address)
       LOCKS_EXCLUDED(mutex_);
 
-  Priority GetMinPriority(const std::vector<ObjectID> &obj_ids);
-
-  std::vector<Priority> PropagatePriority(const std::vector<ObjectID> &obj_ids, int64_t depth, int score);
+  Priority GetMinPriority(const std::vector<ObjectID> &obj_ids, ObjectID *min_arg_id = nullptr);
 
   void AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids);
 
