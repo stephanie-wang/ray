@@ -508,6 +508,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
 
         // The object is nullptr if it already existed in the object store.
         const auto &result = return_objects[i];
+        RAY_CHECK(result);
         return_object->set_size(result->GetSize());
         rpc::ErrorType error;
         if (result->IsException(&error) && error == rpc::ErrorType::TASK_PREEMPTED) {

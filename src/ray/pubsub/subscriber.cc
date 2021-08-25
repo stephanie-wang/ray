@@ -30,6 +30,7 @@ void SubscriberChannel<KeyIdType>::Subscribe(
   cum_subscribe_requests_++;
   const auto publisher_id = PublisherID::FromBinary(publisher_address.worker_id());
   const auto key_id = KeyIdType::FromBinary(key_id_binary);
+  RAY_LOG(DEBUG) << "Subscribing to " << key_id;
 
   auto subscription_it = subscription_map_.find(publisher_id);
   if (subscription_it == subscription_map_.end()) {
@@ -40,7 +41,7 @@ void SubscriberChannel<KeyIdType>::Subscribe(
   RAY_CHECK(subscription_it->second.subscription_callback_map
                 .emplace(key_id, std::make_pair(std::move(subscription_callback),
                                                 std::move(subscription_failure_callback)))
-                .second);
+                .second) << key_id;
 }
 
 template <typename KeyIdType>
@@ -49,6 +50,7 @@ bool SubscriberChannel<KeyIdType>::Unsubscribe(const rpc::Address &publisher_add
   cum_unsubscribe_requests_++;
   const auto publisher_id = PublisherID::FromBinary(publisher_address.worker_id());
   const auto key_id = KeyIdType::FromBinary(key_id_binary);
+  RAY_LOG(DEBUG) << "Unsubscribing from " << key_id;
 
   auto subscription_it = subscription_map_.find(publisher_id);
   if (subscription_it == subscription_map_.end()) {

@@ -241,25 +241,30 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
 
         // The local node currently does not have the resources to run the task, so we
         // should try spilling to another node.
-        bool did_spill = TrySpillback(work, is_infeasible);
+        bool did_spill = TrySpillback(work, spec.GetRequiredPlacementResources().GetResourceMap(), is_infeasible);
+        if (!did_spill) {
+          const std::unordered_map<std::string, double> object_store_requirement = {
+            {"object_store_memory", spec.GetRequiredResources().GetResource("object_store_memory").Double()}
+          };
+          did_spill = TrySpillback(work, object_store_requirement, is_infeasible);
+        }
+
         if (!did_spill) {
           // There must not be any other available nodes in the cluster, so the task
           // should stay on this node. We can skip the reest of the shape because the
           // scheduler will make the same decision.
-
           if (unavailable_resource == OBJECT_STORE_MEM) {
             // This task is blocked by lack of memory.
             if (!HasHigherPriorityTaskRunning(work_it->first.first)) {
-              // There is no higher priority task that is currently running and
-              // no other node has the available object store memory either.
-              // Therefore, we should spill to make room. We spill on all nodes
-              // instead of just this one because there is a high chance that
-              // other tasks are also blocked by lack of memory.
-              RAY_LOG(INFO) << "No object store memory available to schedule task " << task_id << ", triggering global spill";
-              global_spill_objects_();
+            // There is no higher priority task that is currently running and
+            // no other node has the available object store memory either.
+            // Therefore, we should spill to make room. We spill on all nodes
+            // instead of just this one because there is a high chance that
+            // other tasks are also blocked by lack of memory.
+            RAY_LOG(INFO) << "No object store memory available to schedule task " << task_id << ", triggering global spill";
+            global_spill_objects_();
             }
           }
-
           break;
         }
       } else {
@@ -315,12 +320,11 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
   }
 }
 
-bool ClusterTaskManager::TrySpillback(const Work &work, bool &is_infeasible) {
+bool ClusterTaskManager::TrySpillback(const Work &work, const std::unordered_map<std::string, double> &resource_request, bool &is_infeasible) {
   const auto &spec = std::get<0>(work).GetTaskSpecification();
   int64_t _unused;
-  auto placement_resources = spec.GetRequiredPlacementResources().GetResourceMap();
   std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
-      placement_resources, spec.IsActorCreationTask(), /*force_spillback=*/false,
+      resource_request, spec.IsActorCreationTask(), /*force_spillback=*/false,
       &_unused, &is_infeasible);
 
   if (is_infeasible || node_id_string == self_node_id_.Binary() ||

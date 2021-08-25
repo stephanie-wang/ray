@@ -425,6 +425,65 @@ def test_spillback_scheduling_oom(ray_start_cluster):
     #assert "0 objects preempted" in summary
 
 
+def test_shuffle(ray_start_cluster):
+    # Submit many tasks that each require 1 CPU and produce a lot of memory.
+    # Unlike the above test, the total memory capacity will exceed the
+    # cluster's capacity.
+    # Check that the preemption based policy will still spill on each node.
+    config = {
+        "lineage_pinning_enabled": True,
+        "task_retry_delay_ms": 100,
+        "worker_lease_timeout_milliseconds": 0,
+        # This is needed to make sure that the scheduler respects
+        # locality-based scheduling.
+        "scheduler_spread_threshold": 1.0,
+    }
+    cluster = ray_start_cluster
+    # Head node with no resources.
+    cluster.add_node(num_cpus=4, _system_config=config,
+            object_store_memory=10 ** 8)
+    for _ in range(3):
+        cluster.add_node(num_cpus=4, object_store_memory=10 ** 8)
+
+    ray.init(cluster.address)
+
+    dataset_size = 1_000_000_000
+
+    @ray.remote
+    def map(dataset_size, num_mappers, num_reducers):
+        num_blocks = num_mappers * num_reducers
+        partitions = [np.random.rand(int(dataset_size // 8 // num_blocks)) for _ in range(num_reducers)]
+        return partitions
+
+    @ray.remote
+    def reduce(*args):
+        return np.concatenate(args)
+
+    @ray.remote
+    def done(partition):
+        return
+
+    start = time.time()
+    num_mappers = 16
+    num_reducers = 16
+    map_blocks = [map.options(num_returns=num_reducers).remote(dataset_size, num_mappers, num_reducers) for _ in range(num_mappers)]
+    reduce_out = []
+    for _ in range(num_reducers):
+        args = [map_out.pop(0) for map_out in map_blocks]
+        reduce_out.append(reduce.remote(*args))
+        del args
+
+    ray.get([done.remote(out) for out in reduce_out])
+    end = time.time()
+    print("Finished in", end - start)
+
+    summary = memory_summary(stats_only=True)
+    print(summary)
+    # Should expect 1 preempted task, no spilling.
+    #assert "Spill" not in summary
+    #assert "0 objects preempted" in summary
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main(["-v", __file__]))
