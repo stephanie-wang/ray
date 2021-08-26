@@ -83,7 +83,8 @@ class PullManager {
   ///
   /// \param num_bytes_available The number of bytes that are currently
   /// available to store objects pulled from another node.
-  void UpdatePullsBasedOnAvailableMemory(int64_t num_bytes_available);
+  void UpdatePullsBasedOnAvailableMemory(int64_t num_bytes_available,
+      std::vector<ObjectID> objects_to_pull = {});
 
   /// Called when the available locations for a given object change.
   ///
@@ -232,6 +233,9 @@ class PullManager {
                                      bool respect_quota,
                                      std::vector<ObjectID> *objects_to_pull);
 
+  bool ActivatePullBundleRequest(const Queue::const_iterator &request_it,
+                                     bool respect_quota,
+                                     std::vector<ObjectID> *objects_to_pull);
   /// Deactivate a pull request in the queue. This cancels any pull or restore
   /// operations for the object.
   void DeactivatePullBundleRequest(const Queue &bundles,

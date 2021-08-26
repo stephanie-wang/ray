@@ -25,7 +25,7 @@ class PullManagerTestWithCapacity {
               num_send_pull_request_calls_++;
             },
             [this](const ObjectID &object_id) { num_abort_calls_[object_id]++; },
-            [this](const ObjectID &, const std::string &,
+            [this](const ObjectID &, const Priority &pri, const std::string &,
                    std::function<void(const ray::Status &)> callback) {
               num_restore_spilled_object_calls_++;
               restore_object_callback_ = callback;
@@ -992,6 +992,49 @@ TEST_F(PullManagerWithAdmissionControlTest, TestPrioritizeWorkerRequests) {
   ASSERT_TRUE(pull_manager_.IsObjectActive(task_oids[1]));
 
   pull_manager_.CancelPull(task_req_id2);
+  AssertNoLeaks();
+}
+
+TEST_P(PullManagerWithAdmissionControlTest, TestPriority) {
+  /// Test prioritizing worker requests over task argument requests during
+  /// admission control, and gets over waits.
+  int object_size = 2;
+  std::vector<ObjectID> task_oids;
+  pull_manager_.UpdatePullsBasedOnAvailableMemory(3);
+
+  std::vector<rpc::ObjectReference> objects_to_locate;
+  auto refs = CreateObjectRefs(1);
+  auto task_req_id1 = TaskKey(Priority({2, 0}), ObjectID::FromRandom().TaskId());
+  task_oids.push_back(ObjectRefsToIds(refs)[0]);
+
+  auto task_req_id2 = TaskKey(Priority({1, 0}), ObjectID::FromRandom().TaskId());
+  auto refs2 = CreateObjectRefs(1);
+  task_oids.push_back(ObjectRefsToIds(refs2)[0]);
+
+  auto task_req_id3 = TaskKey(Priority({0, 0}), ObjectID::FromRandom().TaskId());
+
+  std::unordered_set<NodeID> client_ids;
+  client_ids.insert(NodeID::FromRandom());
+  pull_manager_.Pull(task_req_id1, refs, BundlePriority::TASK_ARGS, &objects_to_locate);
+  pull_manager_.OnLocationChange(task_oids[0], client_ids, "", NodeID::Nil(), object_size);
+
+  pull_manager_.Pull(task_req_id2, refs2, BundlePriority::TASK_ARGS, &objects_to_locate);
+  pull_manager_.OnLocationChange(task_oids[1], client_ids, "", NodeID::Nil(), object_size);
+  pull_manager_.Pull(task_req_id3, refs2, BundlePriority::TASK_ARGS, &objects_to_locate);
+
+  AssertNumActiveRequestsEquals(1);
+  ASSERT_FALSE(pull_manager_.IsObjectActive(task_oids[0]));
+  ASSERT_TRUE(pull_manager_.IsObjectActive(task_oids[1]));
+
+  pull_manager_.CancelPull(task_req_id2);
+  ASSERT_FALSE(pull_manager_.IsObjectActive(task_oids[0]));
+  ASSERT_TRUE(pull_manager_.IsObjectActive(task_oids[1]));
+
+  pull_manager_.CancelPull(task_req_id3);
+  ASSERT_TRUE(pull_manager_.IsObjectActive(task_oids[0]));
+  ASSERT_FALSE(pull_manager_.IsObjectActive(task_oids[1]));
+
+  pull_manager_.CancelPull(task_req_id1);
   AssertNoLeaks();
 }
 
