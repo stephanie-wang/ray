@@ -23,7 +23,7 @@ DEFAULT_REMOTE_FUNCTION_NUM_RETURN_VALS = 1
 DEFAULT_REMOTE_FUNCTION_MAX_CALLS = 0
 # Normal tasks may be retried on failure this many times.
 # TODO(swang): Allow this to be set globally for an application.
-DEFAULT_REMOTE_FUNCTION_NUM_TASK_RETRIES = 3
+DEFAULT_REMOTE_FUNCTION_NUM_TASK_RETRIES = 100
 
 logger = logging.getLogger(__name__)
 

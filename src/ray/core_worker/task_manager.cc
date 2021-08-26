@@ -57,9 +57,13 @@ void TaskManager::AddPendingTask(const rpc::Address &caller_address,
 
   ObjectID min_arg;
   auto priority = reference_counter_->GetMinPriority(task_deps, &min_arg);
-  auto task_index = reference_counter_->GetDependentTaskIds(min_arg).size();
   auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
-  priority.SetScore(depth, task_index);
+  if (min_arg.IsNil()) {
+    priority.SetScore(depth, num_tasks_submitted_);
+  } else {
+    auto task_index = reference_counter_->GetDependentTaskIds(min_arg).size();
+    priority.SetScore(depth, task_index);
+  }
 
   // Add new owned objects for the return values of the task.
   const auto &return_ids = spec.ReturnIds();
