@@ -348,7 +348,6 @@ def test_spillback_scheduling(ray_start_cluster):
         "worker_lease_timeout_milliseconds": 0,
         # This is needed to make sure that the scheduler respects
         # locality-based scheduling.
-        "scheduler_spread_threshold": 1.0,
     }
     cluster = ray_start_cluster
     # Head node with no resources.
@@ -496,7 +495,6 @@ def test_spillback_scheduling_pipeline(ray_start_cluster):
         "worker_lease_timeout_milliseconds": 0,
         # This is needed to make sure that the scheduler respects
         # locality-based scheduling.
-        "scheduler_spread_threshold": 2.0,
         "object_spilling_threshold": 2,
     }
     cluster = ray_start_cluster
@@ -543,7 +541,7 @@ def test_spillback_scheduling_pipeline(ray_start_cluster):
     # This test shouldn't spill anything but it can due to a bug where the task
     # gets spilled to a node that has more memory, but its arg is still in the
     # plasma store's creation queue.
-    #assert "Spill" not in summary
+    assert "Spill" not in summary, "This test is flaky"
 
 
 if __name__ == "__main__":

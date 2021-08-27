@@ -306,7 +306,9 @@ int64_t ClusterResourceScheduler::GetBestSchedulableNodeSimpleBinPack(
 }
 
 int64_t ClusterResourceScheduler::GetBestSchedulableNode(
-    const ResourceRequest &resource_request, bool actor_creation, bool force_spillback,
+    const ResourceRequest &resource_request,
+    bool has_locality,
+    bool actor_creation, bool force_spillback,
     int64_t *total_violations, bool *is_infeasible) {
   if (get_available_object_store_memory_ != nullptr) {
     auto it_local_node = nodes_.find(local_node_id_);
@@ -341,8 +343,12 @@ int64_t ClusterResourceScheduler::GetBestSchedulableNode(
 
   // TODO (Alex): Setting require_available == force_spillback is a hack in order to
   // remain bug compatible with the legacy scheduling algorithms.
+  auto spread_threshold = spread_threshold_;
+  if (has_locality) {
+    spread_threshold = 2.0;
+  }
   int64_t best_node_id = raylet_scheduling_policy::HybridPolicy(
-      resource_request, local_node_id_, nodes_, spread_threshold_, force_spillback,
+      resource_request, local_node_id_, nodes_, spread_threshold, force_spillback,
       force_spillback);
   *is_infeasible = best_node_id == -1 ? true : false;
   if (!*is_infeasible) {
@@ -358,12 +364,14 @@ int64_t ClusterResourceScheduler::GetBestSchedulableNode(
 }
 
 std::string ClusterResourceScheduler::GetBestSchedulableNode(
-    const std::unordered_map<std::string, double> &task_resources, bool actor_creation,
+    const std::unordered_map<std::string, double> &task_resources,
+    bool has_locality,
+    bool actor_creation,
     bool force_spillback, int64_t *total_violations, bool *is_infeasible) {
   ResourceRequest resource_request =
       ResourceMapToResourceRequest(string_to_int_map_, task_resources);
   int64_t node_id = GetBestSchedulableNode(
-      resource_request, actor_creation, force_spillback, total_violations, is_infeasible);
+      resource_request, has_locality, actor_creation, force_spillback, total_violations, is_infeasible);
 
   std::string id_string;
   if (node_id == -1) {

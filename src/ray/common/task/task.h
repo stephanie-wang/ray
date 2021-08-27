@@ -35,7 +35,8 @@ class Task {
   /// \param message The protobuf message.
   /// \param backlog_size The size of the task owner's backlog size for this
   ///  task's shape.
-  explicit Task(const rpc::Task &message, int64_t backlog_size = -1);
+  explicit Task(const rpc::Task &message, int64_t backlog_size = -1,
+      bool has_locality = false);
 
   /// Construct a `Task` object from a `TaskSpecification` and a
   /// `TaskExecutionSpecification`.
@@ -93,6 +94,8 @@ class Task {
 
   int64_t BacklogSize() const;
 
+  bool HasLocality() const { return has_locality_; }
+
   std::string DebugString() const;
 
  private:
@@ -121,6 +124,7 @@ class Task {
   mutable CancelTaskCallback on_cancellation_ = nullptr;
   /// The size of the core worker's backlog when this task was submitted.
   int64_t backlog_size_ = -1;
+  bool has_locality_ = false;
 };
 
 }  // namespace ray

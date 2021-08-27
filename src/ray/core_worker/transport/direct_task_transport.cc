@@ -498,9 +498,10 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
   auto &resource_spec = task_it->second.task_spec;
 
   rpc::Address best_node_address;
+  bool has_locality = false;
   if (raylet_address == nullptr) {
     // If no raylet address is given, find the best worker for our next lease request.
-    best_node_address = lease_policy_->GetBestNodeForTask(resource_spec);
+    best_node_address = lease_policy_->GetBestNodeForTask(resource_spec, &has_locality);
     raylet_address = &best_node_address;
   }
 
@@ -584,7 +585,8 @@ void CoreWorkerDirectTaskSubmitter::RequestNewWorkerIfNeeded(
           RAY_LOG(FATAL) << status.ToString();
         }
       },
-      queue_size);
+      queue_size,
+      has_locality);
   pending_lease_request = std::make_pair(lease_client, task_id);
 }
 

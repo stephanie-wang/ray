@@ -1658,7 +1658,8 @@ void NodeManager::HandleRequestWorkerLease(const rpc::RequestWorkerLeaseRequest 
   if (RayConfig::instance().report_worker_backlog()) {
     backlog_size = request.backlog_size();
   }
-  Task task(task_message, backlog_size);
+  bool has_locality = request.has_locality();
+  Task task(task_message, backlog_size, has_locality);
   bool is_actor_creation_task = task.GetTaskSpecification().IsActorCreationTask();
   ActorID actor_id = ActorID::Nil();
   metrics_num_task_scheduled_ += 1;

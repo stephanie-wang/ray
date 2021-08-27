@@ -69,7 +69,9 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // This argument is used to set violation, which is an unsupported feature now.
       int64_t _unused;
       std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
-          placement_resources, task.GetTaskSpecification().IsActorCreationTask(),
+          placement_resources,
+          task.HasLocality(),
+          task.GetTaskSpecification().IsActorCreationTask(),
           /*force_spillback=*/false, &_unused, &is_infeasible);
 
       // There is no node that has available resources to run the request.
@@ -321,10 +323,13 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
 }
 
 bool ClusterTaskManager::TrySpillback(const Work &work, const std::unordered_map<std::string, double> &resource_request, bool &is_infeasible) {
-  const auto &spec = std::get<0>(work).GetTaskSpecification();
+  const auto &task = std::get<0>(work);
+  const auto &spec = task.GetTaskSpecification();
   int64_t _unused;
   std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
-      resource_request, spec.IsActorCreationTask(), /*force_spillback=*/false,
+      resource_request,
+      task.HasLocality(),
+      spec.IsActorCreationTask(), /*force_spillback=*/false,
       &_unused, &is_infeasible);
 
   if (is_infeasible || node_id_string == self_node_id_.Binary() ||
@@ -895,7 +900,9 @@ void ClusterTaskManager::TryLocalInfeasibleTaskScheduling() {
     int64_t _unused;
     bool is_infeasible;
     std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
-        placement_resources, task.GetTaskSpecification().IsActorCreationTask(),
+        placement_resources,
+        task.HasLocality(),
+        task.GetTaskSpecification().IsActorCreationTask(),
         /*force_spillback=*/false, &_unused, &is_infeasible);
 
     // There is no node that has available resources to run the request.
@@ -1148,7 +1155,9 @@ void ClusterTaskManager::SpillWaitingTasks() {
     // memory availability. Ideally, we should pick the node with the most
     // memory availability.
     std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
-        placement_resources, task.GetTaskSpecification().IsActorCreationTask(),
+        placement_resources,
+        task.HasLocality(),
+        task.GetTaskSpecification().IsActorCreationTask(),
         /*force_spillback=*/force_spillback, &_unused, &is_infeasible);
     if (!node_id_string.empty() && node_id_string != self_node_id_.Binary()) {
       NodeID node_id = NodeID::FromBinary(node_id_string);
@@ -1237,6 +1246,8 @@ void ClusterTaskManager::HasHigherPriorityTaskQueued(int64_t space_needed,
   bool is_infeasible;
   std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
       required_resources,
+      // Only spillback to another node if it has more resources than us.
+      /*has_locality=*/true,
       /*is_actor_creation_task=*/false,
       /*force_spillback=*/false, &_unused, &is_infeasible);
 

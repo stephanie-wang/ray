@@ -16,9 +16,12 @@
 
 namespace ray {
 
-rpc::Address LocalityAwareLeasePolicy::GetBestNodeForTask(const TaskSpecification &spec) {
+rpc::Address LocalityAwareLeasePolicy::GetBestNodeForTask(const TaskSpecification &spec, bool *has_locality) {
   if (auto node_id = GetBestNodeIdForTask(spec)) {
     if (auto addr = node_addr_factory_(node_id.value())) {
+      if (has_locality) {
+        *has_locality = true;
+      }
       return addr.value();
     }
   }
@@ -53,7 +56,7 @@ absl::optional<NodeID> LocalityAwareLeasePolicy::GetBestNodeIdForTask(
   return max_bytes_node;
 }
 
-rpc::Address LocalLeasePolicy::GetBestNodeForTask(const TaskSpecification &spec) {
+rpc::Address LocalLeasePolicy::GetBestNodeForTask(const TaskSpecification &spec, bool *has_locality) {
   // Always return the local node.
   return local_node_rpc_address_;
 }

@@ -40,7 +40,8 @@ class LocalityDataProviderInterface {
 class LeasePolicyInterface {
  public:
   /// Get the address of the best worker node for a lease request for the provided task.
-  virtual rpc::Address GetBestNodeForTask(const TaskSpecification &spec) = 0;
+  virtual rpc::Address GetBestNodeForTask(const TaskSpecification &spec,
+      bool *has_locality = nullptr) = 0;
 
   virtual ~LeasePolicyInterface() {}
 };
@@ -62,7 +63,8 @@ class LocalityAwareLeasePolicy : public LeasePolicyInterface {
   ~LocalityAwareLeasePolicy() {}
 
   /// Get the address of the best worker node for a lease request for the provided task.
-  rpc::Address GetBestNodeForTask(const TaskSpecification &spec);
+  rpc::Address GetBestNodeForTask(const TaskSpecification &spec,
+      bool *has_locality = nullptr);
 
  private:
   /// Get the best worker node for a lease request for the provided task.
@@ -88,7 +90,8 @@ class LocalLeasePolicy : public LeasePolicyInterface {
   ~LocalLeasePolicy() {}
 
   /// Get the address of the local node for a lease request for the provided task.
-  rpc::Address GetBestNodeForTask(const TaskSpecification &spec);
+  rpc::Address GetBestNodeForTask(const TaskSpecification &spec,
+      bool *has_locality = nullptr);
 
  private:
   /// RPC address of the local node.

@@ -168,6 +168,7 @@ class ClusterResourceScheduler : public ClusterResourceSchedulerInterface {
   ///  \return -1, if no node can schedule the current request; otherwise,
   ///          return the ID of a node that can schedule the resource request.
   int64_t GetBestSchedulableNode(const ResourceRequest &resource_request,
+                                 bool has_locality,
                                  bool actor_creation, bool force_spillback,
                                  int64_t *violations, bool *is_infeasible);
 
@@ -180,6 +181,7 @@ class ClusterResourceScheduler : public ClusterResourceSchedulerInterface {
   //           resource request.
   std::string GetBestSchedulableNode(
       const std::unordered_map<std::string, double> &resource_request,
+      bool has_locality,
       bool actor_creation, bool force_spillback, int64_t *violations,
       bool *is_infeasible);
 
