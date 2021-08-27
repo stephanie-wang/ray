@@ -371,8 +371,9 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
         std::vector<ObjectID> candidates;
         int64_t max_preemptible_bytes = 0;
         for (const auto &entry : store_info_.objects) {
+          RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
           if (priority < entry.second->priority && !entry.second->preemption_failed) {
-            RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
+            RAY_LOG(DEBUG) << "local object " << entry.first << " is preemption candidate";
             candidates.push_back(entry.first);
             max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
           }
@@ -1145,6 +1146,7 @@ void PlasmaStore::HandleObjectPreempted(const ObjectID &object_id, bool success)
   }
 
   if (!success) {
+    RAY_LOG(DEBUG) << "Preemption of object " << object_id << " failed";
     entry->preempted = false;
     entry->preemption_failed = true;
   }
