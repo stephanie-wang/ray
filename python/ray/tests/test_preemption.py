@@ -484,6 +484,68 @@ def test_shuffle(ray_start_cluster):
     #assert "0 objects preempted" in summary
 
 
+def test_spillback_scheduling_pipeline(ray_start_cluster):
+    # Submit many tasks that each require 1 CPU and produce a lot of memory.
+    # Ray's default scheduling algorithm will cause these to be
+    # disproportionately scheduled to the head node, causing spilling.
+    # If we preempt and re-schedule tasks on remote nodes, we can avoid
+    # spilling completely.
+    config = {
+        "lineage_pinning_enabled": True,
+        "task_retry_delay_ms": 100,
+        "worker_lease_timeout_milliseconds": 0,
+        # This is needed to make sure that the scheduler respects
+        # locality-based scheduling.
+        "scheduler_spread_threshold": 2.0,
+        "object_spilling_threshold": 2,
+    }
+    cluster = ray_start_cluster
+    # Head node with no resources.
+    cluster.add_node(num_cpus=2, _system_config=config,
+            object_store_memory=10 ** 8)
+    for _ in range(4):
+        cluster.add_node(num_cpus=2, object_store_memory=10 ** 8)
+
+    ray.init(cluster.address)
+
+    @ray.remote
+    def f():
+        return np.zeros(int(3 * 10**7), dtype=np.uint8)
+
+    @ray.remote
+    def consumer(x):
+        return x
+
+    @ray.remote
+    def done(x):
+        return
+
+    xs = [f.remote() for _ in range(10)]
+    for i, x in enumerate(xs):
+        print(i, x)
+    xs = [consumer.remote(x) for x in xs]
+    for i, x in enumerate(xs):
+        print(i, x)
+    #for x in xs:
+    #    ref = done.remote(x)
+    #    print(ref, "depends on", x)
+    #    ray.get(ref)
+    start = time.time()
+    done = [done.remote(x) for x in xs]
+    while time.time() - start < 30:
+        _, done = ray.wait(done, timeout=1)
+        if not done:
+            break
+    assert not done, f"{done} not ready"
+
+    summary = memory_summary(stats_only=True)
+    print(summary)
+    # This test shouldn't spill anything but it can due to a bug where the task
+    # gets spilled to a node that has more memory, but its arg is still in the
+    # plasma store's creation queue.
+    #assert "Spill" not in summary
+
+
 if __name__ == "__main__":
     import pytest
     sys.exit(pytest.main(["-v", __file__]))

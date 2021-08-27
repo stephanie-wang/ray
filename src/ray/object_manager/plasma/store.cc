@@ -559,6 +559,7 @@ void PlasmaStore::ReturnFromGet(const std::shared_ptr<GetRequest> &get_req) {
   std::vector<MEMFD_TYPE> store_fds;
   std::vector<int64_t> mmap_sizes;
   for (const auto &object_id : get_req->object_ids) {
+    RAY_LOG(DEBUG) << "ReturnFromGet " << object_id;
     PlasmaObject &object = get_req->objects[object_id];
     MEMFD_TYPE fd = object.store_fd;
     if (object.data_size != -1 && fds_to_send.count(fd) == 0 && fd.first != INVALID_FD) {
@@ -655,6 +656,11 @@ void PlasmaStore::ProcessGetRequest(const std::shared_ptr<Client> &client,
         // If necessary, record that this client is using this object. In the case
         // where entry == NULL, this will be called from SealObject.
         AddToClientObjectIds(object_id, entry, client);
+      } else {
+        // Add a placeholder plasma object to the get request to indicate that the
+        // object is preempted. This will be parsed by the client. We set the
+        // data size to -1 to indicate that the object is not present.
+        get_req->objects[object_id].data_size = -1;
       }
       get_req->num_satisfied += 1;
     } else {

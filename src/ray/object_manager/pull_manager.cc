@@ -677,6 +677,7 @@ bool PullManager::TryPinObject(const ObjectID &object_id) {
     if (ref != nullptr) {
       pinned_objects_size_ += ref->GetSize();
       pinned_objects_[object_id] = std::move(ref);
+      RAY_LOG(DEBUG) << "Pinned object " << object_id << " pinned objects size is now " << pinned_objects_size_;
       return false;
     }
   }
