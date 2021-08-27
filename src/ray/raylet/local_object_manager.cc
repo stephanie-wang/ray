@@ -541,8 +541,14 @@ void LocalObjectManager::PreemptObject(const rpc::ObjectReference &object_ref, c
   request.set_owner_worker_id(it->second.second.worker_id());
   auto owner_client = owner_client_pool_.GetOrConnect(it->second.second);
   owner_client->PreemptObject(
-      request, [callback](Status status, const rpc::PreemptObjectReply &reply) {
-      callback(true);
+      request, [this, object_ref, callback](Status status, const rpc::PreemptObjectReply &reply) {
+      if (!status.ok() || reply.success()) {
+        callback(true);
+      } else {
+        // Preemption can fail if the owner doesn't yet know that we have the
+        // primary copy of this object. Try again.
+        PreemptObject(object_ref, callback);
+      }
       });
 }
 

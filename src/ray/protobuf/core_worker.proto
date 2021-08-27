@@ -388,6 +388,7 @@ message PreemptObjectRequest {
 }
 
 message PreemptObjectReply {
+  bool success = 1;
 }
 
 service CoreWorkerService {

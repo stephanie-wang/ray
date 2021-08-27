@@ -3198,16 +3198,20 @@ void CoreWorker::HandlePreemptObject(const rpc::PreemptObjectRequest &request,
     return;
   }
   auto object_id = ObjectID::FromBinary(request.object_id());
-  PreemptObject(object_id);
+  bool success = PreemptObject(object_id);
+  reply->set_success(success);
   send_reply_callback(Status::OK(), nullptr, nullptr);
 }
 
-void CoreWorker::PreemptObject(const ObjectID &object_id) {
+bool CoreWorker::PreemptObject(const ObjectID &object_id) {
   // TODO(memory): Try to pin another copy of the object before preempting?
   // TODO(memory): Check num reconstructions remaining before preempting.
   // Clear pinned location and callback to primary raylet to release the object.
   NodeID pinned_at_raylet_id = reference_counter_->ResetPreemptedObject(object_id);
   RAY_LOG(INFO) << "Preempting object " << object_id << ", was stored at " << pinned_at_raylet_id;
+  if (pinned_at_raylet_id.IsNil()) {
+    return false;
+  }
   // Delete the object from the in-memory store to indicate that it is not
   // available. The object recovery manager will guarantee that a new value
   // will eventually be stored for the objects (either an
@@ -3241,6 +3245,7 @@ void CoreWorker::PreemptObject(const ObjectID &object_id) {
       RAY_LOG(DEBUG) << "Object " << object_id << " lost due to preemption.";
     }
   });
+  return true;
 }
 
 void CoreWorker::YieldCurrentFiber(FiberEvent &event) {

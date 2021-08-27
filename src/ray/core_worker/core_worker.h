@@ -1023,7 +1023,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
                                rpc::PreemptObjectReply *reply,
                                rpc::SendReplyCallback send_reply_callback) override;
 
-  void PreemptObject(const ObjectID &object_id);
+  bool PreemptObject(const ObjectID &object_id);
 
   ///
   /// Public methods related to async actor call. This should only be used when

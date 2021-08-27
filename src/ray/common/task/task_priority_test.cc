@@ -61,6 +61,13 @@ TEST(TaskPriorityTest, TestCompare) {
   ASSERT_LT(priority2, priority3);
 }
 
+TEST(TaskPriorityTest, TestCompare2) {
+  Priority priority1({1, 0});
+  Priority priority2({2});
+
+  ASSERT_LT(priority1, priority2);
+}
+
 TEST(TaskPriorityTest, TestSort) {
   std::set<Priority> queue;
   Priority p1({1, 2, 3});
