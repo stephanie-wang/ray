@@ -1224,9 +1224,9 @@ bool ClusterTaskManager::HasHigherPriorityTaskRunning(const Priority &priority) 
   // we should wait to finish.
   for (const auto leased_worker : leased_workers_) {
     const auto &running_task_priority = leased_worker.second.second;
+    const auto &task_id = leased_worker.second.first->GetAssignedTask().GetTaskSpecification().TaskId();
+    RAY_LOG(DEBUG) << "Running task " << task_id << " has priority " << running_task_priority << ", higher than? " << priority;
     if (running_task_priority < priority) {
-      const auto &task_id = leased_worker.second.first->GetAssignedTask().GetTaskSpecification().TaskId();
-      RAY_LOG(DEBUG) << "Running task " << task_id << " has higher priority " << running_task_priority << " than " << priority;
       return true;;
       break;
     }
