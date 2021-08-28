@@ -695,18 +695,11 @@ void PlasmaStore::ProcessGetRequest(const std::shared_ptr<Client> &client,
     // locally. If so, record that the object is being used and mark it as accounted for.
     auto entry = GetObjectTableEntry(&store_info_, object_id);
     if (entry && entry->state == ObjectState::PLASMA_SEALED) {
-      if (!entry->preempted) {
-        // Update the get request to take into account the present object.
-        PlasmaObject_init(&get_req->objects[object_id], entry);
-        // If necessary, record that this client is using this object. In the case
-        // where entry == NULL, this will be called from SealObject.
-        AddToClientObjectIds(object_id, entry, client);
-      } else {
-        // Add a placeholder plasma object to the get request to indicate that the
-        // object is preempted. This will be parsed by the client. We set the
-        // data size to -1 to indicate that the object is not present.
-        get_req->objects[object_id].data_size = -1;
-      }
+      // Update the get request to take into account the present object.
+      PlasmaObject_init(&get_req->objects[object_id], entry);
+      // If necessary, record that this client is using this object. In the case
+      // where entry == NULL, this will be called from SealObject.
+      AddToClientObjectIds(object_id, entry, client);
       get_req->num_satisfied += 1;
     } else {
       // Add a placeholder plasma object to the get request to indicate that the
@@ -1164,6 +1157,7 @@ void PlasmaStore::PreemptObject(const ObjectID &object_id) {
     return;
   }
 
+  // TODO(memory): Should time this out in case we hang.
   RAY_LOG(DEBUG) << "Preempting object " << object_id << " with priority " << entry->priority << " size " << entry->data_size;
   // Future Get requests will not be served if this flag is set.
   entry->preempted = true;
