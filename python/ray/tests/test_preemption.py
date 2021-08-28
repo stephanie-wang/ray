@@ -336,7 +336,8 @@ def test_automatic_preempt_running_task(ray_start_cluster):
     assert "1 tasks preempted" in summary
 
 
-def test_spillback_scheduling(ray_start_cluster):
+@pytest.mark.parametrize("scale", [1, 100])
+def test_spillback_scheduling(ray_start_cluster, scale):
     # Submit many tasks that each require 1 CPU and produce a lot of memory.
     # Ray's default scheduling algorithm will cause these to be
     # disproportionately scheduled to the head node, causing spilling.
@@ -346,27 +347,27 @@ def test_spillback_scheduling(ray_start_cluster):
         "lineage_pinning_enabled": True,
         "task_retry_delay_ms": 100,
         "worker_lease_timeout_milliseconds": 0,
+        "object_spilling_threshold": 2,
         # This is needed to make sure that the scheduler respects
         # locality-based scheduling.
     }
     cluster = ray_start_cluster
     # Head node with no resources.
-    cluster.add_node(num_cpus=2, _system_config=config,
-            object_store_memory=10 ** 8)
-    for _ in range(4):
-        cluster.add_node(num_cpus=2, object_store_memory=10 ** 8)
+    cluster.add_node(num_cpus=32, _system_config=config,
+            object_store_memory=10 ** 8 * scale)
+    cluster.add_node(num_cpus=32, object_store_memory=10 ** 8 * scale)
 
     ray.init(cluster.address)
 
     @ray.remote
     def f():
-        return np.zeros(int(3.5 * 10**7), dtype=np.uint8)
+        return np.zeros(int(1 * 10**7 * scale), dtype=np.uint8)
 
     @ray.remote
     def done(x):
         return
 
-    xs = [f.remote() for _ in range(10)]
+    xs = [f.remote() for _ in range(18)]
     #for x in xs:
     #    ref = done.remote(x)
     #    print(ref, "depends on", x)
@@ -483,7 +484,8 @@ def test_shuffle(ray_start_cluster):
     #assert "0 objects preempted" in summary
 
 
-def test_spillback_scheduling_pipeline(ray_start_cluster):
+@pytest.mark.parametrize("scale", [1, 100])
+def test_spillback_scheduling_pipeline(ray_start_cluster, scale):
     # Submit many tasks that each require 1 CPU and produce a lot of memory.
     # Ray's default scheduling algorithm will cause these to be
     # disproportionately scheduled to the head node, causing spilling.
@@ -493,22 +495,19 @@ def test_spillback_scheduling_pipeline(ray_start_cluster):
         "lineage_pinning_enabled": True,
         "task_retry_delay_ms": 100,
         "worker_lease_timeout_milliseconds": 0,
-        # This is needed to make sure that the scheduler respects
-        # locality-based scheduling.
         "object_spilling_threshold": 2,
     }
     cluster = ray_start_cluster
     # Head node with no resources.
-    cluster.add_node(num_cpus=2, _system_config=config,
-            object_store_memory=10 ** 8)
-    for _ in range(4):
-        cluster.add_node(num_cpus=2, object_store_memory=10 ** 8)
+    cluster.add_node(num_cpus=32, _system_config=config,
+            object_store_memory=10 ** 8 * scale)
+    cluster.add_node(num_cpus=32, object_store_memory=10 ** 8 * scale)
 
     ray.init(cluster.address)
 
     @ray.remote
     def f():
-        return np.zeros(int(3 * 10**7), dtype=np.uint8)
+        return np.zeros(int(4 * 10**7 * scale), dtype=np.uint8)
 
     @ray.remote
     def consumer(x):
@@ -518,23 +517,39 @@ def test_spillback_scheduling_pipeline(ray_start_cluster):
     def done(x):
         return
 
-    xs = [f.remote() for _ in range(10)]
+    xs = [f.remote() for _ in range(4)]
+
+    next_round = []
     for i, x in enumerate(xs):
-        print(i, x)
-    xs = [consumer.remote(x) for x in xs]
-    for i, x in enumerate(xs):
-        print(i, x)
+        next_x = consumer.remote(x)
+        print(i, "dep", x, "consume", next_x)
+        next_round.append(next_x)
+
+        del x
+        del next_x
+    xs = next_round
+
     #for x in xs:
     #    ref = done.remote(x)
     #    print(ref, "depends on", x)
     #    ray.get(ref)
+    next_round = []
+    for i, x in enumerate(xs):
+        next_x = done.remote(x)
+        print(i, "consume", x, "done", next_x)
+        next_round.append(next_x)
+
+        del x
+        del next_x
+    del xs
+    done_refs = next_round
+
     start = time.time()
-    done = [done.remote(x) for x in xs]
-    while time.time() - start < 30:
-        _, done = ray.wait(done, timeout=1)
-        if not done:
+    while time.time() - start < 60:
+        _, done_refs = ray.wait(done_refs, timeout=1)
+        if not done_refs:
             break
-    assert not done, f"{done} not ready"
+    assert not done_refs, f"{done_refs} not ready"
 
     summary = memory_summary(stats_only=True)
     print(summary)
