@@ -558,6 +558,12 @@ NodeID ReferenceCounter::ResetPreemptedObject(const ObjectID &object_id) {
   NodeID pinned_at_raylet_id;
   auto it = object_id_refs_.find(object_id);
   if (it != object_id_refs_.end()) {
+    if (!it->second.pinned_at_raylet_id.has_value() || !it->second.on_delete) {
+      RAY_LOG(DEBUG) << "Object to preempt " << object_id << " doesn't yet have primary copy, client should retry";
+      // Wait until we have information about where the primary copy of the
+      // object is.
+      return pinned_at_raylet_id;
+    }
     pinned_at_raylet_id = it->second.pinned_at_raylet_id.value_or(NodeID::Nil());
     RAY_LOG(DEBUG) << "Freeing preempted object " << object_id;
     ReleasePlasmaObject(it);
@@ -599,7 +605,7 @@ void ReferenceCounter::UpdateObjectPinnedAtRaylet(const ObjectID &object_id,
     if (!it->second.OutOfScope(lineage_pinning_enabled_)) {
       it->second.pinned_at_raylet_id = raylet_id;
       // We eagerly add the pinned location to the set of object locations.
-      AddObjectLocationInternal(it, raylet_id);
+      //AddObjectLocationInternal(it, raylet_id);
     }
   }
 }
@@ -1114,7 +1120,10 @@ absl::optional<LocalityData> ReferenceCounter::GetLocalityData(
   //   locations.
   // - If we don't own this object, this will contain a snapshot of the object locations
   //   at future resolution time.
-  const auto &node_ids = it->second.locations;
+  auto node_ids = it->second.locations;
+  if (it->second.pinned_at_raylet_id.has_value()) {
+    node_ids.insert(it->second.pinned_at_raylet_id.value());
+  }
 
   // We should only reach here if we have valid locality data to return.
   absl::optional<LocalityData> locality_data(

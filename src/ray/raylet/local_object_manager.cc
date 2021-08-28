@@ -525,11 +525,10 @@ void LocalObjectManager::PreemptObject(const rpc::ObjectReference &object_ref, c
   // Preemption currently assumes that every object copy is the primary. Also
   // it's possible for objects to go out of scope before we can preempt.
   if (it == pinned_objects_.end()) {
-    RAY_LOG(INFO) << "Tried to preempt object that is not pinned " << object_id;
-    callback(false);
-    return;
+    RAY_LOG(INFO) << "Trying to preempt object that is not pinned " << object_id;
   }
 
+  // TODO(memory): Fix this count.
   num_preempted_objects_++;
 
   // TODO(memory): Send owner another RPC once object has been released, instead of
@@ -538,8 +537,8 @@ void LocalObjectManager::PreemptObject(const rpc::ObjectReference &object_ref, c
   RAY_LOG(DEBUG) << "Sending request to preempt object " << object_id << " to owner";
   rpc::PreemptObjectRequest request;
   request.set_object_id(object_id.Binary());
-  request.set_owner_worker_id(it->second.second.worker_id());
-  auto owner_client = owner_client_pool_.GetOrConnect(it->second.second);
+  request.set_owner_worker_id(object_ref.owner_address().worker_id());
+  auto owner_client = owner_client_pool_.GetOrConnect(object_ref.owner_address());
   owner_client->PreemptObject(
       request, [this, object_ref, callback](Status status, const rpc::PreemptObjectReply &reply) {
       if (!status.ok() || reply.success()) {
