@@ -38,6 +38,11 @@ class PlasmaStoreRunner {
 
   int64_t GetAvailableMemorySync() const { return store_->GetAvailableMemorySync(); }
 
+  void AsyncPreemptToMakeSpaceForScheduledTask(const ObjectID &object_id, const ray::Priority &priority,
+    int64_t data_size, const std::vector<ObjectID> &task_deps) {
+    store_->AsyncPreemptToMakeSpaceForScheduledTask(object_id, priority, data_size, task_deps);
+  }
+
  private:
   void Shutdown();
   absl::Mutex store_runner_mutex_;

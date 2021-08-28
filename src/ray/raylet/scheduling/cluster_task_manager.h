@@ -70,7 +70,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
                          std::vector<std::unique_ptr<RayObject>> *results)>
           get_task_arguments,
       size_t max_pinned_task_arguments_bytes,
-      const SpillObjectsCallback &global_spill_objects);
+      const AsyncPreemptCallback &preempt_callback);
 
   /// (Step 1) Queue tasks and schedule.
   /// Queue task and schedule. This hanppens when processing the worker lease request.
@@ -251,7 +251,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// All tasks in this map that have dependencies should be registered with
   /// the dependency manager, in case a dependency gets evicted while the task
   /// is still queued.
-  /// TODO(memory): Sort the queues by priority also?
+  /// TODO(memory): Sort between queues by priority also, not just within a queue.
   std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, Work>> tasks_to_dispatch_;
 
   /// Tasks waiting for arguments to be transferred locally.
@@ -318,7 +318,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   uint64_t metric_tasks_dispatched_;
   uint64_t metric_tasks_spilled_;
 
-  SpillObjectsCallback global_spill_objects_;
+  AsyncPreemptCallback preempt_callback_;
 
   /// Determine whether a task should be immediately dispatched,
   /// or placed on a wait queue.

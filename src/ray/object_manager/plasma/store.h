@@ -232,6 +232,11 @@ class PlasmaStore {
   // object store, so it should be called sparingly.
   std::string GetDebugDump() const;
 
+  void AsyncPreemptToMakeSpaceForScheduledTask(const ObjectID &object_id,
+                                               const ray::Priority &priority,
+                                               int64_t data_size,
+                                               const std::vector<ObjectID> &task_deps);
+
  private:
   PlasmaError HandleCreateObjectRequest(const std::shared_ptr<Client> &client,
                                         const std::vector<uint8_t> &message,
@@ -239,7 +244,7 @@ class PlasmaStore {
                                         bool *spilling_required,
                                         std::function<void(PlasmaError error)> callback);
 
-  PlasmaError HandleObjectOomAsync(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size, bool created_by_worker, std::function<void(PlasmaError error)> callback);
+  PlasmaError HandleObjectOomAsync(const ObjectID &object_id, const ray::Priority &priority, int64_t data_size, bool created_by_worker, const std::unordered_set<ObjectID> &preemption_blacklist, std::function<void(PlasmaError error)> callback);
 
   void ReplyToCreateClient(const std::shared_ptr<Client> &client,
                            const ObjectID &object_id, uint64_t req_id);
@@ -376,6 +381,8 @@ class PlasmaStore {
   ray::ScheduleRemoteMemoryCallback schedule_remote_memory_;
 
   ray::CheckTaskQueuesCallback check_higher_priority_tasks_queued_;
+
+  int64_t oom_start_ms_ = -1;
 };
 
 }  // namespace plasma

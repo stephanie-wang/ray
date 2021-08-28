@@ -27,7 +27,7 @@ ClusterTaskManager::ClusterTaskManager(
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
     size_t max_pinned_task_arguments_bytes,
-    const SpillObjectsCallback &global_spill_objects)
+    const AsyncPreemptCallback &preempt_callback)
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
@@ -44,7 +44,7 @@ ClusterTaskManager::ClusterTaskManager(
       metric_tasks_queued_(0),
       metric_tasks_dispatched_(0),
       metric_tasks_spilled_(0),
-      global_spill_objects_(global_spill_objects) {}
+      preempt_callback_(preempt_callback) {}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
@@ -244,9 +244,10 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
         // The local node currently does not have the resources to run the task, so we
         // should try spilling to another node.
         bool did_spill = TrySpillback(work, spec.GetRequiredPlacementResources().GetResourceMap(), is_infeasible);
+        auto required_obj_store_mem = spec.GetRequiredResources().GetResource("object_store_memory").Double();
         if (!did_spill) {
           const std::unordered_map<std::string, double> object_store_requirement = {
-            {"object_store_memory", spec.GetRequiredResources().GetResource("object_store_memory").Double()}
+            {"object_store_memory", required_obj_store_mem}
           };
           did_spill = TrySpillback(work, object_store_requirement, is_infeasible);
         }
@@ -256,16 +257,19 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
           // should stay on this node. We can skip the reest of the shape because the
           // scheduler will make the same decision.
           if (unavailable_resource == OBJECT_STORE_MEM) {
-            // This task is blocked by lack of memory.
-            if (!HasHigherPriorityTaskRunning(work_it->first.first)) {
-            // There is no higher priority task that is currently running and
-            // no other node has the available object store memory either.
-            // Therefore, we should spill to make room. We spill on all nodes
-            // instead of just this one because there is a high chance that
-            // other tasks are also blocked by lack of memory.
-            RAY_LOG(INFO) << "No object store memory available to schedule task " << task_id << ", triggering global spill";
-            global_spill_objects_();
-            }
+            RAY_LOG(INFO) << "No object store memory available to schedule task " << task_id
+              << ", checking whether space can be made by preempting or spilling";
+            preempt_callback_(ObjectID::FromIndex(task_id, 1), spec.GetPriority(),
+                required_obj_store_mem, spec.GetDependencyIds());
+            //// This task is blocked by lack of memory.
+            //if (!HasHigherPriorityTaskRunning(work_it->first.first)) {
+            //// There is no higher priority task that is currently running and
+            //// no other node has the available object store memory either.
+            //// Therefore, we should spill to make room. We spill on all nodes
+            //// instead of just this one because there is a high chance that
+            //// other tasks are also blocked by lack of memory.
+            //global_spill_objects_();
+            //}
           }
           break;
         }

@@ -21,6 +21,9 @@ using SpaceReleasedCallback = std::function<void()>;
 using RestoreSpilledObjectCallback = std::function<void(
     const ObjectID &, const Priority &priority, const std::string &, std::function<void(const ray::Status &)>)>;
 
+using AsyncPreemptCallback = std::function<void(const ObjectID &object_id, const ray::Priority &priority,
+    int64_t data_size, const std::vector<ObjectID> &task_deps)>;
+
 /// A struct that includes info about the object.
 struct ObjectInfo {
   ObjectID object_id;

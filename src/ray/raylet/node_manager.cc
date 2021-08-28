@@ -350,10 +350,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
         return GetObjectsFromPlasma(object_ids, results);
       },
       max_task_args_memory,
-      [this]() {
-        should_global_spill_ = true;
-        GetLocalObjectManager().SpillObjectUptoMaxThroughput();
-        return true;
+      [this](const ObjectID &object_id, const ray::Priority &priority,
+          int64_t data_size, const std::vector<ObjectID> &task_deps) {
+        object_manager_.AsyncPreemptToMakeSpaceForScheduledTask(object_id, priority, data_size, task_deps);
       }));
   placement_group_resource_manager_ = std::make_shared<NewPlacementGroupResourceManager>(
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),

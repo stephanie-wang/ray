@@ -316,7 +316,7 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
     RAY_LOG(DEBUG) << "Not enough memory to create the object " << object_id
                    << ", data_size=" << data_size << ", metadata_size=" << metadata_size;
     return HandleObjectOomAsync(object_id, priority, data_size + metadata_size,
-        /*created_by_worker=*/source == fb::ObjectSource::CreatedByWorker, callback);
+        /*created_by_worker=*/source == fb::ObjectSource::CreatedByWorker, client->object_ids, callback);
   }
 
   // Trigger object spilling if current usage is above the specified threshold.
@@ -336,12 +336,49 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
   return error;
 }
 
-PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const ray::Priority &priority, int64_t size,
-    bool created_by_worker, std::function<void(PlasmaError error)> callback) {
+void PlasmaStore::AsyncPreemptToMakeSpaceForScheduledTask(
+    const ObjectID &object_id, const ray::Priority &priority,
+    int64_t data_size, const std::vector<ObjectID> &task_deps) {
+  const std::unordered_set<ObjectID> deps_set(task_deps.begin(), task_deps.end());
+
+  HandleObjectOomAsync(object_id, priority, data_size, /*created_by_worker=*/false,
+      deps_set,
+      [this](PlasmaError error) {
+      if (error == PlasmaError::FallbackAllocate || error == PlasmaError::OutOfMemory) {
+        if (oom_start_ms_ == -1) {
+          oom_start_ms_ = current_time_ms();
+        } else if (current_time_ms() - oom_start_ms_ > 1000) {
+          spill_objects_callback_();
+          oom_start_ms_ = -1;
+        }
+      } else {
+        oom_start_ms_ = -1;
+      }
+      });
+}
+
+PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id,
+                                              const ray::Priority &priority,
+                                              int64_t size, bool created_by_worker,
+                                              const std::unordered_set<ObjectID> &preemption_blacklist,
+                                              std::function<void(PlasmaError error)> callback) {
+  // The size of the object to create as well as any dependencies.
+  int64_t total_size_needed = size;
+  for (const auto &dep : preemption_blacklist) {
+    auto entry = GetObjectTableEntry(&store_info_, dep);
+    if (entry != nullptr) {
+      total_size_needed += entry->data_size;
+    }
+  }
+
   // If there is a higher priority ready task in the local task queue that
   // could run instead, preempt the task is trying to create this object.
-  check_higher_priority_tasks_queued_(size, priority, [this, object_id, size, priority, created_by_worker, callback](const NodeID &remote_node_id, bool higher_priority_ready_task, bool higher_priority_running_task) {
-      io_context_.post([this, size, object_id, priority, created_by_worker, callback, remote_node_id, higher_priority_ready_task, higher_priority_running_task]() {
+  check_higher_priority_tasks_queued_(total_size_needed, priority, [this, object_id, size,
+      priority, created_by_worker, callback, preemption_blacklist](const NodeID &remote_node_id, bool higher_priority_ready_task, bool higher_priority_running_task) {
+      io_context_.post([this, size, object_id, priority, created_by_worker,
+          callback, remote_node_id, higher_priority_ready_task,
+          higher_priority_running_task,
+          preemption_blacklist]() {
         RAY_LOG(DEBUG) << "HandleObjectOomAsync " << object_id << " spillback_at_node_id: "
                        << remote_node_id << " has_higher_priority_ready_task? " << higher_priority_ready_task
                        << " has_higher_priority_running_task? " << higher_priority_running_task;
@@ -371,10 +408,17 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id, const r
         std::vector<ObjectID> candidates;
         int64_t max_preemptible_bytes = 0;
         for (const auto &entry : store_info_.objects) {
-          RAY_LOG(DEBUG) << "local object " << entry.first << " has priority " << entry.second->priority;
-          if (priority < entry.second->priority && !entry.second->preemption_failed) {
-            RAY_LOG(DEBUG) << "local object " << entry.first << " is preemption candidate";
-            candidates.push_back(entry.first);
+          const auto &candidate_id = entry.first;
+          RAY_LOG(DEBUG) << "local object " << candidate_id << " has priority " << entry.second->priority;
+          // We should not preempt objects that this client is using because
+          // this can cause a cycle where a worker needs to preempt its current
+          // task arguments (and task) in order to return an object from the
+          // task.
+          if (priority < entry.second->priority &&
+              !entry.second->preemption_failed &&
+              !preemption_blacklist.count(candidate_id)) {
+            RAY_LOG(DEBUG) << "local object " << candidate_id << " is preemption candidate";
+            candidates.push_back(candidate_id);
             max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
           }
         }

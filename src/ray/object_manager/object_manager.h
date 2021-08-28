@@ -308,6 +308,12 @@ class ObjectManager : public ObjectManagerInterface,
     return static_cast<double>(used_memory_) / config_.object_store_memory;
   }
 
+  void AsyncPreemptToMakeSpaceForScheduledTask(const ObjectID &object_id, const ray::Priority &priority,
+    int64_t data_size, const std::vector<ObjectID> &task_deps) {
+    plasma::plasma_store_runner->AsyncPreemptToMakeSpaceForScheduledTask(object_id, priority, data_size, task_deps);
+  }
+
+
  private:
   friend class TestObjectManager;
 
