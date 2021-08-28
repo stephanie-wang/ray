@@ -450,6 +450,12 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
   profiler_ = std::make_shared<worker::Profiler>(
       worker_context_, options_.node_ip_address, io_service_, gcs_client_);
 
+  std::function<void(const ObjectID &, int64_t)> record_object_size = nullptr;
+  if (RayConfig::instance().dump_task_profile()) {
+    record_object_size = [this](const ObjectID &obj_id, int64_t size) {
+        task_profiler_->SetObjectSize(obj_id, static_cast<uint64_t>(size));
+      };
+  }
   reference_counter_ = std::make_shared<ReferenceCounter>(
       rpc_address_, RayConfig::instance().distributed_ref_counting_enabled(),
       RayConfig::instance().lineage_pinning_enabled(),
@@ -457,9 +463,7 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
         return std::shared_ptr<rpc::CoreWorkerClient>(
             new rpc::CoreWorkerClient(addr, *client_call_manager_));
       },
-      [this](const ObjectID &obj_id, int64_t size) {
-        task_profiler_->SetObjectSize(obj_id, static_cast<uint64_t>(size));
-      });
+      record_object_size);
 
   if (options_.worker_type == ray::WorkerType::WORKER) {
     periodical_runner_.RunFnPeriodically(
@@ -508,6 +512,14 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
         },
         "CoreWorker.ReconstructObject");
   };
+  RecordTaskRuntimeCallback record_task_runtime = nullptr;
+  if (RayConfig::instance().dump_task_profile()) {
+    record_task_runtime = [this](const TaskID &task_id, uint64_t start_time_us, uint64_t finish_time_us,
+             uint64_t objects_stored_time_us) {
+        task_profiler_->SetTaskRuntime(task_id, start_time_us, finish_time_us,
+                                       objects_stored_time_us);
+      };
+  }
   task_manager_.reset(new TaskManager(
       memory_store_, reference_counter_,
       /* retry_task_callback= */
@@ -533,11 +545,7 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
         }
       },
       check_node_alive_fn, reconstruct_object_callback,
-      [this](const TaskID &task_id, uint64_t start_time_us, uint64_t finish_time_us,
-             uint64_t objects_stored_time_us) {
-        task_profiler_->SetTaskRuntime(task_id, start_time_us, finish_time_us,
-                                       objects_stored_time_us);
-      }));
+      record_task_runtime));
 
   // Create an entry for the driver task in the task table. This task is
   // added immediately with status RUNNING. This allows us to push errors
