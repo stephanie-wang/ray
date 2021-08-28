@@ -522,6 +522,11 @@ struct hash<ray::ResourceSet> {
   size_t operator()(ray::ResourceSet const &k) const {
     size_t seed = k.GetResourceMap().size();
     for (auto &elem : k.GetResourceMap()) {
+      if (elem.first == ray::kObjectStoreMemory_ResourceLabel) {
+        // This ensures that tasks with the same resource shape, minus object
+        // store memory requirements, will get scheduled under the same class.
+        continue;
+      }
       seed ^= std::hash<std::string>()(elem.first);
       seed ^= std::hash<double>()(elem.second);
     }
