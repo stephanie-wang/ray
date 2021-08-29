@@ -39,16 +39,18 @@ def get_num_mb_spilled():
     return num_mb_spilled
 
 
-def test(num_nodes, num_consumers, object_size_mb, num_objects_per_node, backpressure):
+def test(num_nodes, num_pipeline_args, object_size_mb, num_objects_per_node, backpressure):
     num_mb_spilled_initial = get_num_mb_spilled()
 
     @ray.remote
     def f():
+        time.sleep(object_size_mb * 0.01)
         return np.zeros(int(object_size_mb * (10 ** 6)), dtype=np.uint8)
 
     @ray.remote
-    def consume(x):
-        return x
+    def consume(*x):
+        time.sleep(object_size_mb * 0.01)
+        return np.concatenate(x)
 
     @ray.remote
     def done(x):
@@ -59,36 +61,45 @@ def test(num_nodes, num_consumers, object_size_mb, num_objects_per_node, backpre
     if backpressure:
         total_mem = ray.cluster_resources()['object_store_memory']
         # How many objects can fit in memory at once.
-        max_tasks_in_flight = total_mem / (object_size_mb * num_objects_per_node)
-        if num_consumers > 0:
-            # If there are consumers, then we need space for both the task's
-            # arg and its return value.
-            max_tasks_in_flight /= 2
+        max_tasks_in_flight = (total_mem / 1e6) / (object_size_mb) * 0.8
+        if num_pipeline_args > 0:
+            # If there is a consumer, then we need space for both the consumer
+            # task's args and its return value, the concatenated array.
+            max_tasks_in_flight /= 2 * num_pipeline_args
+        max_tasks_in_flight = int(max_tasks_in_flight)
     else:
         # No backpressure. Submit all tasks at once.
         max_tasks_in_flight = num_objects
+    print("max tasks in flight", max_tasks_in_flight)
 
     num_tasks_submitted = 0
     while num_tasks_submitted < num_objects:
         num_tasks_to_submit = min(max_tasks_in_flight, num_objects - num_tasks_submitted)
-        xs = [f.remote() for _ in range(num_tasks_to_submit)]
+        num_args = 1
+        if num_pipeline_args > 0:
+            num_args *= num_pipeline_args
+        xs = [f.remote() for _ in range(num_tasks_to_submit * num_args)]
         num_tasks_submitted += num_tasks_to_submit
 
-        for _ in range(num_consumers):
-            xs = [consume.remote(x) for x in xs]
-        done = [done.remote(x) for x in xs]
+        if num_pipeline_args > 0:
+            next_xs = []
+            while xs:
+                args = [xs.pop(0) for _ in range(num_pipeline_args)]
+                next_xs.append(consume.remote(*args))
+            xs = next_xs
+        done_refs = [done.remote(x) for x in xs]
 
         # If we have consumers, delete the original refs so that we can GC.
-        if (num_consumers > 0):
+        if num_pipeline_args > 0:
             print("Freeing refs", xs)
             del xs
 
         start_timeout = time.time()
         while time.time() - start_timeout < 360:
-            _, done = ray.wait(done, timeout=1)
-            if not done:
+            _, done_refs = ray.wait(done_refs, timeout=1)
+            if not done_refs:
                 break
-        assert not done, f"{done} timed out"
+        assert not done_refs, f"{done_refs} timed out"
 
     runtime = time.time() - start
     print("Finished in", runtime)
@@ -108,11 +119,15 @@ if __name__ == "__main__":
 
     parser.add_argument("--system", type=str, required=True)
     parser.add_argument("--num-nodes", type=int, required=True)
-    parser.add_argument("--num-consumers", type=int, default=0)
     parser.add_argument("--object-size-mb", type=int, required=True)
     parser.add_argument("--object-store-memory_mb", type=int, required=True)
     parser.add_argument("--num-objects-per-node", type=int, required=True)
     parser.add_argument('--output-filename', type=str, default=None)
+    # If this is 0, then we just produce objects and wait for them to be created.
+    # If this is more than 0, then we submit a second round of consume tasks
+    # that concatenates num_pipeline_args many objects into a single array.
+    # Then, we release each consume task's output.
+    parser.add_argument('--num-pipeline-args', type=int, default=0)
     parser.add_argument('--local', action='store_true')
 
     args = parser.parse_args()
@@ -122,13 +137,13 @@ if __name__ == "__main__":
         ray.init(object_store_memory=int(args.object_store_memory_mb * 10 ** 6))
     else:
         ray.init(address="auto")
-    runtime, num_mb_spilled = test(args.num_nodes, args.num_consumers, args.object_size_mb, args.num_objects_per_node, backpressure)
+    runtime, num_mb_spilled = test(args.num_nodes, args.num_pipeline_args, args.object_size_mb, args.num_objects_per_node, backpressure)
 
     if args.output_filename is not None:
         fieldnames = [
                 "system",
                 "num_nodes",
-                "num_consumers",
+                "num_pipeline_args",
                 "object_size_mb",
                 "object_store_memory_mb",
                 "num_objects_per_node",
@@ -144,7 +159,7 @@ if __name__ == "__main__":
             w.writerow({
                 "system": args.system,
                 "num_nodes": args.num_nodes,
-                "num_consumers": args.num_consumers,
+                "num_pipeline_args": args.num_pipeline_args,
                 "object_size_mb": args.object_size_mb,
                 "object_store_memory_mb": args.object_store_memory_mb,
                 "num_objects_per_node": args.num_objects_per_node,
