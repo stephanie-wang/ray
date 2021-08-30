@@ -3211,6 +3211,12 @@ bool CoreWorker::PreemptObject(const ObjectID &object_id) {
   NodeID pinned_at_raylet_id = reference_counter_->ResetPreemptedObject(object_id, &spilled);
   RAY_LOG(INFO) << "Preempting object " << object_id << ", was stored at " << pinned_at_raylet_id;
   if (pinned_at_raylet_id.IsNil() && !spilled) {
+    auto creating_task_id = object_id.TaskId();
+    TaskSpecification spec;
+    if (task_manager_->IsTaskPending(creating_task_id, &spec)) {
+      direct_task_submitter_->PreemptTask(spec);
+      return true;
+    }
     return false;
   }
   // Delete the object from the in-memory store to indicate that it is not

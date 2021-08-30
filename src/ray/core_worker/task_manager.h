@@ -183,7 +183,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   ///
   /// \param[in] task_id ID of the task to query.
   /// \return Whether the task is pending.
-  bool IsTaskPending(const TaskID &task_id) const;
+  bool IsTaskPending(const TaskID &task_id, TaskSpecification *spec = nullptr) const;
 
   /// Return the number of submissible tasks. This includes both tasks that are
   /// pending execution and tasks that have finished but that may be

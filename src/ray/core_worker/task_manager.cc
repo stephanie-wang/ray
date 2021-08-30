@@ -174,11 +174,14 @@ bool TaskManager::IsTaskSubmissible(const TaskID &task_id) const {
   return submissible_tasks_.count(task_id) > 0;
 }
 
-bool TaskManager::IsTaskPending(const TaskID &task_id) const {
+bool TaskManager::IsTaskPending(const TaskID &task_id, TaskSpecification *spec) const {
   absl::MutexLock lock(&mu_);
   const auto it = submissible_tasks_.find(task_id);
   if (it == submissible_tasks_.end()) {
     return false;
+  }
+  if (spec) {
+    *spec = it->second.spec;
   }
   return it->second.pending;
 }
