@@ -374,7 +374,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// \return The set of objects that were pinned on the given node.
   std::vector<ObjectID> ResetObjectsOnRemovedNode(const NodeID &raylet_id);
 
-  NodeID ResetPreemptedObject(const ObjectID &object_id);
+  NodeID ResetPreemptedObject(const ObjectID &object_id, bool *spilled);
 
   void WaitForLocationRemoved(const ObjectID &object_id, const NodeID &raylet_id, std::function<void()> callback);
 

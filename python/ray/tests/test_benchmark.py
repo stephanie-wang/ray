@@ -120,7 +120,7 @@ if __name__ == "__main__":
     parser.add_argument("--system", type=str, required=True)
     parser.add_argument("--num-nodes", type=int, required=True)
     parser.add_argument("--object-size-mb", type=int, required=True)
-    parser.add_argument("--object-store-memory_mb", type=int, required=True)
+    parser.add_argument("--object-store-memory-mb", type=int, required=True)
     parser.add_argument("--num-objects-per-node", type=int, required=True)
     parser.add_argument('--output-filename', type=str, default=None)
     # If this is 0, then we just produce objects and wait for them to be created.

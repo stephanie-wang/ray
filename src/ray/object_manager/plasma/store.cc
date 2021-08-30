@@ -405,7 +405,7 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id,
 
         // Try to find a lower priority local object that we can forcibly evict to
         // make room for this one.
-        std::vector<ObjectID> candidates;
+        absl::btree_map<ray::Priority, std::vector<std::pair<ObjectID, int64_t>>> candidate_map;
         int64_t max_preemptible_bytes = 0;
         for (const auto &entry : store_info_.objects) {
           const auto &candidate_id = entry.first;
@@ -418,14 +418,22 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id,
               !entry.second->preemption_failed &&
               !preemption_blacklist.count(candidate_id)) {
             RAY_LOG(DEBUG) << "local object " << candidate_id << " is preemption candidate";
-            candidates.push_back(candidate_id);
-            max_preemptible_bytes += entry.second->data_size + entry.second->metadata_size;
+            int64_t candidate_size = entry.second->data_size + entry.second->metadata_size;
+            candidate_map[entry.second->priority].push_back(std::make_pair<>(candidate_id, candidate_size));
+            max_preemptible_bytes += candidate_size;
           }
         }
 
         if (max_preemptible_bytes >= required_space && max_preemptible_bytes > 0) {
-          for (const auto &candidate : candidates) {
-            PreemptObject(candidate);
+          int64_t bytes_preempted = 0;
+          for (auto rit = candidate_map.rbegin(); rit != candidate_map.rend(); rit++) {
+            for (const auto &candidate : rit->second) {
+              PreemptObject(candidate.first);
+              bytes_preempted += candidate.second;
+            }
+            if (bytes_preempted >= required_space) {
+              break;
+            }
           }
           callback(PlasmaError::SpacePending);
         } else if (created_by_worker && higher_priority_ready_task) {

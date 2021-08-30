@@ -553,11 +553,16 @@ std::vector<ObjectID> ReferenceCounter::ResetObjectsOnRemovedNode(
   return lost_objects;
 }
 
-NodeID ReferenceCounter::ResetPreemptedObject(const ObjectID &object_id) {
+NodeID ReferenceCounter::ResetPreemptedObject(const ObjectID &object_id, bool *spilled) {
   absl::MutexLock lock(&mutex_);
   NodeID pinned_at_raylet_id;
   auto it = object_id_refs_.find(object_id);
   if (it != object_id_refs_.end()) {
+    if (it->second.spilled) {
+      RAY_LOG(DEBUG) << "Object to preempt " << object_id << " has been spilled";
+      *spilled = true;
+      return pinned_at_raylet_id;
+    }
     if (!it->second.pinned_at_raylet_id.has_value() || !it->second.on_delete) {
       RAY_LOG(DEBUG) << "Object to preempt " << object_id << " doesn't yet have primary copy, client should retry";
       // Wait until we have information about where the primary copy of the
