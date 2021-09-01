@@ -838,7 +838,7 @@ bool ClusterResourceScheduler::AllocateTaskResourceInstances(
                                      local_resources_.predefined_resources[i].available,
                                      &task_allocation->predefined_resources[i])) {
         if (unavailable_resource) {
-          *unavailable_resource = OBJECT_STORE_MEM;
+          *unavailable_resource = static_cast<PredefinedResources>(i);
         }
         // Allocation failed. Restore node's local resources by freeing the resources
         // of the failed allocation.

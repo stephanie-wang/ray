@@ -432,6 +432,13 @@ class ClusterResourceScheduler : public ClusterResourceSchedulerInterface {
   std::string SerializedTaskResourceInstances(
       std::shared_ptr<TaskResourceInstances> task_allocation) const;
 
+  double GetLocalAvailableCpus() const {
+    NodeResources local_resources;
+    RAY_CHECK(GetNodeResources(local_node_id_, &local_resources));
+    auto &capacity = local_resources.predefined_resources[CPU];
+    return capacity.available.Double();
+  }
+
   /// Return human-readable string for this scheduler state.
   std::string DebugString() const;
 

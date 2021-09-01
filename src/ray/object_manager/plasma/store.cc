@@ -344,7 +344,7 @@ void PlasmaStore::AsyncPreemptToMakeSpaceForScheduledTask(
   HandleObjectOomAsync(object_id, priority, data_size, /*created_by_worker=*/false,
       deps_set,
       [this](PlasmaError error) {
-      if (error == PlasmaError::FallbackAllocate || error == PlasmaError::OutOfMemory) {
+      if (error == PlasmaError::OutOfMemory) {
         if (oom_start_ms_ == -1) {
           oom_start_ms_ = current_time_ms();
         } else if (current_time_ms() - oom_start_ms_ > 1000) {
@@ -385,6 +385,7 @@ PlasmaError PlasmaStore::HandleObjectOomAsync(const ObjectID &object_id,
         int64_t required_space =
             PlasmaAllocator::Allocated() + size - PlasmaAllocator::GetFootprintLimit();
         if (required_space <= 0) {
+          RAY_LOG(INFO) << "Trying to allocate " << size << ", already have " << PlasmaAllocator::Allocated() << " allocated, triggering fallback allocation";
           // We have enough space but can't allocate the object. This must be
           // due to fragmentation.
           callback(PlasmaError::FallbackAllocate);
