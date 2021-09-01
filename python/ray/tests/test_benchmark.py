@@ -8,12 +8,14 @@ import numpy as np
 import pytest
 
 import ray
+from ray.cluster_utils import Cluster
 from ray.test_utils import (
     wait_for_condition,
     wait_for_pid_to_exit,
     SignalActor
 )
 from ray.internal.internal_api import memory_summary
+
 
 SIGKILL = signal.SIGKILL if sys.platform != "win32" else signal.SIGTERM
 
@@ -44,12 +46,12 @@ def test(num_nodes, num_pipeline_args, object_size_mb, num_objects_per_node, bac
 
     @ray.remote
     def f():
-        time.sleep(object_size_mb * 0.01)
+        #time.sleep(object_size_mb * 0.01)
         return np.zeros(int(object_size_mb * (10 ** 6)), dtype=np.uint8)
 
     @ray.remote
     def consume(*x):
-        time.sleep(object_size_mb * 0.01)
+        #time.sleep(object_size_mb * 0.01)
         return np.concatenate(x)
 
     @ray.remote
@@ -132,9 +134,22 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     backpressure = args.system == "application"
+    cluster = None
     if args.local:
-        assert args.num_nodes == 1
-        ray.init(object_store_memory=int(args.object_store_memory_mb * 10 ** 6))
+        cluster = Cluster()
+        num_cpus = 16
+        object_store_memory = int(args.object_store_memory_mb * 10 ** 6)
+        cluster.add_node(object_store_memory=object_store_memory,
+                _system_config={
+                    "lineage_pinning_enabled": True,
+                    "task_retry_delay_ms": 0,
+                    "worker_lease_timeout_milliseconds": 0,
+                    "object_spilling_threshold": 2,
+                    }, num_cpus=num_cpus)
+        for _ in range(args.num_nodes - 1):
+            cluster.add_node(object_store_memory=object_store_memory,
+                    num_cpus=num_cpus)
+        ray.init(address=cluster.address)
     else:
         ray.init(address="auto")
     runtime, num_mb_spilled = test(args.num_nodes, args.num_pipeline_args, args.object_size_mb, args.num_objects_per_node, backpressure)
