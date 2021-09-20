@@ -9,12 +9,11 @@ def load_data():
             .repeat() \
             .random_shuffle() \
             .split(n=3)
-    return pipes
+    return [pipe.iter_datasets() for pipe in pipes]
 
 
 @ray.remote
-def consume(i, pipe):
-    batch = next(pipe.iter_datasets())
+def consume(i, batch):
     num_rows = batch.count()
     print("consume", i, num_rows)
     return num_rows
@@ -22,7 +21,9 @@ def consume(i, pipe):
 
 @workflow.step
 def train(pipes, total=0):
-    results = [consume.remote(i, pipe) for i, pipe in enumerate(pipes)]
+    # What level of fault tolerance do we need to checkpoint a pipe? How do app vs system level lineage interact?
+    batches = [next(pipe) for pipe in pipes]
+    results = [consume.remote(i, batch) for i, batch in enumerate(batches)]
     total += sum(ray.get(results))
     # Stopping condition.
     if total >= 3_000:

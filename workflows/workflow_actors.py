@@ -9,8 +9,7 @@ def load_data(num_workers):
             .repeat() \
             .random_shuffle() \
             .split(n=num_workers)
-    return pipes
-
+    return [pipe.iter_datasets() for pipe in pipes]
 
 @ray.remote
 class Worker:
@@ -18,8 +17,7 @@ class Worker:
         # TODO: Reload model?
         pass
 
-    def consume(self, pipe):
-        batch = next(pipe.iter_datasets())
+    def consume(self, batch):
         # ...Train...
         num_rows = batch.count()
         print("consume", i, num_rows)
@@ -33,7 +31,8 @@ def load_workers(num_workers):
 
 @workflow.step
 def train(pipes, workers, total=0):
-    results = [worker.consume.remote(pipe) for worker, pipe in zip(workers, pipes)]
+    batches = [next(pipe) for pipe in pipes]
+    results = [worker.consume.remote(batch) for worker, batch in zip(workers, batches)]
     total += sum(ray.get(results))
     # Stopping condition.
     if total >= 3_000:
