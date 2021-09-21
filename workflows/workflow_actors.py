@@ -4,6 +4,8 @@ from ray import workflow
 
 @workflow.step
 def load_data(num_workers):
+    # Requirement 5: Recover data during execution without stopping the whole
+    # job.
     pipes = ray.data.range(1000) \
             .map(lambda x: x * 2) \
             .repeat() \
@@ -13,15 +15,16 @@ def load_data(num_workers):
 
 @ray.remote
 class Worker:
-    def __init__(self):
-        # TODO: Reload model?
-        pass
+    def __init__(self, model_checkpoint=None):
+        if model_checkpoint is None:
+            self.model = "xxx"
+        else:
+            self.model = load(model_checkpoint)
 
     def consume(self, batch):
         # ...Train...
-        num_rows = batch.count()
-        print("consume", i, num_rows)
-        return num_rows
+        self.model, accuracy = update(model)
+        return accuracy
 
 
 @workflow.step
@@ -31,12 +34,20 @@ def load_workers(num_workers):
 
 @workflow.step
 def train(pipes, workers, total=0):
+    # Requirement 1: Checkpoint pipe without checkpointing the data. On
+    # restart, re-execute the data pipeline.
     batches = [next(pipe) for pipe in pipes]
+    # Requirement 2: Checkpoint actor state (the model). On restart, recover
+    # actor from checkpoint.
+    # Requirement 3: Periodic checkpointing of actor state to avoid checkpoint
+    # model on each step.
     results = [worker.consume.remote(batch) for worker, batch in zip(workers, batches)]
-    total += sum(ray.get(results))
+    accuracy = sum(ray.get(results))
     # Stopping condition.
-    if total >= 3_000:
-        return total
+    if accuracy >= TARGET:
+        # Requirement 4: Application dynamically chooses whether to checkpoint
+        # a workflow step.
+        return accuracy
     else:
         return train.step(pipes, total, workers)
 

@@ -21,7 +21,6 @@ def consume(i, batch):
 
 @workflow.step
 def train(pipes, total=0):
-    # What level of fault tolerance do we need to checkpoint a pipe? How do app vs system level lineage interact?
     batches = [next(pipe) for pipe in pipes]
     results = [consume.remote(i, batch) for i, batch in enumerate(batches)]
     total += sum(ray.get(results))
