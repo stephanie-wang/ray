@@ -180,6 +180,7 @@ table FetchOrReconstruct {
   object_ids: [string];
   // The RPC addresses of the workers that own the objects in object_ids.
   owner_addresses: [Address];
+  priority: [int];
   // Do we only want to fetch the objects or also reconstruct them?
   fetch_only: bool;
   // False for direct call tasks. Blocking for those tasks is handled via the

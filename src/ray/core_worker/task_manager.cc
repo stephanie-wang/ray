@@ -17,6 +17,7 @@
 #include "ray/common/buffer.h"
 #include "ray/common/common_protocol.h"
 #include "ray/common/constants.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/util/util.h"
 
 #include "msgpack.hpp"
@@ -57,39 +58,55 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
   }
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
 
-  // Add new owned objects for the return values of the task.
-  size_t num_returns = spec.NumReturns();
-  if (spec.IsActorTask()) {
-    num_returns--;
+  ObjectID min_arg;
+  auto priority = reference_counter_->GetMinPriority(task_deps, &min_arg);
+  auto depth = reference_counter_->GetMaxDepth(task_deps) + 1;
+  if (min_arg.IsNil()) {
+    priority.SetScore(depth, num_tasks_submitted_);
+  } else {
+    auto task_index = reference_counter_->GetDependentTaskIds(min_arg).size();
+    priority.SetScore(depth, task_index);
   }
   std::vector<rpc::ObjectReference> returned_refs;
-  for (size_t i = 0; i < num_returns; i++) {
+  std::vector<ObjectID> return_ids;
+  for (size_t i = 0; i < spec.NumReturns(); i++) {
+    auto return_id = spec.ReturnId(i);
     if (!spec.IsActorCreationTask()) {
       // We pass an empty vector for inner IDs because we do not know the return
       // value of the task yet. If the task returns an ID(s), the worker will
       // publish the WaitForRefRemoved message that we are now a borrower for
       // the inner IDs. Note that this message can be received *before* the
       // PushTaskReply.
-      reference_counter_->AddOwnedObject(spec.ReturnId(i),
+      reference_counter_->AddOwnedObject(return_id,
                                          /*inner_ids=*/{}, caller_address, call_site, -1,
-                                         /*is_reconstructable=*/true);
+                                         /*is_reconstructable=*/true,
+                                         priority,
+                                         depth);
+      return_ids.push_back(return_id);
     }
 
     rpc::ObjectReference ref;
-    ref.set_object_id(spec.ReturnId(i).Binary());
+    ref.set_object_id(return_id.Binary());
     ref.mutable_owner_address()->CopyFrom(caller_address);
     ref.set_call_site(call_site);
     returned_refs.push_back(std::move(ref));
   }
+  if (!return_ids.empty()) {
+    for (const auto &dep : task_deps) {
+      reference_counter_->AddDependentObjectIds(dep, return_ids);
+    }
+  }
 
   {
     absl::MutexLock lock(&mu_);
+    const auto num_returns = spec.NumReturns();
     RAY_CHECK(submissible_tasks_
                   .emplace(spec.TaskId(), TaskEntry(spec, max_retries, num_returns))
                   .second);
     num_pending_tasks_++;
   }
 
+  num_tasks_submitted_++;
   return returned_refs;
 }
 
@@ -167,11 +184,14 @@ bool TaskManager::IsTaskSubmissible(const TaskID &task_id) const {
   return submissible_tasks_.count(task_id) > 0;
 }
 
-bool TaskManager::IsTaskPending(const TaskID &task_id) const {
+bool TaskManager::IsTaskPending(const TaskID &task_id, TaskSpecification *spec) const {
   absl::MutexLock lock(&mu_);
   const auto it = submissible_tasks_.find(task_id);
   if (it == submissible_tasks_.end()) {
     return false;
+  }
+  if (spec) {
+    *spec = it->second.spec;
   }
   return it->second.pending;
 }
@@ -190,7 +210,6 @@ void TaskManager::CompletePendingTask(const TaskID &task_id,
                                       const rpc::PushTaskReply &reply,
                                       const rpc::Address &worker_addr) {
   RAY_LOG(DEBUG) << "Completing task " << task_id;
-
   std::vector<ObjectID> direct_return_ids;
   std::vector<ObjectID> plasma_return_ids;
   for (int i = 0; i < reply.return_objects_size(); i++) {
@@ -333,7 +352,8 @@ bool TaskManager::RetryTaskIfPossible(const TaskID &task_id) {
 }
 
 bool TaskManager::PendingTaskFailed(
-    const TaskID &task_id, rpc::ErrorType error_type, Status *status,
+    const TaskID &task_id, rpc::ErrorType error_type,
+    Status *status,
     const std::shared_ptr<rpc::RayException> &creation_task_exception,
     bool immediately_mark_object_fail) {
   // Note that this might be the __ray_terminate__ task, so we don't log
@@ -350,6 +370,7 @@ bool TaskManager::PendingTaskFailed(
         << "Tried to complete task that was not pending " << task_id;
     RAY_CHECK(it->second.pending)
         << "Tried to complete task that was not pending " << task_id;
+
     spec = it->second.spec;
     if (!will_retry) {
       submissible_tasks_.erase(it);
@@ -550,6 +571,30 @@ std::vector<TaskID> TaskManager::GetPendingChildrenTasks(
     }
   }
   return ret_vec;
+}
+
+std::vector<ObjectID> TaskManager::GetDependencies(const ObjectID &object_id) const {
+  const auto task_id = object_id.TaskId();
+  absl::MutexLock lock(&mu_);
+  auto it = submissible_tasks_.find(task_id);
+  if (it == submissible_tasks_.end()) {
+    RAY_LOG(INFO) << "No task spec found for return object " << object_id << " during priority propagation";
+    return {};
+  }
+
+  const auto &spec = it->second.spec;
+  std::vector<ObjectID> task_deps;
+  for (size_t i = 0; i < spec.NumArgs(); i++) {
+    if (spec.ArgByRef(i)) {
+      task_deps.push_back(spec.ArgId(i));
+    } else {
+      const auto &inlined_refs = spec.ArgInlinedRefs(i);
+      for (const auto &inlined_ref : inlined_refs) {
+        task_deps.push_back(ObjectID::FromBinary(inlined_ref.object_id()));
+      }
+    }
+  }
+  return task_deps;
 }
 
 }  // namespace core

@@ -125,7 +125,9 @@ bool ActorManager::AddNewActorHandle(std::unique_ptr<ActorHandle> actor_handle,
     reference_counter_->AddOwnedObject(actor_creation_return_id,
                                        /*inner_ids=*/{}, caller_address, call_site,
                                        /*object_size*/ -1,
-                                       /*is_reconstructable=*/true);
+                                       /*is_reconstructable=*/true,
+                                       /*priority=*/Priority(0),
+                                       /*depth=*/0);
   }
 
   return AddActorHandle(std::move(actor_handle), cached_actor_name,

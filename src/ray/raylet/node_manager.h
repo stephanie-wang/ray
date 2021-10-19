@@ -133,6 +133,9 @@ class HeartbeatSender {
   uint64_t last_heartbeat_at_ms_;
 };
 
+using LeasedWorkerPool = std::unordered_map<WorkerID, std::pair<std::shared_ptr<WorkerInterface>, Priority>>;
+
+
 class NodeManager : public rpc::NodeManagerServiceHandler {
  public:
   /// Create a node manager.
@@ -292,7 +295,9 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// \return Void.
   void AsyncResolveObjects(const std::shared_ptr<ClientConnection> &client,
                            const std::vector<rpc::ObjectReference> &required_object_refs,
-                           const TaskID &current_task_id, bool ray_get,
+                           const TaskID &current_task_id,
+                           const Priority &priority,
+                           bool ray_get,
                            bool mark_worker_blocked);
 
   /// Handle end of a blocking object get. This could be a task assigned to a
@@ -663,7 +668,7 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
       remote_node_manager_addresses_;
 
   /// Map of workers leased out to direct call clients.
-  std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> leased_workers_;
+  LeasedWorkerPool leased_workers_;
 
   /// Map from owner worker ID to a list of worker IDs that the owner has a
   /// lease on.
@@ -676,6 +681,8 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
   /// Whether to trigger local GC in the next resource usage report. This will trigger gc
   /// on all local workers of this raylet.
   bool should_local_gc_ = false;
+
+  bool should_global_spill_ = false;
 
   /// When plasma storage usage is high, we'll run gc to reduce it.
   double high_plasma_storage_usage_ = 1.0;

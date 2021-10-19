@@ -18,6 +18,7 @@
 
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/common/task/task_util.h"
 #include "ray/common/test_util.h"
 
@@ -29,9 +30,14 @@ using ::testing::_;
 using ::testing::InSequence;
 using ::testing::Return;
 
+TaskKey RandomTaskKey() {
+  return TaskKey(Priority(), RandomTaskId());
+}
+
 class MockObjectManager : public ObjectManagerInterface {
  public:
-  uint64_t Pull(const std::vector<rpc::ObjectReference> &object_refs,
+  void Pull(const TaskKey &req_id,
+                const std::vector<rpc::ObjectReference> &object_refs,
                 BundlePriority prio) {
     if (prio == BundlePriority::GET_REQUEST) {
       active_get_requests.insert(req_id);
@@ -40,25 +46,23 @@ class MockObjectManager : public ObjectManagerInterface {
     } else {
       active_task_requests.insert(req_id);
     }
-    return req_id++;
   }
 
-  void CancelPull(uint64_t request_id) {
+  void CancelPull(const TaskKey &request_id) {
     ASSERT_TRUE(active_get_requests.erase(request_id) ||
                 active_wait_requests.erase(request_id) ||
                 active_task_requests.erase(request_id));
   }
 
-  bool PullRequestActiveOrWaitingForMetadata(uint64_t request_id) const {
+  bool PullRequestActiveOrWaitingForMetadata(const TaskKey &request_id) const {
     return active_get_requests.count(request_id) ||
            active_wait_requests.count(request_id) ||
            active_task_requests.count(request_id);
   }
 
-  uint64_t req_id = 1;
-  std::unordered_set<uint64_t> active_get_requests;
-  std::unordered_set<uint64_t> active_wait_requests;
-  std::unordered_set<uint64_t> active_task_requests;
+  absl::flat_hash_set<TaskKey> active_get_requests;
+  absl::flat_hash_set<TaskKey> active_wait_requests;
+  absl::flat_hash_set<TaskKey> active_task_requests;
 };
 
 class DependencyManagerTest : public ::testing::Test {
@@ -90,7 +94,7 @@ TEST_F(DependencyManagerTest, TestSimpleTask) {
   for (int i = 0; i < num_arguments; i++) {
     arguments.push_back(ObjectID::FromRandom());
   }
-  TaskID task_id = RandomTaskId();
+  TaskKey task_id = RandomTaskKey();
   bool ready =
       dependency_manager_.RequestTaskDependencies(task_id, ObjectIdsToRefs(arguments));
   ASSERT_FALSE(ready);
@@ -105,10 +109,10 @@ TEST_F(DependencyManagerTest, TestSimpleTask) {
   // The task is ready to run.
   ready_task_ids = dependency_manager_.HandleObjectLocal(arguments[2]);
   ASSERT_EQ(ready_task_ids.size(), 1);
-  ASSERT_EQ(ready_task_ids.front(), task_id);
+  ASSERT_EQ(ready_task_ids.front(), task_id.second);
 
   // Remove the task.
-  dependency_manager_.RemoveTaskDependencies(task_id);
+  dependency_manager_.RemoveTaskDependencies(task_id.second);
   AssertNoLeaks();
 }
 
@@ -117,10 +121,10 @@ TEST_F(DependencyManagerTest, TestSimpleTask) {
 TEST_F(DependencyManagerTest, TestMultipleTasks) {
   // Create 3 tasks that are dependent on the same object.
   ObjectID argument_id = ObjectID::FromRandom();
-  std::vector<TaskID> dependent_tasks;
+  std::vector<TaskKey> dependent_tasks;
   int num_dependent_tasks = 3;
   for (int i = 0; i < num_dependent_tasks; i++) {
-    TaskID task_id = RandomTaskId();
+    TaskKey task_id = RandomTaskKey();
     dependent_tasks.push_back(task_id);
     bool ready = dependency_manager_.RequestTaskDependencies(
         task_id, ObjectIdsToRefs({argument_id}));
@@ -132,14 +136,17 @@ TEST_F(DependencyManagerTest, TestMultipleTasks) {
   // Tell the task dependency manager that the object is local.
   auto ready_task_ids = dependency_manager_.HandleObjectLocal(argument_id);
   // Check that all tasks are now ready to run.
-  std::unordered_set<TaskID> added_tasks(dependent_tasks.begin(), dependent_tasks.end());
+  std::unordered_set<TaskID> added_tasks;
+  for (auto &id : dependent_tasks) {
+    added_tasks.insert(id.second);
+  }
   for (auto &id : ready_task_ids) {
     ASSERT_TRUE(added_tasks.erase(id));
   }
   ASSERT_TRUE(added_tasks.empty());
 
   for (auto &id : dependent_tasks) {
-    dependency_manager_.RemoveTaskDependencies(id);
+    dependency_manager_.RemoveTaskDependencies(id.second);
   }
   AssertNoLeaks();
 }
@@ -154,7 +161,7 @@ TEST_F(DependencyManagerTest, TestTaskArgEviction) {
   for (int i = 0; i < num_arguments; i++) {
     arguments.push_back(ObjectID::FromRandom());
   }
-  TaskID task_id = RandomTaskId();
+  TaskKey task_id = RandomTaskKey();
   bool ready =
       dependency_manager_.RequestTaskDependencies(task_id, ObjectIdsToRefs(arguments));
   ASSERT_FALSE(ready);
@@ -166,7 +173,7 @@ TEST_F(DependencyManagerTest, TestTaskArgEviction) {
     ready_tasks = dependency_manager_.HandleObjectLocal(arguments[i]);
     if (i == arguments.size() - 1) {
       ASSERT_EQ(ready_tasks.size(), 1);
-      ASSERT_EQ(ready_tasks.front(), task_id);
+      ASSERT_EQ(ready_tasks.front(), task_id.second);
     } else {
       ASSERT_TRUE(ready_tasks.empty());
     }
@@ -181,7 +188,7 @@ TEST_F(DependencyManagerTest, TestTaskArgEviction) {
       // The first eviction should cause the task to go back to the waiting
       // state.
       ASSERT_EQ(waiting_tasks.size(), 1);
-      ASSERT_EQ(waiting_tasks.front(), task_id);
+      ASSERT_EQ(waiting_tasks.front(), task_id.second);
     } else {
       // The subsequent evictions shouldn't cause any more tasks to go back to
       // the waiting state.
@@ -196,13 +203,13 @@ TEST_F(DependencyManagerTest, TestTaskArgEviction) {
     ready_tasks = dependency_manager_.HandleObjectLocal(arguments[i]);
     if (i == arguments.size() - 1) {
       ASSERT_EQ(ready_tasks.size(), 1);
-      ASSERT_EQ(ready_tasks.front(), task_id);
+      ASSERT_EQ(ready_tasks.front(), task_id.second);
     } else {
       ASSERT_TRUE(ready_tasks.empty());
     }
   }
 
-  dependency_manager_.RemoveTaskDependencies(task_id);
+  dependency_manager_.RemoveTaskDependencies(task_id.second);
   AssertNoLeaks();
 }
 
@@ -324,7 +331,7 @@ TEST_F(DependencyManagerTest, TestDuplicateTaskArgs) {
   for (int i = 0; i < num_arguments; i++) {
     arguments.push_back(obj_id);
   }
-  TaskID task_id = RandomTaskId();
+  TaskKey task_id = RandomTaskKey();
   bool ready =
       dependency_manager_.RequestTaskDependencies(task_id, ObjectIdsToRefs(arguments));
   ASSERT_FALSE(ready);
@@ -332,15 +339,15 @@ TEST_F(DependencyManagerTest, TestDuplicateTaskArgs) {
 
   auto ready_task_ids = dependency_manager_.HandleObjectLocal(obj_id);
   ASSERT_EQ(ready_task_ids.size(), 1);
-  ASSERT_EQ(ready_task_ids.front(), task_id);
-  dependency_manager_.RemoveTaskDependencies(task_id);
+  ASSERT_EQ(ready_task_ids.front(), task_id.second);
+  dependency_manager_.RemoveTaskDependencies(task_id.second);
 
-  TaskID task_id2 = RandomTaskId();
+  TaskKey task_id2 = RandomTaskKey();
   ready =
       dependency_manager_.RequestTaskDependencies(task_id2, ObjectIdsToRefs(arguments));
   ASSERT_TRUE(ready);
   ASSERT_EQ(object_manager_mock_.active_task_requests.size(), 1);
-  dependency_manager_.RemoveTaskDependencies(task_id2);
+  dependency_manager_.RemoveTaskDependencies(task_id2.second);
 
   AssertNoLeaks();
 }

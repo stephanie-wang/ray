@@ -18,6 +18,8 @@
 #include <functional>
 
 #include "ray/common/id.h"
+#include "ray/common/task/task_priority.h"
+#include "src/ray/protobuf/common.pb.h"
 #include "ray/common/status.h"
 
 namespace ray {
@@ -31,7 +33,10 @@ using SpaceReleasedCallback = std::function<void()>;
 
 /// A callback to call when a spilled object needs to be returned to the object store.
 using RestoreSpilledObjectCallback = std::function<void(
-    const ObjectID &, const std::string &, std::function<void(const ray::Status &)>)>;
+    const ObjectID &, const Priority &priority, const std::string &, std::function<void(const ray::Status &)>)>;
+
+using AsyncPreemptCallback = std::function<void(const ObjectID &object_id, const ray::Priority &priority,
+    int64_t data_size, const std::vector<ObjectID> &task_deps)>;
 
 /// A struct that includes info about the object.
 struct ObjectInfo {
@@ -46,6 +51,7 @@ struct ObjectInfo {
   int owner_port;
   /// Owner's worker ID.
   WorkerID owner_worker_id;
+  Priority priority;
 
   int64_t GetObjectSize() const { return data_size + metadata_size; }
 
@@ -64,5 +70,18 @@ using AddObjectCallback = std::function<void(const ObjectInfo &)>;
 
 // A callback to call when an object is removed from the shared memory store.
 using DeleteObjectCallback = std::function<void(const ObjectID &)>;
+
+using PreemptObjectCallback = std::function<void(const rpc::ObjectReference &object_ref, std::function<void(bool)>)>;
+
+using ScheduleRemoteMemoryCallback = std::function<NodeID(int64_t space_needed)>;
+
+using TaskQueueInfoCallback = std::function<void(
+    const NodeID &remote_node_id,
+    bool higher_priority_ready_task,
+    bool higher_priority_running_task
+    )>;
+
+// Returns <higher_priority_ready_task, higher_priority_running_task>.
+using CheckTaskQueuesCallback = std::function<void(int64_t space_needed, const Priority &priority, TaskQueueInfoCallback callback)>;
 
 }  // namespace ray

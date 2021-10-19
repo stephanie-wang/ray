@@ -284,6 +284,7 @@ class RayletClient : public RayletClientInterface {
   /// \return int 0 means correct, other numbers mean error.
   ray::Status FetchOrReconstruct(const std::vector<ObjectID> &object_ids,
                                  const std::vector<rpc::Address> &owner_addresses,
+                                 const Priority &priority,
                                  bool fetch_only, bool mark_worker_blocked,
                                  const TaskID &current_task_id);
 

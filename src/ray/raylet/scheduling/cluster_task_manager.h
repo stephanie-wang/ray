@@ -14,6 +14,7 @@
 
 #pragma once
 
+#include "absl/container/btree_map.h"
 #include "absl/container/flat_hash_map.h"
 #include "absl/container/flat_hash_set.h"
 #include "ray/common/ray_object.h"
@@ -60,6 +61,9 @@ struct Work {
 typedef std::function<absl::optional<rpc::GcsNodeInfo>(const NodeID &node_id)>
     NodeInfoGetter;
 
+using LeasedWorkerPool = std::unordered_map<WorkerID, std::pair<std::shared_ptr<WorkerInterface>, Priority>>;
+
+
 /// Manages the queuing and dispatching of tasks. The logic is as follows:
 /// 1. Queue tasks for scheduling.
 /// 2. Pick a node on the cluster which has the available resources to run a
@@ -96,7 +100,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
       NodeInfoGetter get_node_info,
       std::function<void(const RayTask &)> announce_infeasible_task,
       WorkerPoolInterface &worker_pool,
-      std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers,
+      LeasedWorkerPool &leased_workers,
       std::function<bool(const std::vector<ObjectID> &object_ids,
                          std::vector<std::unique_ptr<RayObject>> *results)>
           get_task_arguments,
@@ -206,6 +210,13 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// Calculate normal task resources.
   ResourceSet CalcNormalTaskResources() const override;
 
+  bool HasHigherPriorityTaskRunning(const Priority &priority) const;
+
+  void HasHigherPriorityTaskQueued(int64_t space_needed,
+      const Priority &priority, NodeID *remote_node_id,
+      bool *has_higher_priority_ready_task,
+      bool *has_higher_priority_running_task) const override;
+
  private:
   /// (Step 2) For each task in tasks_to_schedule_, pick a node in the system
   /// (local or remote) that has enough resources available to run the task, if
@@ -230,7 +241,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// different node.
   void DispatchScheduledTasksToWorkers(
       WorkerPoolInterface &worker_pool,
-      std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers);
+      LeasedWorkerPool &leased_workers);
 
   /// Helper method when the current node does not have the available resources to run a
   /// task.
@@ -267,8 +278,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// through queues to cancel tasks, etc.
   /// Queue of lease requests that are waiting for resources to become available.
   /// Tasks move from scheduled -> dispatch | waiting.
-  std::unordered_map<SchedulingClass, std::deque<std::shared_ptr<Work>>>
-      tasks_to_schedule_;
+  std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, std::shared_ptr<Work>>> tasks_to_schedule_;
 
   /// Queue of lease requests that should be scheduled onto workers.
   /// Tasks move from scheduled | waiting -> dispatch.
@@ -277,8 +287,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// All tasks in this map that have dependencies should be registered with
   /// the dependency manager, in case a dependency gets evicted while the task
   /// is still queued.
-  std::unordered_map<SchedulingClass, std::deque<std::shared_ptr<Work>>>
-      tasks_to_dispatch_;
+  /// TODO(memory): Sort between queues by priority also, not just within a queue.
+  std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, std::shared_ptr<Work>>> tasks_to_dispatch_;
 
   /// Tasks waiting for arguments to be transferred locally.
   /// Tasks move from waiting -> dispatch.
@@ -304,8 +314,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   /// Queue of lease requests that are infeasible.
   /// Tasks go between scheduling <-> infeasible.
-  std::unordered_map<SchedulingClass, std::deque<std::shared_ptr<Work>>>
-      infeasible_tasks_;
+  std::unordered_map<SchedulingClass, absl::btree_map<TaskKey, std::shared_ptr<Work>>> infeasible_tasks_;
 
   /// Track the cumulative backlog of all workers requesting a lease to this raylet.
   std::unordered_map<SchedulingClass, int> backlog_tracker_;
@@ -313,7 +322,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// TODO(Shanly): Remove `worker_pool_` and `leased_workers_` and make them as
   /// parameters of methods if necessary once we remove the legacy scheduler.
   WorkerPoolInterface &worker_pool_;
-  std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers_;
+  
+  LeasedWorkerPool &leased_workers_;
 
   /// Callback to get references to task arguments. These will be pinned while
   /// the task is running.
@@ -353,7 +363,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   void Dispatch(
       std::shared_ptr<WorkerInterface> worker,
-      std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers_,
+      LeasedWorkerPool &leased_workers_,
       const std::shared_ptr<TaskResourceInstances> &allocated_instances,
       const RayTask &task, rpc::RequestWorkerLeaseReply *reply,
       std::function<void(void)> send_reply_callback);

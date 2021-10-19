@@ -24,13 +24,15 @@
 
 namespace plasma {
 
-uint64_t CreateRequestQueue::AddRequest(const ObjectID &object_id,
+uint64_t CreateRequestQueue::AddRequest(const ray::TaskKey &key, const ObjectID &object_id,
                                         const std::shared_ptr<ClientInterface> &client,
                                         const CreateObjectCallback &create_callback,
                                         size_t object_size) {
   auto req_id = next_req_id_++;
+  index_[req_id] = key;
   fulfilled_requests_[req_id] = nullptr;
-  queue_.emplace_back(
+  queue_.emplace(
+      key,
       new CreateRequest(object_id, req_id, client, create_callback, object_size));
   num_bytes_pending_ += object_size;
   return req_id;
@@ -59,6 +61,7 @@ bool CreateRequestQueue::GetRequestResult(uint64_t req_id, PlasmaObject *result,
 }
 
 std::pair<PlasmaObject, PlasmaError> CreateRequestQueue::TryRequestImmediately(
+    const ray::TaskKey &key,
     const ObjectID &object_id, const std::shared_ptr<ClientInterface> &client,
     const CreateObjectCallback &create_callback, size_t object_size) {
   PlasmaObject result = {};
@@ -88,7 +91,7 @@ Status CreateRequestQueue::ProcessRequests() {
     auto request_it = queue_.begin();
     bool spilling_required = false;
     auto status =
-        ProcessRequest(/*fallback_allocator=*/false, *request_it, &spilling_required);
+        ProcessRequest(/*fallback_allocator=*/false, request_it->second, &spilling_required);
     if (spilling_required) {
       spill_objects_callback_();
     }
@@ -119,7 +122,7 @@ Status CreateRequestQueue::ProcessRequests() {
         return Status::ObjectStoreFull("Waiting for grace period.");
       } else {
         // Trigger the fallback allocator.
-        status = ProcessRequest(/*fallback_allocator=*/true, *request_it,
+        status = ProcessRequest(/*fallback_allocator=*/true, request_it->second,
                                 /*spilling_required=*/nullptr);
         if (!status.ok()) {
           std::string dump = "";
@@ -128,8 +131,8 @@ Status CreateRequestQueue::ProcessRequests() {
             logged_oom = true;
           }
           RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
-                        << (*request_it)->object_id << " of size "
-                        << (*request_it)->object_size / 1024 / 1024 << "MB\n"
+                        << request_it->second->object_id << " of size "
+                        << request_it->second->object_size / 1024 / 1024 << "MB\n"
                         << dump;
         }
         FinishRequest(request_it);
@@ -140,25 +143,27 @@ Status CreateRequestQueue::ProcessRequests() {
 }
 
 void CreateRequestQueue::FinishRequest(
-    std::list<std::unique_ptr<CreateRequest>>::iterator request_it) {
+    absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator request_it) {
   // Fulfill the request.
-  auto &request = *request_it;
-  auto it = fulfilled_requests_.find(request->request_id);
+  auto req_id = request_it->second->request_id;
+  RAY_CHECK(req_id != 0);
+  auto it = fulfilled_requests_.find(req_id);
   RAY_CHECK(it != fulfilled_requests_.end());
   RAY_CHECK(it->second == nullptr);
-  it->second = std::move(request);
+  it->second = std::move(request_it->second);
   RAY_CHECK(num_bytes_pending_ >= it->second->object_size);
   num_bytes_pending_ -= it->second->object_size;
+  index_.erase(req_id);
   queue_.erase(request_it);
 }
 
 void CreateRequestQueue::RemoveDisconnectedClientRequests(
     const std::shared_ptr<ClientInterface> &client) {
   for (auto it = queue_.begin(); it != queue_.end();) {
-    if ((*it)->client == client) {
-      fulfilled_requests_.erase((*it)->request_id);
-      RAY_CHECK(num_bytes_pending_ >= (*it)->object_size);
-      num_bytes_pending_ -= (*it)->object_size;
+    if (it->second->client == client) {
+      fulfilled_requests_.erase(it->second->request_id);
+      RAY_CHECK(num_bytes_pending_ >= it->second->object_size);
+      num_bytes_pending_ -= it->second->object_size;
       it = queue_.erase(it);
     } else {
       it++;

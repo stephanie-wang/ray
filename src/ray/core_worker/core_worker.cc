@@ -536,6 +536,9 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       rpc_address_,
       /*object_info_publisher=*/object_info_publisher_.get(),
       /*object_info_subscriber=*/object_info_subscriber_.get(),
+      [this](const ObjectID &object_id) {
+      return task_manager_->GetDependencies(object_id);
+      },
       RayConfig::instance().lineage_pinning_enabled(), [this](const rpc::Address &addr) {
         return std::shared_ptr<rpc::CoreWorkerClient>(
             new rpc::CoreWorkerClient(addr, *client_call_manager_));

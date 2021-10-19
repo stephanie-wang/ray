@@ -82,6 +82,8 @@ enum PlasmaError:int {
   // the result of the same request twice. This is most likely due to a system
   // bug in the plasma store or caller.
   UnexpectedError,
+  // We are trying to make space for this object.
+  SpacePending,
   // Trying to abort an object but it's not sealed.
   ObjectSealed,
 }
@@ -125,6 +127,7 @@ table PlasmaCreateRequest {
   owner_port: int;
   // Unique id for the owner worker.
   owner_worker_id: string;
+  priority: [int];
   // The size of the object's data in bytes.
   data_size: ulong;
   // The size of the object's metadata in bytes.

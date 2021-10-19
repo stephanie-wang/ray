@@ -351,6 +351,14 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     const auto &request = flatbuffers::GetRoot<fb::PlasmaCreateRequest>(input);
     const size_t object_size = request->data_size() + request->metadata_size();
 
+    ray::Priority priority;
+    priority.score.clear();
+    for (size_t i = 0; i < request->priority()->size(); i++) {
+      priority.score.push_back(request->priority()->Get(i));
+    }
+    ray::TaskKey key(priority, ObjectID::FromRandom().TaskId());
+
+
     // absl failed analyze mutex safety for lambda
     auto handle_create = [this, client, message](
                              bool fallback_allocator, PlasmaObject *result,
@@ -364,6 +372,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
       RAY_LOG(DEBUG) << "Received request to create object " << object_id
                      << " immediately";
       auto result_error = create_request_queue_.TryRequestImmediately(
+          key,
           object_id, client, handle_create, object_size);
       const auto &result = result_error.first;
       const auto &error = result_error.second;
@@ -373,7 +382,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
       }
     } else {
       auto req_id =
-          create_request_queue_.AddRequest(object_id, client, handle_create, object_size);
+          create_request_queue_.AddRequest(key, object_id, client, handle_create, object_size);
       RAY_LOG(DEBUG) << "Received create request for object " << object_id
                      << " assigned request ID " << req_id << ", " << object_size
                      << " bytes";

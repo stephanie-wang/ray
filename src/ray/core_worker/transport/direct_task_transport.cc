@@ -729,6 +729,47 @@ Status CoreWorkerDirectTaskSubmitter::CancelTask(TaskSpecification task_spec,
   return Status::OK();
 }
 
+bool CoreWorkerDirectTaskSubmitter::CancelTaskInternal(const TaskSpecification &task_spec,
+                                                       std::shared_ptr<rpc::CoreWorkerClientInterface> *worker) {
+  // This will get removed either when the RPC call to cancel is returned
+  // or when all dependencies are resolved.
+  auto rpc_it = executing_tasks_.find(task_spec.TaskId());
+  if (rpc_it != executing_tasks_.end()) {
+    *worker = client_cache_->GetOrConnect(rpc_it->second.ToProto());
+    return false;
+  }
+
+  const SchedulingKey scheduling_key(
+      task_spec.GetSchedulingClass(), task_spec.GetDependencyIds(),
+      task_spec.IsActorCreationTask() ? task_spec.ActorCreationId() : ActorID::Nil(),
+      task_spec.GetRuntimeEnvHash());
+  auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
+  auto &scheduled_tasks = scheduling_key_entry.task_priority_queue;
+  // This cancels tasks that have completed dependencies and are awaiting
+  // a worker lease.
+  if (!scheduled_tasks.empty()) {
+    for (auto it = scheduled_tasks.begin(); it != scheduled_tasks.end(); it++) {
+      const auto &task_id = it->second;
+      const auto task_it = tasks_.find(task_id);
+      RAY_CHECK(task_it != tasks_.end());
+      const auto &spec = task_it->second.task_spec;
+      if (spec.TaskId() == task_spec.TaskId()) {
+        scheduled_tasks.erase(it);
+        tasks_.erase(task_it);
+
+        if (scheduled_tasks.empty()) {
+          CancelWorkerLeaseIfNeeded(scheduling_key);
+        }
+        return true;
+      }
+    }
+  }
+
+  RAY_LOG(DEBUG) << "Cancelled task " << task_spec.TaskId() << " is waiting for dependencies";
+  // This case is reached for tasks that have unresolved dependencies.
+  return false;
+}
+
 Status CoreWorkerDirectTaskSubmitter::CancelRemoteTask(const ObjectID &object_id,
                                                        const rpc::Address &worker_addr,
                                                        bool force_kill, bool recursive) {

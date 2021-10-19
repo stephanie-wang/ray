@@ -34,7 +34,8 @@ class TaskFinisherInterface {
   virtual bool RetryTaskIfPossible(const TaskID &task_id) = 0;
 
   virtual bool PendingTaskFailed(
-      const TaskID &task_id, rpc::ErrorType error_type, Status *status,
+      const TaskID &task_id, rpc::ErrorType error_type,
+      Status *status,
       const std::shared_ptr<rpc::RayException> &creation_task_exception = nullptr,
       bool immediately_mark_object_fail = true) = 0;
 
@@ -142,7 +143,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// result object as failed.
   /// \return Whether the task will be retried or not.
   bool PendingTaskFailed(
-      const TaskID &task_id, rpc::ErrorType error_type, Status *status = nullptr,
+      const TaskID &task_id, rpc::ErrorType error_type,
+      Status *status = nullptr,
       const std::shared_ptr<rpc::RayException> &creation_task_exception = nullptr,
       bool immediately_mark_object_fail = true) override;
 
@@ -187,7 +189,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   ///
   /// \param[in] task_id ID of the task to query.
   /// \return Whether the task is pending.
-  bool IsTaskPending(const TaskID &task_id) const;
+  bool IsTaskPending(const TaskID &task_id, TaskSpecification *spec = nullptr) const;
 
   /// Return the number of submissible tasks. This includes both tasks that are
   /// pending execution and tasks that have finished but that may be
@@ -196,6 +198,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
 
   /// Return the number of pending tasks.
   size_t NumPendingTasks() const;
+
+  std::vector<ObjectID> GetDependencies(const ObjectID &object_id) const;
 
  private:
   struct TaskEntry {
@@ -217,7 +221,7 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
     /// the worker fails. We could avoid this by either not caching the full
     /// TaskSpec for tasks that cannot be retried (e.g., actor tasks), or by
     /// storing a shared_ptr to a PushTaskRequest protobuf for all tasks.
-    const TaskSpecification spec;
+    TaskSpecification spec;
     // Number of times this task may be resubmitted. If this reaches 0, then
     // the task entry may be erased.
     int num_retries_left;
@@ -302,6 +306,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
 
   /// Optional shutdown hook to call when pending tasks all finish.
   std::function<void()> shutdown_hook_ GUARDED_BY(mu_) = nullptr;
+
+  int64_t num_tasks_submitted_ = 0;
 };
 
 }  // namespace core

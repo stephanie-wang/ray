@@ -183,13 +183,16 @@ Status raylet::RayletClient::TaskDone() {
 
 Status raylet::RayletClient::FetchOrReconstruct(
     const std::vector<ObjectID> &object_ids,
-    const std::vector<rpc::Address> &owner_addresses, bool fetch_only,
+    const std::vector<rpc::Address> &owner_addresses,
+    const Priority &priority, bool fetch_only,
     bool mark_worker_blocked, const TaskID &current_task_id) {
   RAY_CHECK(object_ids.size() == owner_addresses.size());
   flatbuffers::FlatBufferBuilder fbb;
   auto object_ids_message = to_flatbuf(fbb, object_ids);
   auto message = protocol::CreateFetchOrReconstruct(
-      fbb, object_ids_message, AddressesToFlatbuffer(fbb, owner_addresses), fetch_only,
+      fbb, object_ids_message, AddressesToFlatbuffer(fbb, owner_addresses),
+      fbb.CreateVector(priority.score.data(), priority.score.size()),
+      fetch_only,
       mark_worker_blocked, to_flatbuf(fbb, current_task_id));
   fbb.Finish(message);
   return conn_->WriteMessage(MessageType::FetchOrReconstruct, &fbb);

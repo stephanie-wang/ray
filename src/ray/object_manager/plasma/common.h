@@ -25,6 +25,7 @@
 
 #include "gtest/gtest.h"
 #include "ray/common/id.h"
+#include "ray/common/task/task_priority.h"
 #include "ray/object_manager/common.h"
 #include "ray/object_manager/plasma/compat.h"
 #include "ray/object_manager/plasma/plasma.h"
@@ -32,7 +33,6 @@
 #include "ray/util/macros.h"
 
 namespace plasma {
-
 using ray::NodeID;
 using ray::ObjectID;
 using ray::WorkerID;
@@ -148,5 +148,9 @@ class LocalObject {
   ObjectState state;
   /// The source of the object. Used for debugging purposes.
   plasma::flatbuf::ObjectSource source;
+  ray::Priority priority;
+
+  bool preempted = false;
+  bool preemption_failed = false;
 };
 }  // namespace plasma

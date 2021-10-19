@@ -113,6 +113,8 @@ class CoreWorkerDirectTaskSubmitter {
   }
 
  private:
+  bool CancelTaskInternal(const TaskSpecification &task_spec,
+      std::shared_ptr<rpc::CoreWorkerClientInterface> *worker) EXCLUSIVE_LOCKS_REQUIRED(mu_);
   /// Schedule more work onto an idle worker or return it back to the raylet if
   /// no more tasks are queued for submission. If an error was encountered
   /// processing the worker, we don't attempt to re-use the worker.

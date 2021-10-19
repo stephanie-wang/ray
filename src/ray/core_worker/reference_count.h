@@ -44,6 +44,8 @@ class ReferenceCounterInterface {
       const ObjectID &object_id, const std::vector<ObjectID> &contained_ids,
       const rpc::Address &owner_address, const std::string &call_site,
       const int64_t object_size, bool is_reconstructable,
+      Priority priority,
+      int64_t depth,
       const absl::optional<NodeID> &pinned_at_raylet_id = absl::optional<NodeID>()) = 0;
   virtual bool SetDeleteCallback(
       const ObjectID &object_id,
@@ -51,6 +53,8 @@ class ReferenceCounterInterface {
 
   virtual ~ReferenceCounterInterface() {}
 };
+
+using PrioritiesUpdatedCallback = std::function<void(const absl::flat_hash_map<TaskID, Priority> &updated_priorities)>;
 
 /// Class used by the core worker to keep track of ObjectID reference counts for garbage
 /// collection. This class is thread safe.
@@ -63,16 +67,22 @@ class ReferenceCounter : public ReferenceCounterInterface,
   using LineageReleasedCallback =
       std::function<void(const ObjectID &, std::vector<ObjectID> *)>;
 
-  ReferenceCounter(const rpc::WorkerAddress &rpc_address,
-                   pubsub::PublisherInterface *object_info_publisher,
-                   pubsub::SubscriberInterface *object_info_subscriber,
-                   bool lineage_pinning_enabled = false,
-                   rpc::ClientFactoryFn client_factory = nullptr)
+  ReferenceCounter(
+      const rpc::WorkerAddress &rpc_address,
+      pubsub::PublisherInterface *object_info_publisher,
+      pubsub::SubscriberInterface *object_info_subscriber,
+      std::function<std::vector<ObjectID>(const ObjectID &)> get_dependencies,
+      const PrioritiesUpdatedCallback &on_priorities_updated,
+      bool lineage_pinning_enabled = false, rpc::ClientFactoryFn client_factory = nullptr,
+      std::function<void(const ObjectID &, int64_t)> record_object_size = nullptr)
       : rpc_address_(rpc_address),
         lineage_pinning_enabled_(lineage_pinning_enabled),
         borrower_pool_(client_factory),
         object_info_publisher_(object_info_publisher),
-        object_info_subscriber_(object_info_subscriber) {}
+        object_info_subscriber_(object_info_subscriber),
+        record_object_size_(record_object_size),
+        get_dependencies_(get_dependencies),
+        on_priorities_updated_(on_priorities_updated) {}
 
   ~ReferenceCounter() {}
 
@@ -101,6 +111,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// \param[out] deleted List to store objects that hit zero ref count.
   void RemoveLocalReference(const ObjectID &object_id, std::vector<ObjectID> *deleted)
       LOCKS_EXCLUDED(mutex_);
+
+  int64_t GetMaxDepth(const std::vector<ObjectID> &obj_ids) const;
 
   /// Add references for the provided object IDs that correspond to them being
   /// dependencies to a submitted task. If lineage pinning is enabled, then
@@ -180,6 +192,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
       const ObjectID &object_id, const std::vector<ObjectID> &contained_ids,
       const rpc::Address &owner_address, const std::string &call_site,
       const int64_t object_size, bool is_reconstructable,
+      Priority priority,
+      int64_t depth,
       const absl::optional<NodeID> &pinned_at_raylet_id = absl::optional<NodeID>())
       LOCKS_EXCLUDED(mutex_);
 
@@ -366,6 +380,10 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// \return The set of objects that were pinned on the given node.
   std::vector<ObjectID> ResetObjectsOnRemovedNode(const NodeID &raylet_id);
 
+  NodeID ResetPreemptedObject(const ObjectID &object_id, bool *spilled);
+
+  void WaitForLocationRemoved(const ObjectID &object_id, const NodeID &raylet_id, std::function<void()> callback);
+
   /// Whether we have a reference to a particular ObjectID.
   ///
   /// \param[in] object_id The object ID to check for.
@@ -470,20 +488,30 @@ class ReferenceCounter : public ReferenceCounterInterface,
   void AddBorrowerAddress(const ObjectID &object_id, const rpc::Address &borrower_address)
       LOCKS_EXCLUDED(mutex_);
 
+  Priority GetMinPriority(const std::vector<ObjectID> &obj_ids, ObjectID *min_arg_id = nullptr);
+
+  void AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids);
+
+  std::unordered_set<TaskID> GetDependentTaskIds(const ObjectID &object_id) const;
+
  private:
   struct Reference {
     /// Constructor for a reference whose origin is unknown.
-    Reference() {}
+    Reference() : priority(depth) {}
     Reference(std::string call_site, const int64_t object_size)
-        : call_site(call_site), object_size(object_size) {}
+        : call_site(call_site), object_size(object_size), priority(depth) {}
     /// Constructor for a reference that we created.
     Reference(const rpc::Address &owner_address, std::string call_site,
               const int64_t object_size, bool is_reconstructable,
+              Priority priority,
+              int64_t depth,
               const absl::optional<NodeID> &pinned_at_raylet_id)
         : call_site(call_site),
           object_size(object_size),
           owned_by_us(true),
           owner_address(owner_address),
+          depth(depth),
+          priority(priority),
           pinned_at_raylet_id(pinned_at_raylet_id),
           is_reconstructable(is_reconstructable) {}
 
@@ -550,6 +578,11 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// process is a borrower, the borrower must add the owner's address before
     /// using the ObjectID.
     absl::optional<rpc::Address> owner_address;
+
+    int64_t depth = 0;
+
+    Priority priority;
+
     /// If this object is owned by us and stored in plasma, and reference
     /// counting is enabled, then some raylet must be pinning the object value.
     /// This is the address of that raylet.
@@ -557,10 +590,14 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// If this object is owned by us and stored in plasma, this contains all
     /// object locations.
     absl::flat_hash_set<NodeID> locations;
+    std::unordered_map<NodeID, std::function<void()>> location_removed_callbacks;
     // Whether this object can be reconstructed via lineage. If false, then the
     // object's value will be pinned as long as it is referenced by any other
     // object's lineage.
     const bool is_reconstructable = false;
+
+    // ObjectIDs that depend on this object.
+    std::unordered_set<ObjectID> dependent_obj_ids = {};
 
     /// The local ref count for the ObjectID in the language frontend.
     size_t local_ref_count = 0;
@@ -821,6 +858,12 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// Object status subscriber. It is used to subscribe the ref removed information from
   /// other workers.
   pubsub::SubscriberInterface *object_info_subscriber_;
+
+  std::function<void(const ObjectID &, int64_t)> record_object_size_ = nullptr;
+
+  std::function<std::vector<ObjectID>(const ObjectID &)> get_dependencies_;
+
+  PrioritiesUpdatedCallback on_priorities_updated_;
 };
 
 }  // namespace core

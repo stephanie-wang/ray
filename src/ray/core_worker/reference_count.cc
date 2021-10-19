@@ -164,8 +164,10 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
                                       const rpc::Address &owner_address,
                                       const std::string &call_site,
                                       const int64_t object_size, bool is_reconstructable,
+                                      Priority priority,
+                                      int64_t depth,
                                       const absl::optional<NodeID> &pinned_at_raylet_id) {
-  RAY_LOG(DEBUG) << "Adding owned object " << object_id;
+  RAY_LOG(DEBUG) << "Adding owned object " << object_id << " with priority " << priority << ", depth " << depth;
   absl::MutexLock lock(&mutex_);
   RAY_CHECK(object_id_refs_.count(object_id) == 0)
       << "Tried to create an owned object that already exists: " << object_id;
@@ -174,7 +176,8 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
   // in the frontend language, incrementing the reference count.
   auto it = object_id_refs_
                 .emplace(object_id, Reference(owner_address, call_site, object_size,
-                                              is_reconstructable, pinned_at_raylet_id))
+                                              is_reconstructable, priority, depth,
+                                              pinned_at_raylet_id))
                 .first;
   if (!inner_ids.empty()) {
     // Mark that this object ID contains other inner IDs. Then, we will not GC
@@ -202,6 +205,7 @@ void ReferenceCounter::RemoveOwnedObject(const ObjectID &object_id) {
 }
 
 void ReferenceCounter::UpdateObjectSize(const ObjectID &object_id, int64_t object_size) {
+  record_object_size_(object_id, object_size);
   absl::MutexLock lock(&mutex_);
   auto it = object_id_refs_.find(object_id);
   if (it != object_id_refs_.end()) {
@@ -511,6 +515,10 @@ void ReferenceCounter::DeleteReferenceInternal(ReferenceTable::iterator it,
       ReleaseLineageReferencesInternal(ids_to_release);
     }
 
+    //for (auto &callback : it->second.location_removed_callbacks) {
+    //  callback.second();
+    //}
+
     freed_objects_.erase(id);
     object_id_refs_.erase(it);
     ShutdownIfNeeded();
@@ -567,6 +575,45 @@ std::vector<ObjectID> ReferenceCounter::ResetObjectsOnRemovedNode(
   return lost_objects;
 }
 
+NodeID ReferenceCounter::ResetPreemptedObject(const ObjectID &object_id, bool *spilled) {
+  absl::MutexLock lock(&mutex_);
+  NodeID pinned_at_raylet_id;
+  auto it = object_id_refs_.find(object_id);
+  if (it != object_id_refs_.end()) {
+    if (it->second.spilled) {
+      RAY_LOG(DEBUG) << "Object to preempt " << object_id << " has been spilled";
+      *spilled = true;
+      return pinned_at_raylet_id;
+    }
+    if (!it->second.pinned_at_raylet_id.has_value() || !it->second.on_delete) {
+      RAY_LOG(DEBUG) << "Object to preempt " << object_id << " doesn't yet have primary copy, client should retry";
+      // Wait until we have information about where the primary copy of the
+      // object is.
+      return pinned_at_raylet_id;
+    }
+    pinned_at_raylet_id = it->second.pinned_at_raylet_id.value_or(NodeID::Nil());
+    RAY_LOG(DEBUG) << "Freeing preempted object " << object_id;
+    ReleasePlasmaObject(it);
+  }
+  return pinned_at_raylet_id;
+}
+
+void ReferenceCounter::WaitForLocationRemoved(const ObjectID &object_id, const NodeID &raylet_id, std::function<void()> callback) {
+  bool trigger_callback = false;
+  {
+    absl::MutexLock lock(&mutex_);
+    auto it = object_id_refs_.find(object_id);
+    if (it == object_id_refs_.end() || !it->second.locations.count(raylet_id)) {
+      trigger_callback = true;
+    } else {
+      it->second.location_removed_callbacks[raylet_id] = callback;
+    }
+  }
+  if (trigger_callback) {
+    callback();
+  }
+}
+
 void ReferenceCounter::UpdateObjectPinnedAtRaylet(const ObjectID &object_id,
                                                   const NodeID &raylet_id) {
   absl::MutexLock lock(&mutex_);
@@ -585,7 +632,7 @@ void ReferenceCounter::UpdateObjectPinnedAtRaylet(const ObjectID &object_id,
     if (!it->second.OutOfScope(lineage_pinning_enabled_)) {
       it->second.pinned_at_raylet_id = raylet_id;
       // We eagerly add the pinned location to the set of object locations.
-      AddObjectLocationInternal(it, raylet_id);
+      //AddObjectLocationInternal(it, raylet_id);
     }
   }
 }
@@ -1004,6 +1051,7 @@ bool ReferenceCounter::AddObjectLocation(const ObjectID &object_id,
 
 void ReferenceCounter::AddObjectLocationInternal(ReferenceTable::iterator it,
                                                  const NodeID &node_id) {
+  RAY_LOG(DEBUG) << "Adding location " << node_id << " for object " << it->first;
   if (it->second.locations.emplace(node_id).second) {
     // Only push to subscribers if we added a new location. We eagerly add the pinned
     // location without waiting for the object store notification to trigger a location
@@ -1014,16 +1062,30 @@ void ReferenceCounter::AddObjectLocationInternal(ReferenceTable::iterator it,
 
 bool ReferenceCounter::RemoveObjectLocation(const ObjectID &object_id,
                                             const NodeID &node_id) {
-  absl::MutexLock lock(&mutex_);
-  auto it = object_id_refs_.find(object_id);
-  if (it == object_id_refs_.end()) {
-    RAY_LOG(DEBUG) << "Tried to remove an object location for an object " << object_id
-                   << " that doesn't exist in the reference table. It can happen if the "
-                      "object is already evicted.";
-    return false;
+  RAY_LOG(DEBUG) << "Removing location " << node_id << " for object " << object_id;
+  std::function<void()> callback = nullptr;
+  {
+    absl::MutexLock lock(&mutex_);
+    auto it = object_id_refs_.find(object_id);
+    if (it == object_id_refs_.end()) {
+      RAY_LOG(DEBUG) << "Tried to remove an object location for an object " << object_id
+                     << " that doesn't exist in the reference table. It can happen if the "
+                        "object is already evicted.";
+      return false;
+    }
+    it->second.locations.erase(node_id);
+    PushToLocationSubscribers(it);
+
+    auto callback_it = it->second.location_removed_callbacks.find(node_id);
+    if (callback_it != it->second.location_removed_callbacks.end()) {
+      callback = std::move(callback_it->second);
+      it->second.location_removed_callbacks.erase(callback_it);
+    }
   }
-  it->second.locations.erase(node_id);
-  PushToLocationSubscribers(it);
+
+  if (callback) {
+    callback();
+  }
   return true;
 }
 
@@ -1104,7 +1166,10 @@ absl::optional<LocalityData> ReferenceCounter::GetLocalityData(
   //   locations.
   // - If we don't own this object, this will contain a snapshot of the object locations
   //   at future resolution time.
-  const auto &node_ids = it->second.locations;
+  auto node_ids = it->second.locations;
+  if (it->second.pinned_at_raylet_id.has_value()) {
+    node_ids.insert(it->second.pinned_at_raylet_id.value());
+  }
 
   // We should only reach here if we have valid locality data to return.
   absl::optional<LocalityData> locality_data(
@@ -1275,6 +1340,67 @@ void ReferenceCounter::Reference::ToProto(rpc::ObjectReferenceCount *ref) const 
   for (const auto &contains_id : contains) {
     ref->add_contains(contains_id.Binary());
   }
+}
+
+int64_t ReferenceCounter::GetMaxDepth(const std::vector<ObjectID> &obj_ids) const {
+  absl::MutexLock lock(&mutex_);
+  int64_t max_depth = -1;
+  for (const ObjectID &obj_id : obj_ids) {
+    if (ObjectID::IsActorID(obj_id)) {
+      continue;
+    }
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.depth > max_depth) {
+        max_depth = it->second.depth;
+      }
+    }
+  }
+  return max_depth;
+}
+
+Priority ReferenceCounter::GetMinPriority(const std::vector<ObjectID> &obj_ids, ObjectID *object_id) {
+  absl::MutexLock lock(&mutex_);
+  Priority min_priority(0);
+  for (const auto &obj_id : obj_ids) {
+    if (ObjectID::IsActorID(obj_id)) {
+      continue;
+    }
+    auto it = object_id_refs_.find(obj_id);
+    if (it != object_id_refs_.end()) {
+      if (it->second.priority < min_priority) {
+        min_priority = it->second.priority;
+        if (object_id) {
+          *object_id = it->first;
+        }
+      }
+    }
+  }
+  return min_priority;
+}
+
+void ReferenceCounter::AddDependentObjectIds(const ObjectID &obj_id, const std::vector<ObjectID> &dependent_obj_ids) {
+  absl::MutexLock lock(&mutex_);
+  auto it = object_id_refs_.find(obj_id);
+  RAY_CHECK(it != object_id_refs_.end());
+  for (auto &dependent_id : dependent_obj_ids) {
+    if (ObjectID::IsActorID(dependent_id)) {
+      continue;
+    }
+    it->second.dependent_obj_ids.insert(dependent_id);
+  }
+}
+
+std::unordered_set<TaskID> ReferenceCounter::GetDependentTaskIds(const ObjectID &object_id) const {
+  absl::MutexLock lock(&mutex_);
+  std::unordered_set<TaskID> task_ids;
+  auto it = object_id_refs_.find(object_id);
+  if (it != object_id_refs_.end()) {
+    for (const auto &obj_id : it->second.dependent_obj_ids) {
+      task_ids.insert(obj_id.TaskId());
+    }
+  }
+  return task_ids;
 }
 
 }  // namespace core

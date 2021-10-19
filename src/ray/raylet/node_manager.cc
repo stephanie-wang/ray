@@ -83,13 +83,11 @@ namespace raylet {
 
 // A helper function to print the leased workers.
 std::string LeasedWorkersSring(
-    const std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>>
-        &leased_workers) {
+    const LeasedWorkerPool &leased_workers) {
   std::stringstream buffer;
   buffer << "  @leased_workers: (";
   for (const auto &pair : leased_workers) {
-    auto &worker = pair.second;
-    buffer << worker->WorkerId() << ", ";
+    buffer << pair.first << ", ";
   }
   buffer << ")";
   return buffer.str();
@@ -208,9 +206,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           })),
       object_manager_(
           io_service, self_node_id, object_manager_config, object_directory_.get(),
-          [this](const ObjectID &object_id, const std::string &object_url,
+          [this](const ObjectID &object_id, const Priority &priority, const std::string &object_url,
                  std::function<void(const ray::Status &)> callback) {
-            GetLocalObjectManager().AsyncRestoreSpilledObject(object_id, object_url,
+            GetLocalObjectManager().AsyncRestoreSpilledObject(object_id, priority, object_url,
                                                               callback);
           },
           /*get_spilled_object_url=*/
@@ -222,7 +220,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             // This callback is called from the plasma store thread.
             // NOTE: It means the local object manager should be thread-safe.
             io_service_.post(
-                [this]() { GetLocalObjectManager().SpillObjectUptoMaxThroughput(); },
+                [this]() {
+                GetLocalObjectManager().SpillObjectUptoMaxThroughput();
+                },
                 "NodeManager.SpillObjects");
             return GetLocalObjectManager().IsSpillingInProgress();
           },
@@ -655,7 +655,7 @@ void NodeManager::HandleReleaseUnusedBundles(
   // `workers_associated_with_unused_bundles` separately.
   std::vector<std::shared_ptr<WorkerInterface>> workers_associated_with_unused_bundles;
   for (const auto &worker_it : leased_workers_) {
-    auto &worker = worker_it.second;
+    auto &worker = worker_it.second.first;
     const auto &bundle_id = worker->GetBundleId();
     // We need to filter out the workers used by placement group.
     if (!bundle_id.first.IsNil() && 0 == in_use_bundles.count(bundle_id)) {
@@ -842,7 +842,7 @@ void NodeManager::HandleUnexpectedWorkerFailure(const rpc::WorkerDeltaData &data
   // infeasible, since requests that are fulfilled will get canceled during
   // dispatch.
   for (const auto &pair : leased_workers_) {
-    auto &worker = pair.second;
+    auto &worker = pair.second.first;
     const auto owner_worker_id =
         WorkerID::FromBinary(worker->GetOwnerAddress().worker_id());
     const auto owner_node_id = NodeID::FromBinary(worker->GetOwnerAddress().raylet_id());
@@ -1307,6 +1307,13 @@ void NodeManager::ProcessFetchOrReconstructMessage(
   auto message = flatbuffers::GetRoot<protocol::FetchOrReconstruct>(message_data);
   const auto refs =
       FlatbufferToObjectReference(*message->object_ids(), *message->owner_addresses());
+
+  ray::Priority priority;
+  priority.score.clear();
+  for (size_t i = 0; i < message->priority()->size(); i++) {
+    priority.score.push_back(message->priority()->Get(i));
+  }
+
   // TODO(ekl) we should be able to remove the fetch only flag along with the legacy
   // non-direct call support.
   if (message->fetch_only()) {
@@ -1319,7 +1326,7 @@ void NodeManager::ProcessFetchOrReconstructMessage(
     if (worker && !worker->GetAssignedTaskId().IsNil()) {
       // This will start a fetch for the objects that gets canceled once the
       // objects are local, or if the worker dies.
-      dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), refs);
+      dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), refs, priority);
     }
   } else {
     // The values are needed. Add all requested objects to the list to
@@ -1327,7 +1334,7 @@ void NodeManager::ProcessFetchOrReconstructMessage(
     // pulled from remote node managers. If an object's owner dies, an error
     // will be stored as the object's value.
     const TaskID task_id = from_flatbuf<TaskID>(*message->task_id());
-    AsyncResolveObjects(client, refs, task_id, /*ray_get=*/true,
+    AsyncResolveObjects(client, refs, task_id, priority, /*ray_get=*/true,
                         /*mark_worker_blocked*/ message->mark_worker_blocked());
   }
 }
@@ -1368,7 +1375,9 @@ void NodeManager::ProcessWaitRequestMessage(
     // already local. Missing objects will be pulled from remote node managers.
     // If an object's owner dies, an error will be stored as the object's
     // value.
-    AsyncResolveObjects(client, refs, current_task_id, /*ray_get=*/false,
+    // TODO(memory): Fill in priority for ray.wait.
+    Priority priority;
+    AsyncResolveObjects(client, refs, current_task_id, priority, /*ray_get=*/false,
                         /*mark_worker_blocked*/ was_blocked);
   }
   int64_t wait_ms = message->timeout();
@@ -1406,6 +1415,13 @@ void NodeManager::ProcessWaitForDirectActorCallArgsRequestMessage(
   auto message =
       flatbuffers::GetRoot<protocol::WaitForDirectActorCallArgsRequest>(message_data);
   std::vector<ObjectID> object_ids = from_flatbuf<ObjectID>(*message->object_ids());
+
+  ray::Priority priority;
+  priority.score.clear();
+  for (size_t i = 0; i < message->priority()->size(); i++) {
+    priority.score.push_back(message->priority()->Get(i));
+  }
+
   int64_t tag = message->tag();
   // Resolve any missing objects. This will pull the objects from remote node
   // managers or store an error if the objects have failed.
@@ -1415,7 +1431,7 @@ void NodeManager::ProcessWaitForDirectActorCallArgsRequestMessage(
   for (const auto &ref : refs) {
     owner_addresses.emplace(ObjectID::FromBinary(ref.object_id()), ref.owner_address());
   }
-  AsyncResolveObjects(client, refs, TaskID::Nil(), /*ray_get=*/false,
+  AsyncResolveObjects(client, refs, TaskID::Nil(), priority, /*ray_get=*/false,
                       /*mark_worker_blocked*/ false);
   // Reply to the client once a location has been found for all arguments.
   // NOTE(swang): ObjectManager::Wait currently returns as soon as any location
@@ -1514,7 +1530,8 @@ void NodeManager::HandleRequestWorkerLease(const rpc::RequestWorkerLeaseRequest 
     // backlog.
     backlog_size = request.backlog_size() + 1;
   }
-  RayTask task(task_message, backlog_size);
+  bool has_locality = request.has_locality();
+  RayTask task(task_message, backlog_size, has_locality);
   bool is_actor_creation_task = task.GetTaskSpecification().IsActorCreationTask();
   ActorID actor_id = ActorID::Nil();
   metrics_num_task_scheduled_ += 1;
@@ -1548,6 +1565,8 @@ void NodeManager::HandleRequestWorkerLease(const rpc::RequestWorkerLeaseRequest 
     return;
   }
 
+  auto task_spec = task.GetTaskSpecification();
+  RAY_LOG(DEBUG) << "Received task " << task_spec.TaskId() << " with priority " << task_spec.GetPriority();
   auto send_reply_callback_wrapper = [this, actor_id, reply, send_reply_callback](
                                          Status status, std::function<void()> success,
                                          std::function<void()> failure) {
@@ -1623,7 +1642,7 @@ void NodeManager::HandleCancelResourceReserve(
   // `workers_associated_with_pg` separately.
   std::vector<std::shared_ptr<WorkerInterface>> workers_associated_with_pg;
   for (const auto &worker_it : leased_workers_) {
-    auto &worker = worker_it.second;
+    auto &worker = worker_it.second.first;
     if (worker->GetBundleId().first == bundle_spec.PlacementGroupId()) {
       workers_associated_with_pg.emplace_back(worker);
     }
@@ -1650,7 +1669,7 @@ void NodeManager::HandleReturnWorker(const rpc::ReturnWorkerRequest &request,
                                      rpc::SendReplyCallback send_reply_callback) {
   // Read the resource spec submitted by the client.
   auto worker_id = WorkerID::FromBinary(request.worker_id());
-  std::shared_ptr<WorkerInterface> worker = leased_workers_[worker_id];
+  std::shared_ptr<WorkerInterface> worker = leased_workers_[worker_id].first;
 
   Status status;
   leased_workers_.erase(worker_id);
@@ -1686,7 +1705,7 @@ void NodeManager::HandleReleaseUnusedWorkers(
   for (auto &iter : leased_workers_) {
     // We need to exclude workers used by common tasks.
     // Because they are not used by GCS.
-    if (!iter.second->GetActorId().IsNil() && !in_use_worker_ids.count(iter.first)) {
+    if (!iter.second.first->GetActorId().IsNil() && !in_use_worker_ids.count(iter.first)) {
       unused_worker_ids.emplace_back(iter.first);
     }
   }
@@ -1778,7 +1797,9 @@ void NodeManager::HandleDirectCallTaskUnblocked(
 void NodeManager::AsyncResolveObjects(
     const std::shared_ptr<ClientConnection> &client,
     const std::vector<rpc::ObjectReference> &required_object_refs,
-    const TaskID &current_task_id, bool ray_get, bool mark_worker_blocked) {
+    const TaskID &current_task_id,
+    const Priority &priority,
+    bool ray_get, bool mark_worker_blocked) {
   std::shared_ptr<WorkerInterface> worker = worker_pool_.GetRegisteredWorker(client);
   if (!worker) {
     // The client is a driver. Drivers do not hold resources, so we simply mark
@@ -1791,10 +1812,10 @@ void NodeManager::AsyncResolveObjects(
   // fetched and/or restarted as necessary, until the objects become local
   // or are unsubscribed.
   if (ray_get) {
-    dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), required_object_refs);
+    dependency_manager_.StartOrUpdateGetRequest(worker->WorkerId(), required_object_refs, priority);
   } else {
     dependency_manager_.StartOrUpdateWaitRequest(worker->WorkerId(),
-                                                 required_object_refs);
+                                                 required_object_refs, priority);
   }
 }
 
@@ -1972,7 +1993,7 @@ void NodeManager::ProcessSubscribePlasmaReady(
     //    is local at this time but when the core worker was notified, the object is
     //    is evicted. The core worker should be able to handle evicted object in this
     //    case.
-    dependency_manager_.StartOrUpdateWaitRequest(associated_worker->WorkerId(), refs);
+    dependency_manager_.StartOrUpdateWaitRequest(associated_worker->WorkerId(), refs, Priority());
 
     // Add this worker to the listeners for the object ID.
     {
@@ -2087,6 +2108,15 @@ void NodeManager::HandlePinObjectIDs(const rpc::PinObjectIDsRequest &request,
     // TODO(suquark): Maybe "Status::ObjectNotFound" is more accurate here.
     send_reply_callback(Status::Invalid("Failed to get objects."), nullptr, nullptr);
     return;
+  }
+  for (const auto &result : results) {
+    if (result == nullptr) {
+      RAY_LOG(WARNING)
+          << "Failed to get objects that should have been in the object store. These "
+             "objects may have been evicted while there are still references in scope.";
+      send_reply_callback(Status::Invalid("Failed to get objects."), nullptr, nullptr);
+      return;
+    }
   }
   local_object_manager_.PinObjects(object_ids, std::move(results), owner_address);
   // Wait for the object to be freed by the owner, which keeps the ref count.

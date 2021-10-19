@@ -35,7 +35,7 @@ ClusterTaskManager::ClusterTaskManager(
     NodeInfoGetter get_node_info,
     std::function<void(const RayTask &)> announce_infeasible_task,
     WorkerPoolInterface &worker_pool,
-    std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers,
+    LeasedWorkerPool &leased_workers,
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
@@ -71,7 +71,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // blocking where a task which cannot be scheduled because
       // there are not enough available resources blocks other
       // tasks from being scheduled.
-      const std::shared_ptr<Work> &work = *work_it;
+      const std::shared_ptr<Work> &work = work_it->second;
       RayTask task = work->task;
       RAY_LOG(DEBUG) << "Scheduling pending task "
                      << task.GetTaskSpecification().TaskId();
@@ -81,6 +81,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       int64_t _unused;
       std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
           placement_resources,
+          task.HasLocality(),
           /*requires_object_store_memory=*/false,
           task.GetTaskSpecification().IsActorCreationTask(),
           /*force_spillback=*/false, &_unused, &is_infeasible);
@@ -111,7 +112,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       RAY_CHECK(!work_queue.empty());
       // Only announce the first item as infeasible.
       auto &work_queue = shapes_it->second;
-      const auto &work = work_queue[0];
+      const auto &work = work_queue.begin()->second;
       const RayTask task = work->task;
       announce_infeasible_task_(task);
 
@@ -132,13 +133,14 @@ bool ClusterTaskManager::WaitForTaskArgsRequests(std::shared_ptr<Work> work) {
   const auto &task_id = task.GetTaskSpecification().TaskId();
   const auto &scheduling_key = task.GetTaskSpecification().GetSchedulingClass();
   auto object_ids = task.GetTaskSpecification().GetDependencies();
+  const auto &task_key = task.GetTaskSpecification().GetTaskKey();
   bool can_dispatch = true;
   if (object_ids.size() > 0) {
     bool args_ready =
-        task_dependency_manager_.RequestTaskDependencies(task_id, task.GetDependencies());
+        task_dependency_manager_.RequestTaskDependencies(task_key, task.GetDependencies());
     if (args_ready) {
       RAY_LOG(DEBUG) << "Args already ready, task can be dispatched " << task_id;
-      tasks_to_dispatch_[scheduling_key].push_back(work);
+      tasks_to_dispatch_[scheduling_key].emplace(task_key, work);
     } else {
       RAY_LOG(DEBUG) << "Waiting for args for task: "
                      << task.GetTaskSpecification().TaskId();
@@ -149,7 +151,7 @@ bool ClusterTaskManager::WaitForTaskArgsRequests(std::shared_ptr<Work> work) {
   } else {
     RAY_LOG(DEBUG) << "No args, task can be dispatched "
                    << task.GetTaskSpecification().TaskId();
-    tasks_to_dispatch_[scheduling_key].push_back(work);
+    tasks_to_dispatch_[scheduling_key].emplace(task_key, work);
   }
   return can_dispatch;
 }
@@ -182,7 +184,7 @@ bool ClusterTaskManager::PoppedWorkerHandler(
     bool erased = false;
     for (auto work_it = dispatch_queue.begin(); work_it != dispatch_queue.end();
          work_it++) {
-      if (*work_it == work) {
+      if (work_it->second == work) {
         dispatch_queue.erase(work_it);
         erased = true;
         break;
@@ -263,7 +265,7 @@ bool ClusterTaskManager::PoppedWorkerHandler(
 
 void ClusterTaskManager::DispatchScheduledTasksToWorkers(
     WorkerPoolInterface &worker_pool,
-    std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers) {
+    LeasedWorkerPool &leased_workers) {
   // Check every task in task_to_dispatch queue to see
   // whether it can be dispatched and ran. This avoids head-of-line
   // blocking where a task which cannot be dispatched because
@@ -275,7 +277,7 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
     auto &dispatch_queue = shapes_it->second;
     bool is_infeasible = false;
     for (auto work_it = dispatch_queue.begin(); work_it != dispatch_queue.end();) {
-      auto &work = *work_it;
+      auto &work = work_it->second;
       const auto &task = work->task;
       const auto spec = task.GetTaskSpecification();
       TaskID task_id = spec.TaskId();
@@ -285,6 +287,8 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
       }
 
       bool args_missing = false;
+      // TODO(memory): This can deadlock if we do this before trying to acquire
+      // the other resources and a worker.
       bool success = PinTaskArgsIfMemoryAvailable(spec, &args_missing);
       // An argument was evicted since this task was added to the dispatch
       // queue. Move it back to the waiting queue. The caller is responsible
@@ -294,7 +298,7 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
           // Insert the task at the head of the waiting queue because we
           // prioritize spilling from the end of the queue.
           auto it = waiting_task_queue_.insert(waiting_task_queue_.begin(),
-                                               std::move(*work_it));
+                                               std::move(work_it->second));
           RAY_CHECK(waiting_tasks_index_.emplace(task_id, it).second);
           work_it = dispatch_queue.erase(work_it);
         } else {
@@ -333,15 +337,29 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
 
       // Check if the node is still schedulable. It may not be if dependency resolution
       // took a long time.
+      // TODO(memory): Should spill if we have no tasks running and cannot
+      // schedule task due to lack of object store memory. How to make sure
+      // that we still spread tasks to other nodes?
       auto allocated_instances = std::make_shared<TaskResourceInstances>();
+      PredefinedResources unavailable_resource = PredefinedResources_MAX;
       bool schedulable = cluster_resource_scheduler_->AllocateLocalTaskResources(
-          spec.GetRequiredResources().GetResourceMap(), allocated_instances);
+          spec.GetRequiredResources().GetResourceMap(), allocated_instances,
+          &unavailable_resource);
 
       if (!schedulable) {
         ReleaseTaskArgs(task_id);
+
         // The local node currently does not have the resources to run the task, so we
         // should try spilling to another node.
-        bool did_spill = TrySpillback(work, is_infeasible);
+        bool did_spill = TrySpillback(work, spec.GetRequiredPlacementResources().GetResourceMap(), is_infeasible);
+        auto required_obj_store_mem = spec.GetRequiredResources().GetResource("object_store_memory").Double();
+        if (!did_spill) {
+          const std::unordered_map<std::string, double> object_store_requirement = {
+            {"object_store_memory", required_obj_store_mem}
+          };
+          did_spill = TrySpillback(work, object_store_requirement, is_infeasible);
+        }
+
         if (!did_spill) {
           // There must not be any other available nodes in the cluster, so the task
           // should stay on this node. We can skip the reest of the shape because the
@@ -393,11 +411,11 @@ bool ClusterTaskManager::TrySpillback(const std::shared_ptr<Work> &work,
                                       bool &is_infeasible) {
   const auto &spec = work->task.GetTaskSpecification();
   int64_t _unused;
-  auto placement_resources = spec.GetRequiredPlacementResources().GetResourceMap();
   std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
       placement_resources,
+      task.HasLocality(),
       /*requires_object_store_memory=*/false, spec.IsActorCreationTask(),
-      /*force_spillback=*/false, &_unused, &is_infeasible);
+      /*force_spillback=*/false, &_unused, is_infeasible);
 
   if (is_infeasible || node_id_string == self_node_id_.Binary() ||
       node_id_string.empty()) {
@@ -419,12 +437,13 @@ void ClusterTaskManager::QueueAndScheduleTask(
     send_reply_callback(Status::OK(), nullptr, nullptr);
   });
   const auto &scheduling_class = task.GetTaskSpecification().GetSchedulingClass();
+  const auto &task_key = task.GetTaskSpecification().GetTaskKey();
   // If the scheduling class is infeasible, just add the work to the infeasible queue
   // directly.
   if (infeasible_tasks_.count(scheduling_class) > 0) {
-    infeasible_tasks_[scheduling_class].push_back(work);
+    infeasible_tasks_[scheduling_class].emplace(task_key, work);
   } else {
-    tasks_to_schedule_[scheduling_class].push_back(work);
+    tasks_to_schedule_[scheduling_class].emplace(task_key, work);
   }
   AddToBacklogTracker(task);
   ScheduleAndDispatchTasks();
@@ -441,9 +460,10 @@ void ClusterTaskManager::TasksUnblocked(const std::vector<TaskID> &ready_ids) {
       auto work = *it->second;
       const auto &task = work->task;
       const auto &scheduling_key = task.GetTaskSpecification().GetSchedulingClass();
+      const auto &task_key = task.GetTaskSpecification().GetTaskKey();
       RAY_LOG(DEBUG) << "Args ready, task can be dispatched "
                      << task.GetTaskSpecification().TaskId();
-      tasks_to_dispatch_[scheduling_key].push_back(work);
+      tasks_to_dispatch_[scheduling_key].emplace(task_key, work);
       waiting_task_queue_.erase(it->second);
       waiting_tasks_index_.erase(it);
     }
@@ -579,38 +599,42 @@ void ReplyCancelled(std::shared_ptr<Work> &work, bool runtime_env_setup_failed) 
 
 bool ClusterTaskManager::CancelTask(const TaskID &task_id,
                                     bool runtime_env_setup_failed) {
+  RAY_LOG(DEBUG) << "Received cancellation request for task " << task_id;
   // TODO(sang): There are lots of repetitive code around task backlogs. We should
   // refactor them.
   for (auto shapes_it = tasks_to_schedule_.begin(); shapes_it != tasks_to_schedule_.end();
        shapes_it++) {
     auto &work_queue = shapes_it->second;
-    for (auto work_it = work_queue.begin(); work_it != work_queue.end(); work_it++) {
-      const auto &task = (*work_it)->task;
+    for (auto work_it = work_queue.begin(); work_it != work_queue.end(); ) {
+      const auto &task = work_it->second->task;
       if (task.GetTaskSpecification().TaskId() == task_id) {
         RemoveFromBacklogTracker(task);
-        RAY_LOG(DEBUG) << "Canceling task " << task_id << " from schedule queue.";
-        ReplyCancelled(*work_it, runtime_env_setup_failed);
-        work_queue.erase(work_it);
+        RAY_LOG(DEBUG) << "Canceling task " << task_id;
+        ReplyCancelled(work_it->second, runtime_env_setup_failed);
+        work_it = work_queue.erase(work_it);
         if (work_queue.empty()) {
           tasks_to_schedule_.erase(shapes_it);
         }
         return true;
+      } else {
+        work_it++;
       }
     }
   }
   for (auto shapes_it = tasks_to_dispatch_.begin(); shapes_it != tasks_to_dispatch_.end();
        shapes_it++) {
     auto &work_queue = shapes_it->second;
-    for (auto work_it = work_queue.begin(); work_it != work_queue.end(); work_it++) {
-      const auto &task = (*work_it)->task;
+    for (auto work_it = work_queue.begin(); work_it != work_queue.end(); ) {
+      const auto &task = work_it->second->task;
       if (task.GetTaskSpecification().TaskId() == task_id) {
+        RAY_LOG(DEBUG) << "Canceling task " << task_id;
         RemoveFromBacklogTracker(task);
         RAY_LOG(DEBUG) << "Canceling task " << task_id << " from dispatch queue.";
-        ReplyCancelled(*work_it, runtime_env_setup_failed);
-        if ((*work_it)->status == WorkStatus::WAITING_FOR_WORKER) {
+        ReplyCancelled(work_it->second, runtime_env_setup_failed);
+        if (work_it->second->status == WorkStatus::WAITING_FOR_WORKER) {
           // We've already acquired resources so we need to release them.
           cluster_resource_scheduler_->ReleaseWorkerResources(
-              (*work_it)->allocated_instances);
+              work_it->second->allocated_instances);
           // Release pinned task args.
           ReleaseTaskArgs(task_id);
         }
@@ -618,12 +642,14 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
           task_dependency_manager_.RemoveTaskDependencies(
               task.GetTaskSpecification().TaskId());
         }
-        (*work_it)->status = WorkStatus::CANCELLED;
-        work_queue.erase(work_it);
+        work_it->second->status = WorkStatus::CANCELLED;
+        work_it = work_queue.erase(work_it);
         if (work_queue.empty()) {
           tasks_to_dispatch_.erase(shapes_it);
         }
         return true;
+      } else {
+        work_it++;
       }
     }
   }
@@ -631,24 +657,27 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
   for (auto shapes_it = infeasible_tasks_.begin(); shapes_it != infeasible_tasks_.end();
        shapes_it++) {
     auto &work_queue = shapes_it->second;
-    for (auto work_it = work_queue.begin(); work_it != work_queue.end(); work_it++) {
-      const auto &task = (*work_it)->task;
+    for (auto work_it = work_queue.begin(); work_it != work_queue.end(); ) {
+      const auto &task = work_it->second->task;
       if (task.GetTaskSpecification().TaskId() == task_id) {
+        RAY_LOG(DEBUG) << "Canceling task " << task_id;
         RemoveFromBacklogTracker(task);
-        RAY_LOG(DEBUG) << "Canceling task " << task_id << " from infeasible queue.";
-        ReplyCancelled(*work_it, runtime_env_setup_failed);
-        work_queue.erase(work_it);
+        ReplyCancelled(work_it->second, runtime_env_setup_failed);
+        work_it = work_queue.erase(work_it);
         if (work_queue.empty()) {
           infeasible_tasks_.erase(shapes_it);
         }
         return true;
+      } else {
+        work_it++;
       }
     }
   }
 
   auto iter = waiting_tasks_index_.find(task_id);
   if (iter != waiting_tasks_index_.end()) {
-    const auto &task = (*iter->second)->task;
+    RAY_LOG(DEBUG) << "Canceling task " << task_id;
+    const auto &task = *iter->second->task;
     RemoveFromBacklogTracker(task);
     ReplyCancelled(*iter->second, runtime_env_setup_failed);
     if (!task.GetTaskSpecification().GetDependencies().empty()) {
@@ -661,6 +690,7 @@ bool ClusterTaskManager::CancelTask(const TaskID &task_id,
     return true;
   }
 
+  RAY_LOG(DEBUG) << "Task to cancel " << task_id << " no longer queued, probably already dispatched";
   return false;
 }
 
@@ -670,7 +700,7 @@ void ClusterTaskManager::FillPendingActorInfo(rpc::GetNodeStatsReply *reply) con
   for (const auto &shapes_it : infeasible_tasks_) {
     auto &work_queue = shapes_it.second;
     for (const auto &work_it : work_queue) {
-      RayTask task = work_it->task;
+      RayTask task = work_it->second->task;
       if (task.GetTaskSpecification().IsActorCreationTask()) {
         if (num_reported++ > kMaxPendingActorsToReport) {
           break;  // Protect the raylet from reporting too much data.
@@ -685,7 +715,7 @@ void ClusterTaskManager::FillPendingActorInfo(rpc::GetNodeStatsReply *reply) con
   for (const auto &shapes_it : boost::join(tasks_to_dispatch_, tasks_to_schedule_)) {
     auto &work_queue = shapes_it.second;
     for (const auto &work_it : work_queue) {
-      RayTask task = work_it->task;
+      RayTask task = work_it.second->task;
       if (task.GetTaskSpecification().IsActorCreationTask()) {
         if (num_reported++ > kMaxPendingActorsToReport) {
           break;  // Protect the raylet from reporting too much data.
@@ -890,7 +920,7 @@ bool ClusterTaskManager::AnyPendingTasks(RayTask *exemplar, bool *any_pending,
   for (const auto &shapes_it : boost::join(tasks_to_dispatch_, tasks_to_schedule_)) {
     auto &work_queue = shapes_it.second;
     for (const auto &work_it : work_queue) {
-      const auto &task = work_it->task;
+      const auto &task = work_it.second->task;
       if (task.GetTaskSpecification().IsActorCreationTask()) {
         *num_pending_actor_creation += 1;
       } else {
@@ -910,8 +940,7 @@ bool ClusterTaskManager::AnyPendingTasks(RayTask *exemplar, bool *any_pending,
 std::string ClusterTaskManager::DebugStr() const {
   // TODO(Shanly): This method will be replaced with `DebugString` once we remove the
   // legacy scheduler.
-  auto accumulator = [](size_t state,
-                        const std::pair<int, std::deque<std::shared_ptr<Work>>> &pair) {
+  auto accumulator = [](size_t state, const std::pair<int, absl::btree_map<TaskKey, Work>> &pair) {
     return state + pair.second.size();
   };
   size_t num_infeasible_tasks = std::accumulate(
@@ -958,7 +987,7 @@ void ClusterTaskManager::TryLocalInfeasibleTaskScheduling() {
         << "Empty work queue shouldn't have been added as a infeasible shape.";
     // We only need to check the first item because every task has the same shape.
     // If the first entry is infeasible, that means everything else is the same.
-    const auto work = work_queue[0];
+    const auto work = work_queue.begin()->second;
     RayTask task = work->task;
     RAY_LOG(DEBUG) << "Check if the infeasible task is schedulable in any node. task_id:"
                    << task.GetTaskSpecification().TaskId();
@@ -969,6 +998,7 @@ void ClusterTaskManager::TryLocalInfeasibleTaskScheduling() {
     bool is_infeasible;
     std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
         placement_resources,
+        task.HasLocality(),
         /*requires_object_store_memory=*/false,
         task.GetTaskSpecification().IsActorCreationTask(),
         /*force_spillback=*/false, &_unused, &is_infeasible);
@@ -991,7 +1021,7 @@ void ClusterTaskManager::TryLocalInfeasibleTaskScheduling() {
 
 void ClusterTaskManager::Dispatch(
     std::shared_ptr<WorkerInterface> worker,
-    std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers,
+    LeasedWorkerPool &leased_workers,
     const std::shared_ptr<TaskResourceInstances> &allocated_instances,
     const RayTask &task, rpc::RequestWorkerLeaseReply *reply,
     std::function<void(void)> send_reply_callback) {
@@ -1017,7 +1047,7 @@ void ClusterTaskManager::Dispatch(
   reply->mutable_worker_address()->set_raylet_id(self_node_id_.Binary());
 
   RAY_CHECK(leased_workers.find(worker->WorkerId()) == leased_workers.end());
-  leased_workers[worker->WorkerId()] = worker;
+  leased_workers[worker->WorkerId()] = std::make_pair<>(worker, task_spec.GetPriority());
   RemoveFromBacklogTracker(task);
 
   // Update our internal view of the cluster state.
@@ -1233,6 +1263,7 @@ void ClusterTaskManager::SpillWaitingTasks() {
     // the most memory availability.
     std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
         placement_resources,
+        task.HasLocality(),
         /*requires_object_store_memory=*/true,
         task.GetTaskSpecification().IsActorCreationTask(),
         /*force_spillback=*/force_spillback, &_unused, &is_infeasible);
@@ -1271,7 +1302,7 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
   std::unordered_map<std::string, FixedPoint> total_normal_task_resources;
   const auto &string_id_map = cluster_resource_scheduler_->GetStringIdMap();
   for (auto &entry : leased_workers_) {
-    std::shared_ptr<WorkerInterface> worker = entry.second;
+    std::shared_ptr<WorkerInterface> worker = entry.second.first;
     auto &task_spec = worker->GetAssignedTask().GetTaskSpecification();
     if (!task_spec.PlacementGroupBundleId().first.IsNil()) {
       continue;
@@ -1300,6 +1331,56 @@ ResourceSet ClusterTaskManager::CalcNormalTaskResources() const {
     }
   }
   return total_normal_task_resources;
+}
+
+bool ClusterTaskManager::HasHigherPriorityTaskRunning(const Priority &priority) const {
+  // Check whether there is a higher priority currently running task for which
+  // we should wait to finish.
+  for (const auto leased_worker : leased_workers_) {
+    const auto &running_task_priority = leased_worker.second.second;
+    const auto &task_id = leased_worker.second.first->GetAssignedTask().GetTaskSpecification().TaskId();
+    RAY_LOG(DEBUG) << "Running task " << task_id << " has priority " << running_task_priority << ", higher than? " << priority;
+    if (running_task_priority < priority) {
+      return true;;
+      break;
+    }
+  }
+  return false;
+}
+
+void ClusterTaskManager::HasHigherPriorityTaskQueued(int64_t space_needed,
+    const Priority &priority, NodeID *remote_node_id,
+    bool *has_higher_priority_ready_task,
+    bool *has_higher_priority_running_task) const {
+  // Check whether this task could be spilled back to a different node. Attach
+  // object store memory requirement to task description.
+  std::unordered_map<std::string, double> required_resources;
+  required_resources["object_store_memory"] = space_needed;
+  int64_t _unused;
+  bool is_infeasible;
+  std::string node_id_string = cluster_resource_scheduler_->GetBestSchedulableNode(
+      required_resources,
+      // Only spillback to another node if it has more resources than us.
+      /*has_locality=*/true,
+      /*is_actor_creation_task=*/false,
+      /*force_spillback=*/false, &_unused, &is_infeasible);
+
+  if (!node_id_string.empty() && node_id_string != self_node_id_.Binary()) {
+    *remote_node_id = NodeID::FromBinary(node_id_string);
+  }
+
+  // Check whether there is a higher priority ready task in the local task
+  // queue that could run instead.
+  for (const auto &queue : tasks_to_dispatch_) {
+    const auto &key = queue.second.begin()->first;
+    auto &top_priority = key.first;
+    if (top_priority < priority) {
+      RAY_LOG(DEBUG) << "Task " << key.second << " has higher priority " << top_priority << " than " << priority;
+      *has_higher_priority_ready_task = true;
+      break;
+    }
+  }
+  *has_higher_priority_running_task = HasHigherPriorityTaskRunning(priority);
 }
 
 }  // namespace raylet

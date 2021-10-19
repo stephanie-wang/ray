@@ -84,9 +84,10 @@ Status CoreWorkerPlasmaStoreProvider::Put(const RayObject &object,
                                           bool *object_exists) {
   RAY_CHECK(!object.IsInPlasmaError()) << object_id;
   std::shared_ptr<Buffer> data;
+  // TODO(memory): I don't think we need to fill in the priority here?
   RAY_RETURN_NOT_OK(Create(object.GetMetadata(),
                            object.HasData() ? object.GetData()->Size() : 0, object_id,
-                           owner_address, &data, /*created_by_worker=*/true));
+                           owner_address, Priority(), &data, /*created_by_worker=*/true));
   // data could be a nullptr if the ObjectID already existed, but this does
   // not throw an error.
   if (data != nullptr) {
@@ -107,6 +108,7 @@ Status CoreWorkerPlasmaStoreProvider::Create(const std::shared_ptr<Buffer> &meta
                                              const size_t data_size,
                                              const ObjectID &object_id,
                                              const rpc::Address &owner_address,
+                                             const Priority &priority,
                                              std::shared_ptr<Buffer> *data,
                                              bool created_by_worker) {
   auto source = plasma::flatbuf::ObjectSource::CreatedByWorker;
@@ -114,7 +116,8 @@ Status CoreWorkerPlasmaStoreProvider::Create(const std::shared_ptr<Buffer> &meta
     source = plasma::flatbuf::ObjectSource::RestoredFromStorage;
   }
   Status status = store_client_.CreateAndSpillIfNeeded(
-      object_id, owner_address, data_size, metadata ? metadata->Data() : nullptr,
+      object_id, owner_address, priority,
+      data_size, metadata ? metadata->Data() : nullptr,
       metadata ? metadata->Size() : 0, data, source,
       /*device_num=*/0);
 
@@ -153,12 +156,13 @@ Status CoreWorkerPlasmaStoreProvider::Release(const ObjectID &object_id) {
 
 Status CoreWorkerPlasmaStoreProvider::FetchAndGetFromPlasmaStore(
     absl::flat_hash_set<ObjectID> &remaining, const std::vector<ObjectID> &batch_ids,
+    const Priority &priority,
     int64_t timeout_ms, bool fetch_only, bool in_direct_call, const TaskID &task_id,
     absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> *results,
     bool *got_exception) {
   const auto owner_addresses = reference_counter_->GetOwnerAddresses(batch_ids);
   RAY_RETURN_NOT_OK(raylet_client_->FetchOrReconstruct(
-      batch_ids, owner_addresses, fetch_only, /*mark_worker_blocked*/ !in_direct_call,
+      batch_ids, owner_addresses, priority, fetch_only, /*mark_worker_blocked*/ !in_direct_call,
       task_id));
 
   std::vector<plasma::ObjectBuffer> plasma_results;
@@ -243,7 +247,9 @@ Status UnblockIfNeeded(const std::shared_ptr<raylet::RayletClient> &client,
 }
 
 Status CoreWorkerPlasmaStoreProvider::Get(
-    const absl::flat_hash_set<ObjectID> &object_ids, int64_t timeout_ms,
+    const absl::flat_hash_set<ObjectID> &object_ids,
+    const Priority &priority,
+    int64_t timeout_ms,
     const WorkerContext &ctx,
     absl::flat_hash_map<ObjectID, std::shared_ptr<RayObject>> *results,
     bool *got_exception) {
@@ -260,7 +266,7 @@ Status CoreWorkerPlasmaStoreProvider::Get(
       batch_ids.push_back(id_vector[start + i]);
     }
     RAY_RETURN_NOT_OK(
-        FetchAndGetFromPlasmaStore(remaining, batch_ids, /*timeout_ms=*/0,
+        FetchAndGetFromPlasmaStore(remaining, batch_ids, priority, /*timeout_ms=*/0,
                                    /*fetch_only=*/true, ctx.CurrentTaskIsDirectCall(),
                                    ctx.GetCurrentTaskID(), results, got_exception));
   }
@@ -302,7 +308,7 @@ Status CoreWorkerPlasmaStoreProvider::Get(
           /*release_resources_during_plasma_fetch=*/false));
     }
     RAY_RETURN_NOT_OK(
-        FetchAndGetFromPlasmaStore(remaining, batch_ids, batch_timeout,
+        FetchAndGetFromPlasmaStore(remaining, batch_ids, priority, batch_timeout,
                                    /*fetch_only=*/false, ctx.CurrentTaskIsDirectCall(),
                                    ctx.GetCurrentTaskID(), results, got_exception));
     should_break = timed_out || *got_exception;
@@ -433,7 +439,7 @@ Status CoreWorkerPlasmaStoreProvider::WarmupStore() {
   ObjectID object_id = ObjectID::FromRandom();
   std::shared_ptr<Buffer> data;
   RAY_RETURN_NOT_OK(
-      Create(nullptr, 8, object_id, rpc::Address(), &data, /*created_by_worker=*/true));
+      Create(nullptr, 8, object_id, rpc::Address(), Priority(), &data, /*created_by_worker=*/true));
   RAY_RETURN_NOT_OK(Seal(object_id));
   RAY_RETURN_NOT_OK(Release(object_id));
   RAY_RETURN_NOT_OK(Delete({object_id}, true));
