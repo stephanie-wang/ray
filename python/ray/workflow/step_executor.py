@@ -26,10 +26,12 @@ from ray.workflow.common import (
     StepID,
     WorkflowData,
     WorkflowStaticRef,
+    CheckpointMode,
 )
 
 if TYPE_CHECKING:
-    from ray.workflow.common import (WorkflowRef, WorkflowStepRuntimeOptions,
+    from ray.workflow.common import (WorkflowRef, CheckpointModeType,
+                                     WorkflowStepRuntimeOptions,
                                      WorkflowActorBase)
     from ray.workflow.workflow_context import WorkflowStepContext
 
@@ -113,9 +115,25 @@ def _execute_workflow(workflow: "Workflow") -> "WorkflowExecutionResult":
     # Stage 1: prepare inputs
     workflow_data = workflow.data
     inputs = workflow_data.inputs
+    # If the outer workflow step skips checkpointing, it would
+    # update the checkpoint context of all inner steps except
+    # the output step, marking them "detached" from the DAG.
+    # Output step is not detached from the DAG because once
+    # completed, it replaces the output of the outer step.
+    step_context = workflow_context.get_workflow_step_context()
+    checkpoint_context = step_context.checkpoint_context.copy()
+    # detached := already detached or the outer step skips checkpointing
+    checkpoint_context.detached_from_dag = (
+        checkpoint_context.detached_from_dag
+        or not step_context.checkpoint_context.checkpoint)
+    # Apply checkpoint context to input steps. Since input steps
+    # further apply them to their inputs, this would eventually
+    # apply to all steps except the output step.
     workflow_outputs = []
     with workflow_context.fork_workflow_step_context(
-            outer_most_step_id=None, last_step_of_workflow=False):
+            outer_most_step_id=None,
+            last_step_of_workflow=False,
+            checkpoint_context=checkpoint_context):
         for w in inputs.workflows:
             static_ref = w.ref
             if static_ref is None:
@@ -126,7 +144,7 @@ def _execute_workflow(workflow: "Workflow") -> "WorkflowExecutionResult":
             workflow_outputs.append(static_ref)
 
     baked_inputs = _BakedWorkflowInputs(
-        args=workflow_data.inputs.args,
+        args=inputs.args,
         workflow_outputs=workflow_outputs,
         workflow_refs=inputs.workflow_refs,
         workflow_actors=inputs.workflow_actors,
@@ -181,8 +199,8 @@ def _execute_workflow(workflow: "Workflow") -> "WorkflowExecutionResult":
 
     # Stage 3: execution
     persisted_output, volatile_output = executor(
-        workflow_data.func_body, workflow_context.get_workflow_step_context(),
-        workflow.step_id, baked_inputs, workflow_data.step_options)
+        workflow_data.func_body, step_context, workflow.step_id, baked_inputs,
+        workflow_data.step_options)
 
     # Stage 4: post processing outputs
     if step_options.step_type != StepType.READONLY_ACTOR_METHOD:
@@ -288,19 +306,64 @@ async def _write_step_inputs(wf_storage: workflow_storage.WorkflowStorage,
     await asyncio.gather(*save_tasks)
 
 
+def _validate_checkpoint_options(ret: Union["Workflow", Any]):
+    """Validate checkpoint options. This implementation maybe not most
+    efficient, but it is easier to understand"""
+    # The condition where checkpointing is not allowed.
+    if not isinstance(ret, Workflow):
+        return
+    context = workflow_context.get_workflow_step_context()
+    if context is None:
+        checkpoint_context = workflow_context.CheckpointContext()
+    else:
+        checkpoint_context = context.checkpoint_context
+    detached_from_dag = checkpoint_context.detached_from_dag
+
+    err_msg = ("'checkpoint=True' was passed to the options for step '{}', "
+               "but it cannot be checkpointed because it will not be saved "
+               "in the workflow DAG. This is because its outer workflow has "
+               "checkpoint=False, which means that we will not save the "
+               "returned nested workflow.")
+
+    # Filter out all steps with option 'checkpoint=True'.
+    checkpointed_steps = []
+    for w in ret._iter_workflows_in_dag():
+        if w.data.step_options.checkpoint:
+            checkpointed_steps.append(w)
+
+    if not checkpoint_context.checkpoint:
+        # If the outer workflow step is skipping checkpointing, we need to
+        # make sure that any inner workflow steps are not detached from the
+        # top-level DAG (except output step).
+        if checkpointed_steps and checkpointed_steps != [ret]:
+            raise ValueError(err_msg.format(checkpointed_steps[0].step_id))
+
+    if detached_from_dag:
+        # The outer workflow is already detached, so we definitely can't
+        # checkpoint any of its sub-workflow steps.
+        if checkpointed_steps:
+            raise ValueError(err_msg.format(checkpointed_steps[0].step_id))
+
+
 def commit_step(store: workflow_storage.WorkflowStorage, step_id: "StepID",
-                ret: Union["Workflow", Any], *,
-                exception: Optional[Exception]):
+                ret: Union["Workflow", Any], *, exception: Optional[Exception],
+                checkpoint: "CheckpointModeType"):
     """Checkpoint the step output.
     Args:
         store: The storage the current workflow is using.
         step_id: The ID of the step.
         ret: The returned object of the workflow step.
         exception: The exception caught by the step.
+        checkpoint: The checkpoint mode.
     """
     # if step_id:
     #     return
     from ray.workflow.common import Workflow
+
+    if checkpoint == CheckpointMode.SKIP.value:
+        return
+    elif checkpoint != CheckpointMode.SYNC.value:
+        raise ValueError(f"Unknown checkpoint mode: {checkpoint}.")
     if isinstance(ret, Workflow):
         assert not ret.executed
         tasks = []
@@ -429,6 +492,7 @@ def _workflow_step_executor(func: Callable,
     workflow_context.update_workflow_step_context(context, step_id)
     context = workflow_context.get_workflow_step_context()
     step_type = runtime_options.step_type
+    context.checkpoint_context.checkpoint = runtime_options.checkpoint
 
     # Part 2: resolve inputs
     args, kwargs = baked_inputs.resolve()
@@ -443,7 +507,8 @@ def _workflow_step_executor(func: Callable,
         step_postrun_metadata = {"end_time": time.time()}
         store.save_step_postrun_metadata(step_id, step_postrun_metadata)
     except Exception as e:
-        commit_step(store, step_id, None, exception=e)
+        # Always checkpoint the exception.
+        commit_step(store, step_id, None, exception=e, checkpoint=True)
         raise e
 
     # Part 4: save outputs
@@ -454,8 +519,15 @@ def _workflow_step_executor(func: Callable,
                 "is not allowed.")
         assert not isinstance(persisted_output, Workflow)
     else:
+        # validate the checkpoint options before commit the step
+        _validate_checkpoint_options(persisted_output)
         store = workflow_storage.get_workflow_storage()
-        commit_step(store, step_id, persisted_output, exception=None)
+        commit_step(
+            store,
+            step_id,
+            persisted_output,
+            exception=None,
+            checkpoint=runtime_options.checkpoint)
         if isinstance(persisted_output, Workflow):
             outer_most_step_id = context.outer_most_step_id
             if step_type == StepType.FUNCTION:

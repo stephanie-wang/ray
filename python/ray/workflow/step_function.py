@@ -1,13 +1,30 @@
 import functools
 import json
-from typing import Callable, Dict, Any, Optional
+from typing import Callable, Dict, Any, Optional, TYPE_CHECKING
 
 from ray._private import signature
 from ray.workflow import serialization_context
 from ray.workflow.common import (Workflow, WorkflowData, StepType,
                                  ensure_ray_initialized,
                                  WorkflowStepRuntimeOptions)
+from ray.workflow import workflow_context
 from ray.util.annotations import PublicAPI
+
+if TYPE_CHECKING:
+    from ray.workflow.common import CheckpointModeType
+
+
+def _inherit_checkpoint_option(checkpoint: "Optional[CheckpointModeType]"):
+    # If checkpoint option is not specified, inherit checkpoint
+    # options from context (i.e. checkpoint options of the outer
+    # step). If it is still not specified, it's True by default.
+    context = workflow_context.get_workflow_step_context()
+    if checkpoint is None:
+        if context is not None:
+            return context.checkpoint_context.checkpoint
+    if checkpoint is None:
+        return True
+    return checkpoint
 
 
 class WorkflowStepFunction:
@@ -29,9 +46,6 @@ class WorkflowStepFunction:
                     raise ValueError(
                         "metadata values must be JSON serializable, "
                         "however '{}' has a value whose {}.".format(k, e))
-        if step_options is None:
-            step_options = WorkflowStepRuntimeOptions.make(
-                step_type=StepType.FUNCTION)
         self._func = func
         self._step_options = step_options
         self._func_signature = signature.extract_signature(func)
@@ -48,6 +62,15 @@ class WorkflowStepFunction:
                 ensure_ray_initialized()
                 return serialization_context.make_workflow_inputs(
                     flattened_args)
+
+            nonlocal step_options
+            if step_options is None:
+                step_options = WorkflowStepRuntimeOptions.make(
+                    step_type=StepType.FUNCTION)
+            # We could have "checkpoint=None" when we use @workflow.step
+            # with arguments. Avoid this by updating it here.
+            step_options.checkpoint = _inherit_checkpoint_option(
+                step_options.checkpoint)
 
             workflow_data = WorkflowData(
                 func_body=self._func,
@@ -72,6 +95,7 @@ class WorkflowStepFunction:
                 name: str = None,
                 metadata: Dict[str, Any] = None,
                 allow_inplace: bool = False,
+                checkpoint: "Optional[CheckpointModeType]" = None,
                 **ray_options) -> "WorkflowStepFunction":
         """This function set how the step function is going to be executed.
 
@@ -89,6 +113,7 @@ class WorkflowStepFunction:
                 appending .N suffixes.
             metadata: metadata to add to the step.
             allow_inplace: Execute the workflow step inplace.
+            checkpoint: The option for checkpointing.
             **ray_options: All parameters in this fields will be passed
                 to ray remote function options.
 
@@ -103,6 +128,7 @@ class WorkflowStepFunction:
             catch_exceptions=catch_exceptions,
             max_retries=max_retries,
             allow_inplace=allow_inplace,
+            checkpoint=_inherit_checkpoint_option(checkpoint),
             ray_options=ray_options,
         )
         return WorkflowStepFunction(

@@ -74,7 +74,8 @@ def run(entry_workflow: Workflow,
         #  - it's a new workflow
         # TODO (yic): follow up with force rerun
         if is_growing or not wf_exists:
-            commit_step(ws, "", entry_workflow, exception=None)
+            commit_step(
+                ws, "", entry_workflow, exception=None, checkpoint=True)
 
         if entry_workflow.data.step_options.allow_inplace:
             wf = step_executor._WorkflowHolder(entry_workflow)

@@ -299,6 +299,7 @@ Papers
    workflows/management.rst
    workflows/actors.rst
    workflows/events.rst
+   workflows/checkpointing.rst
    workflows/comparison.rst
    workflows/advanced.rst
    workflows/package-ref.rst
