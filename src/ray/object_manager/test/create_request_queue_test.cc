@@ -56,6 +56,7 @@ class CreateRequestQueueTest : public ::testing::Test {
         queue_(
             /*oom_grace_period_s=*/oom_grace_period_s_,
             /*spill_object_callback=*/[&]() { return false; },
+            [&](const ray::Priority &p) { return false; },
             /*on_global_gc=*/[&]() { num_global_gc_++; },
             /*get_time=*/[&]() { return current_time_ns_; },
             /*debug_dump_handler*/ nullptr) {}
@@ -196,6 +197,7 @@ TEST(CreateRequestQueueParameterTest, TestOomInfiniteRetry) {
       /*oom_grace_period_s=*/100,
       // Spilling is failing.
       /*spill_object_callback=*/[&]() { return false; },
+      /*on_object_creation_blocked_callback=*/[&](const ray::Priority &p) { return false; },
       /*on_global_gc=*/[&]() { num_global_gc_++; },
       /*get_time=*/[&]() { return current_time_ns; });
 
@@ -229,6 +231,7 @@ TEST_F(CreateRequestQueueTest, TestTransientOom) {
   CreateRequestQueue queue(
       /*oom_grace_period_s=*/oom_grace_period_s_,
       /*spill_object_callback=*/[&]() { return true; },
+      /*on_object_creation_blocked_callback=*/[&](const ray::Priority &p) { return false; },
       /*on_global_gc=*/[&]() { num_global_gc_++; },
       /*get_time=*/[&]() { return current_time_ns_; });
 
@@ -277,6 +280,7 @@ TEST_F(CreateRequestQueueTest, TestOomTimerWithSpilling) {
       /*oom_grace_period_s=*/oom_grace_period_s_,
       /*spill_object_callback=*/
       [&]() { return spill_object_callback_ret; },
+      /*on_object_creation_blocked_callback=*/[&](const ray::Priority &p) { return false; },
       /*on_global_gc=*/[&]() { num_global_gc_++; },
       /*get_time=*/[&]() { return current_time_ns_; });
 
@@ -336,6 +340,7 @@ TEST_F(CreateRequestQueueTest, TestTransientOomThenOom) {
   CreateRequestQueue queue(
       /*oom_grace_period_s=*/oom_grace_period_s_,
       /*spill_object_callback=*/[&]() { return is_spilling_possible; },
+      /*on_object_creation_blocked_callback=*/[&](const ray::Priority &p) { return false; },
       /*on_global_gc=*/[&]() { num_global_gc_++; },
       /*get_time=*/[&]() { return current_time_ns_; });
 
@@ -391,6 +396,7 @@ TEST(CreateRequestQueueParameterTest, TestNoEvictIfFull) {
   CreateRequestQueue queue(
       /*oom_grace_period_s=*/1,
       /*spill_object_callback=*/[&]() { return false; },
+      /*on_object_creation_blocked_callback=*/[&](const ray::Priority &p) { return false; },
       /*on_global_gc=*/[&]() {},
       /*get_time=*/[&]() { return current_time_ns; });
 

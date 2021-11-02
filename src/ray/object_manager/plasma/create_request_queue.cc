@@ -146,8 +146,8 @@ Status CreateRequestQueue::ProcessFirstRequest() {
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
-  auto queue_it = queue_.begin();
-  while (queue_it != queue_.end()) {
+  while (!queue_.empty()) {
+    auto queue_it = queue_.begin();
     bool spilling_required = false;
     std::unique_ptr<CreateRequest> &request = queue_it->second;
     auto status =
@@ -168,6 +168,13 @@ Status CreateRequestQueue::ProcessRequests() {
       if (oom_start_time_ns_ == -1) {
         oom_start_time_ns_ = now;
       }
+
+      bool wait = on_object_creation_blocked_callback_(queue_it->first.first);
+      if (wait) {
+        RAY_LOG(INFO) << "Object creation of priority " << queue_it->first.first << " blocked";
+        return Status::TransientObjectStoreFull("Waiting for higher priority tasks to finish");
+      }
+
       auto grace_period_ns = oom_grace_period_ns_;
       auto spill_pending = spill_objects_callback_();
       if (spill_pending) {
@@ -199,6 +206,11 @@ Status CreateRequestQueue::ProcessRequests() {
       }
     }
   }
+
+  // If we make it here, then there is nothing left in the queue. It's safe to
+  // run new tasks again.
+  RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority()));
+
   return Status::OK();
 }
 
