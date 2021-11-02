@@ -93,6 +93,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
       const NodeID &self_node_id,
       std::shared_ptr<ClusterResourceScheduler> cluster_resource_scheduler,
       TaskDependencyManagerInterface &task_dependency_manager,
+      std::function<void(std::shared_ptr<WorkerInterface>, rpc::WorkerExitType)> destroy_worker,
       std::function<bool(const WorkerID &, const NodeID &)> is_owner_alive,
       NodeInfoGetter get_node_info,
       std::function<void(const RayTask &)> announce_infeasible_task,
@@ -102,6 +103,10 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
                          std::vector<std::unique_ptr<RayObject>> *results)>
           get_task_arguments,
       size_t max_pinned_task_arguments_bytes);
+
+  //Preempt currently running tasks with a lower priority
+  //Block new tasks from being scheduled with this priority
+  void BlockTasks(ray::Priority) override;
 
   /// (Step 1) Queue tasks and schedule.
   /// Queue task and schedule. This hanppens when processing the worker lease request.
@@ -254,6 +259,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   std::shared_ptr<ClusterResourceScheduler> cluster_resource_scheduler_;
   /// Class to make task dependencies to be local.
   TaskDependencyManagerInterface &task_dependency_manager_;
+  /// Function to destroy worker from a given node.
+  std::function<void(std::shared_ptr<WorkerInterface>, rpc::WorkerExitType )> destroy_worker_;
   /// Function to check if the owner is alive on a given node.
   std::function<bool(const WorkerID &, const NodeID &)> is_owner_alive_;
   /// Function to get the node information of a given node id.
@@ -315,6 +322,9 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// parameters of methods if necessary once we remove the legacy scheduler.
   WorkerPoolInterface &worker_pool_;
   std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers_;
+
+  //Destroy all workers with lower priorities BlockTasks() set this value
+  ray::Priority block_requested_priority_;
 
   /// Callback to get references to task arguments. These will be pinned while
   /// the task is running.

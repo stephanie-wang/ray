@@ -37,6 +37,10 @@ struct Priority {
 
   bool operator<=(const Priority &rhs) const;
 
+  bool operator>(const Priority &rhs) const;
+
+  bool operator>=(const Priority &rhs) const;
+
   int GetScore(int64_t depth) const {
     extend(depth + 1);
     return score[depth];

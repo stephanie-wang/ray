@@ -25,6 +25,19 @@ bool Priority::operator<=(const Priority &rhs) const {
   return score <= rhs.score;
 }
 
+bool Priority::operator>(const Priority &rhs) const {
+  rhs.extend(score.size());
+  extend(rhs.score.size());
+
+  return score > rhs.score;
+}
+
+bool Priority::operator>=(const Priority &rhs) const {
+  rhs.extend(score.size());
+  extend(rhs.score.size());
+
+  return score >= rhs.score;
+}
 
 std::ostream &operator<<(std::ostream &os, const Priority &p) {
   os << "[ ";

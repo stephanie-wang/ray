@@ -1,0 +1,6 @@
+pushd ../dashboard/client
+npm install
+npm run build
+popd
+cd ../python
+pip install -e . --verbose

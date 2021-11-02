@@ -31,6 +31,7 @@ ClusterTaskManager::ClusterTaskManager(
     const NodeID &self_node_id,
     std::shared_ptr<ClusterResourceScheduler> cluster_resource_scheduler,
     TaskDependencyManagerInterface &task_dependency_manager,
+    std::function<void(std::shared_ptr<WorkerInterface>, rpc::WorkerExitType)> destroy_worker,
     std::function<bool(const WorkerID &, const NodeID &)> is_owner_alive,
     NodeInfoGetter get_node_info,
     std::function<void(const RayTask &)> announce_infeasible_task,
@@ -43,6 +44,7 @@ ClusterTaskManager::ClusterTaskManager(
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
+      destroy_worker_(destroy_worker),
       is_owner_alive_(is_owner_alive),
       get_node_info_(get_node_info),
       announce_infeasible_task_(announce_infeasible_task),
@@ -71,6 +73,11 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // blocking where a task which cannot be scheduled because
       // there are not enough available resources blocks other
       // tasks from being scheduled.
+      Priority task_priority = work_it->first.first;
+      if(task_priority >= block_requested_priority_){
+  	//TODO(Jae) Do not schedule it
+  	return did_schedule;
+      }
       const std::shared_ptr<Work> &work = work_it->second;
       RayTask task = work->task;
       RAY_LOG(DEBUG) << "Scheduling pending task "
@@ -278,6 +285,7 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
       auto &work = work_it->second;
       const auto &task = work->task;
       const auto spec = task.GetTaskSpecification();
+      //TODO (Jae) NodeManager.cc
       TaskID task_id = spec.TaskId();
       if (work->status == WorkStatus::WAITING_FOR_WORKER) {
         work_it++;
@@ -1185,6 +1193,24 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
     }
   }
   return false;
+}
+
+void ClusterTaskManager::BlockTasks(ray::Priority base_priority) {
+  block_requested_priority_ = base_priority;
+  
+  for (auto &entry : leased_workers_) {
+    std::shared_ptr<WorkerInterface> worker = entry.second;
+    ray::Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
+    //Smaller priority have higher priority
+    //Does not have less than check it
+    // TODO(Jae) Comback Here revise less than or equal
+    if(priority >= base_priority){
+      //Consider Using CancelTask instead of DestroyWorker
+      destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
+    }
+  }
+  //Check Deadlock corner cases
+  //Finer granularity preemption is not considered, kill all the lower priorities
 }
 
 void ClusterTaskManager::ScheduleAndDispatchTasks() {

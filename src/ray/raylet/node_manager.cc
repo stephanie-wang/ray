@@ -319,6 +319,12 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
            "return values are greater than the remaining capacity.";
     max_task_args_memory = 0;
   }
+  auto destroy_worker = [this](std::shared_ptr<WorkerInterface> worker,
+                                rpc::WorkerExitType disconnect_type) {
+    DisconnectClient(worker->Connection(), disconnect_type);
+    worker->MarkDead();
+    KillWorker(worker);
+  };
   auto is_owner_alive = [this](const WorkerID &owner_worker_id,
                                const NodeID &owner_node_id) {
     return !(failed_workers_cache_.count(owner_worker_id) > 0 ||
@@ -327,7 +333,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
   cluster_task_manager_ = std::shared_ptr<ClusterTaskManager>(new ClusterTaskManager(
       self_node_id_,
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),
-      dependency_manager_, is_owner_alive, get_node_info_func, announce_infeasible_task,
+      dependency_manager_, destroy_worker, is_owner_alive, get_node_info_func, announce_infeasible_task,
       worker_pool_, leased_workers_,
       [this](const std::vector<ObjectID> &object_ids,
              std::vector<std::unique_ptr<RayObject>> *results) {
@@ -516,6 +522,7 @@ void NodeManager::KillWorker(std::shared_ptr<WorkerInterface> worker) {
   });
 }
 
+//when make a change in this function make sure to change destroy_worker lammbda function as well
 void NodeManager::DestroyWorker(std::shared_ptr<WorkerInterface> worker,
                                 rpc::WorkerExitType disconnect_type) {
   // We should disconnect the client first. Otherwise, we'll remove bundle resources

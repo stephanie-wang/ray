@@ -31,7 +31,6 @@ uint64_t CreateRequestQueue::AddRequest(const ray::TaskKey &task_id,
                                         size_t object_size) {
   auto req_id = next_req_id_++;
   fulfilled_requests_[req_id] = nullptr;
-  // TODO(jae): Convert from FIFO queue to priority queue (absl::btree_map).
   //auto taskId = task.GetTaskSpecification().GetTaskKey();
   queue_.emplace(
       task_id,
