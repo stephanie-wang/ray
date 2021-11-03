@@ -2,42 +2,47 @@ import ray
 import time
 import sys
 import argparse
+import csv
+import numpy as np
+from time import perf_counter
 from time import perf_counter
 
 ####################
 ## Argument Parse ##
 ####################
 parser = argparse.ArgumentParser()
-parser.add_argument('--LIST_SIZE', '-l', type=int, default=1000)
+parser.add_argument('--WORKING_SET_RATIO', '-w', type=int, default=1)
+parser.add_argument('--OBJECT_STORE_SIZE', '-o', type=int, default=1_000_000_000)
+parser.add_argument('--OBJECT_SIZE', '-os', type=int, default=50_000_000)
+parser.add_argument('--RESULT_PATH', '-r', type=str, default="../data/pipeline.csv")
 args = parser.parse_args()
 params = vars(args)
 
-LIST_SIZE = params['LIST_SIZE']
-OBJECT_STORE_SIZE = 1000_000_000 # 1GB
+OBJECT_STORE_SIZE = params['OBJECT_STORE_SIZE'] 
+OBJECT_SIZE = params['OBJECT_SIZE'] 
+WORKING_SET_RATIO = params['WORKING_SET_RATIO']
+RESULT_PATH = params['RESULT_PATH']
 
 
 def test_ray_pipeline():
     ray_pipeline_begin = perf_counter()
+
     @ray.remote(num_cpus=1)
-    def consumer(args):
+    def consumer(obj_ref):
         #args = ray.get(obj_ref)
-        time.sleep(5)
-        return sum(sum(arg) for arg in args)
+        return True
 
-    @ray.remote(num_cpus=1)
-    def producer():
-        args = [[1 for _ in range(LIST_SIZE)] for _ in range(LIST_SIZE)]
-        obj_ref = ray.put(args)
-        result = consumer.remote(obj_ref)
-        return ray.get(result) == LIST_SIZE * LIST_SIZE
+    @ray.remote(num_cpus=1) 
+    def producer(): 
+        return np.zeros(OBJECT_SIZE // 8)
         
-    num_cpus = int(ray.cluster_resources()["CPU"])
-    refs = []
-    #refs = for [producer.remote() _ in range(num_cpus)]
-    for _ in range(num_cpus):
-        refs.append(producer.remote())
+    num_fill_object_store = OBJECT_STORE_SIZE//OBJECT_SIZE 
+    refs = [producer.remote()  for _ in range(WORKING_SET_RATIO*num_fill_object_store)]
+    new_refs = []
+    for r in refs:
+        new_refs.append(consumer.remote(r))
 
-    for ref in refs:
+    for ref in new_refs:
         assert ray.get(ref)
     ray_pipeline_end = perf_counter()
 
@@ -45,24 +50,28 @@ def test_ray_pipeline():
 
 def test_baseline_pipeline():
     baseline_start = perf_counter()
-    def consumer(*args):
-        time.sleep(5)
-        return sum(sum(arg) for arg in args)
 
     @ray.remote(num_cpus=1)
-    def producer():
-        args = [[1 for _ in range(LIST_SIZE)] for _ in range(LIST_SIZE)]
-        result = consumer(*args)
-        return result == LIST_SIZE * LIST_SIZE
+    def consumer(obj_ref):
+        #args = ray.get(obj_ref)
+        return True
 
-    num_cpus = int(ray.cluster_resources()["CPU"])
-    refs = []
+    @ray.remote(num_cpus=1) 
+    def producer(): 
+        return np.zeros(OBJECT_SIZE // 8)
+        
+    num_fill_object_store = OBJECT_STORE_SIZE//OBJECT_SIZE
+    for i in range(WORKING_SET_RATIO):
+        refs = []
+        for j in range(num_fill_object_store):
+            refs.append(producer.remote())
 
-    for _ in range(num_cpus):
-        refs.append(producer.remote())
+        new_refs = []
+        for j in range(num_fill_object_store):
+            new_refs.append(consumer.remote(refs[j]))
 
-    for ref in refs:
-        assert ray.get(ref)
+        assert ray.get(new_refs)
+
 
     baseline_end = perf_counter()
     return baseline_end - baseline_start
@@ -72,7 +81,12 @@ ray.init(object_store_memory=OBJECT_STORE_SIZE)
 baseline_time = test_baseline_pipeline()
 ray_pipeline_time = test_ray_pipeline()
 
-args = [[1 for _ in range(LIST_SIZE)] for _ in range(LIST_SIZE)]
+#header = ['working_set_ratio', 'object_store_size','object_size','baseline_pipeline','ray_pipeline']
+data = [WORKING_SET_RATIO, OBJECT_STORE_SIZE, OBJECT_SIZE, baseline_time, ray_pipeline_time]
+
+with open(RESULT_PATH, 'a', encoding='UTF-8', newline='') as f:
+    writer = csv.writer(f)
+    writer.writerow(data)
 
 print(f"Baseline Pipieline time: {baseline_time}")
-print(f"Ray Pipieline time: {ray_pipeline_time} Memory Used:{sys.getsizeof(args)*int(ray.cluster_resources()['CPU'])*LIST_SIZE}")
+print(f"Ray Pipieline time: {ray_pipeline_time}")

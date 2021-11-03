@@ -1,12 +1,17 @@
 #! /bin/bash
 
-LIST_LEN=1000
-LIST_LEN_INCREASE=1000
-LIST_LEN_MAX=10000
-
 # Pipeline Test
-for((list_len = $LIST_LEN; list_len <=$LIST_LEN_MAX; list_len += $LIST_LEN_INCREASE))
+PIPELINE_RESULT=../data/pipeline.csv
+test -f "$PIPELINE_RESULT" && rm $PIPELINE_RESULT
+echo "working_set_ratio, object_store_size,object_size,baseline_pipeline,ray_pipeline" >>$PIPELINE_RESULT
+for w in 1 2 4 8 16
 do
-	echo -n -e "test_pipline -l $list_len\n"
-	python test_pipeline.py -l $list_len
+	for o in 1000000000 5000000000 10000000000 #((o=$OBJECT_STORE_SIZE; o<=$OBJECT_STORE_SIZE_MAX; o += $OBJECT_STORE_SIZE_INCREASE))
+	do
+		for ((os=10000000; os<=160000000; os *= 2))
+		do
+			echo -n -e "test_pipeline.py -w $w -o $o -os $os\n"
+			python test_pipeline.py -w $w -o $o -os $os -r $PIPELINE_RESULT
+		done
+	done
 done
