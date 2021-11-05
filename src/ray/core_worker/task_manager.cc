@@ -55,6 +55,8 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
     const auto actor_creation_return_id = spec.ActorCreationDummyObjectId();
     task_deps.push_back(actor_creation_return_id);
   }
+  // TODO: Get the priority of this task's dependencies. Use this to compute
+  // the priority of this task's return Refs.
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
 
   // Add new owned objects for the return values of the task.
@@ -70,6 +72,7 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
       // publish the WaitForRefRemoved message that we are now a borrower for
       // the inner IDs. Note that this message can be received *before* the
       // PushTaskReply.
+      // TODO: Set the priority of this task's return Refs.
       reference_counter_->AddOwnedObject(spec.ReturnId(i),
                                          /*inner_ids=*/{}, caller_address, call_site, -1,
                                          /*is_reconstructable=*/true);
