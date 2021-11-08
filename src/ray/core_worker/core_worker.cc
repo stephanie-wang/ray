@@ -1658,6 +1658,7 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitTask(
     BundleID placement_options, bool placement_group_capture_child_tasks,
     const std::string &debugger_breakpoint) {
   TaskSpecBuilder builder;
+  Priority priority;
   const auto next_task_index = worker_context_.GetNextTaskIndex();
   const auto task_id =
       TaskID::ForNormalTask(worker_context_.GetCurrentJobID(),
@@ -1675,17 +1676,19 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitTask(
                       rpc_address_, function, args, task_options.num_returns,
                       constrained_resources, required_resources, placement_options,
                       placement_group_capture_child_tasks, debugger_breakpoint,
-                      Priority(),
+                      priority,
                       task_options.serialized_runtime_env, task_options.runtime_env_uris);
   builder.SetNormalTaskSpec(max_retries, retry_exceptions);
   TaskSpecification task_spec = builder.Build();
+  priority = task_manager_->GenerateTaskPriority(task_spec);
   RAY_LOG(DEBUG) << "Submit task " << task_spec.DebugString();
   std::vector<rpc::ObjectReference> returned_refs;
   if (options_.is_local_mode) {
+	  //TODO(Jae) Stephanie what is this is_local_mode?
     returned_refs = ExecuteTaskLocalMode(task_spec);
   } else {
     returned_refs = task_manager_->AddPendingTask(task_spec.CallerAddress(), task_spec,
-                                                  CurrentCallSite(), max_retries);
+                                                  CurrentCallSite(), priority, max_retries);
     io_service_.post(
         [this, task_spec]() {
           RAY_UNUSED(direct_task_submitter_->SubmitTask(task_spec));
@@ -1903,6 +1906,7 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitActorTask(
 
   // Build common task spec.
   TaskSpecBuilder builder;
+  Priority priority;
   const auto next_task_index = worker_context_.GetNextTaskIndex();
   const TaskID actor_task_id = TaskID::ForActorTask(
       worker_context_.GetCurrentJobID(), worker_context_.GetCurrentTaskID(),
@@ -1917,7 +1921,7 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitActorTask(
                       required_resources, std::make_pair(PlacementGroupID::Nil(), -1),
                       true, /* placement_group_capture_child_tasks */
                       "",   /* debugger_breakpoint */
-                      Priority(),
+                      priority,
                       "{}", /* serialized_runtime_env */
                       {},   /* runtime_env_uris */
                       task_options.concurrency_group_name);
@@ -1930,12 +1934,13 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitActorTask(
 
   // Submit task.
   TaskSpecification task_spec = builder.Build();
+  priority = task_manager_->GenerateTaskPriority(task_spec);
   std::vector<rpc::ObjectReference> returned_refs;
   if (options_.is_local_mode) {
     returned_refs = ExecuteTaskLocalMode(task_spec, actor_id);
   } else {
     returned_refs = task_manager_->AddPendingTask(
-        rpc_address_, task_spec, CurrentCallSite(), actor_handle->MaxTaskRetries());
+        rpc_address_, task_spec, CurrentCallSite(), priority, actor_handle->MaxTaskRetries());
     io_service_.post(
         [this, task_spec]() {
           RAY_UNUSED(direct_actor_submitter_->SubmitTask(task_spec));

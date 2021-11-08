@@ -262,6 +262,22 @@ void ReferenceCounter::RemoveLocalReference(const ObjectID &object_id,
   }
 }
 
+Priority& ReferenceCounter::GetObjectPriority(const ObjectID &object_id){
+	auto it = object_id_priority_.find(object_id);
+    if (it == object_id_priority_.end()) {
+      // This happens if a large argument is transparently passed by reference
+      // because we don't hold a Python reference to its ObjectID.
+      it = object_id_priority_.emplace(object_id, Priority()).first;
+    }
+	return it->second;
+}
+
+void ReferenceCounter::UpdateObjectPriority(
+		const ObjectID &object_id,
+		const Priority &priority){
+  object_id_priority_.emplace(object_id, priority);
+}
+
 void ReferenceCounter::UpdateSubmittedTaskReferences(
     const std::vector<ObjectID> &argument_ids_to_add,
     const std::vector<ObjectID> &argument_ids_to_remove, std::vector<ObjectID> *deleted) {

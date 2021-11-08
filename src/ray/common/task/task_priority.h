@@ -23,6 +23,8 @@ struct Priority {
 
   void extend(int64_t size) const;
 
+  void SetFromParentPriority(Priority &parent, int);
+
   bool operator==(const Priority &rhs) const {
     rhs.extend(score.size());
     extend(rhs.score.size());

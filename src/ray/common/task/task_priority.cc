@@ -11,6 +11,15 @@ void Priority::extend(int64_t size) const {
   }
 }
 
+void Priority::SetFromParentPriority(Priority &parent, int s){
+  //param s id the last score to add
+  if(parent.score.size() != 1 && parent.score[0] == INT_MAX)
+	score = parent.score;
+
+  //if parent is the default priority, add s only
+  score.push_back(s);
+}
+
 bool Priority::operator<(const Priority &rhs) const {
   rhs.extend(score.size());
   extend(rhs.score.size());

@@ -30,9 +30,31 @@ const int64_t kTaskFailureThrottlingThreshold = 50;
 // Throttle task failure logs to once this interval.
 const int64_t kTaskFailureLoggingFrequencyMillis = 5000;
 
+//TODO(Jae) you stopped here
+//delete object priority when a task is finished
+Priority TaskManager::GenerateTaskPriority(
+		TaskSpecification &spec) {
+  RAY_LOG(DEBUG) << "Generating priority of task " << spec.TaskId();
+  Priority pri = Priority();
+  Priority &max_priority = pri;
+  for (size_t i = 0; i < spec.NumArgs(); i++) {
+    if (spec.ArgByRef(i)) {
+      ObjectID object_id = spec.ArgId(i);
+	  Priority &p = reference_counter_->GetObjectPriority(object_id);
+	  //TODO(Jae) Revise this > 
+	  if(max_priority > p){
+        max_priority = p;
+	  }
+	}
+  }
+  pri.SetFromParentPriority(max_priority, new_priority_s++);
+  spec.SetPriority(pri);
+  return pri;
+}
+
 std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
     const rpc::Address &caller_address, const TaskSpecification &spec,
-    const std::string &call_site, int max_retries) {
+    const std::string &call_site, const Priority &priority, int max_retries) {
   RAY_LOG(DEBUG) << "Adding pending task " << spec.TaskId() << " with " << max_retries
                  << " retries";
 
@@ -82,6 +104,8 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
     ref.set_object_id(spec.ReturnId(i).Binary());
     ref.mutable_owner_address()->CopyFrom(caller_address);
     ref.set_call_site(call_site);
+	//reference_counter_->UpdateObjectPriority(ObjectID::FromBinary(ref.object_id()), priority);
+	reference_counter_->UpdateObjectPriority(spec.ReturnId(i), priority);
     returned_refs.push_back(std::move(ref));
   }
 
