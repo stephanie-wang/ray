@@ -89,7 +89,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
 	new_priority_s = 0;
   }
 
-  Priority GenerateTaskPriority(TaskSpecification &spec);
+  Priority GenerateTaskPriority(TaskSpecification &spec, std::vector<ObjectID> &task_deps);
+
   /// Add a task that is pending execution.
   ///
   /// \param[in] caller_address The rpc address of the calling task.
@@ -98,9 +99,8 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// on failure.
   /// \return ObjectRefs returned by this task.
   std::vector<rpc::ObjectReference> AddPendingTask(const rpc::Address &caller_address,
-                                                   const TaskSpecification &spec,
+                                                   TaskSpecification &spec,
                                                    const std::string &call_site,
-												   const Priority &priority,
                                                    int max_retries = 0);
 
   /// Resubmit a task that has completed execution before. This is used to

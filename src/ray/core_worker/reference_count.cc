@@ -267,6 +267,7 @@ Priority& ReferenceCounter::GetObjectPriority(const ObjectID &object_id){
     if (it == object_id_priority_.end()) {
       // This happens if a large argument is transparently passed by reference
       // because we don't hold a Python reference to its ObjectID.
+	  // When an object is made with Put() Priority is not set. Should to this Jae
       it = object_id_priority_.emplace(object_id, Priority()).first;
     }
 	return it->second;
