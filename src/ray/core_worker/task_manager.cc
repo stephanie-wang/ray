@@ -35,14 +35,16 @@ const int64_t kTaskFailureLoggingFrequencyMillis = 5000;
 Priority TaskManager::GenerateTaskPriority(
 		TaskSpecification &spec, std::vector<ObjectID> &task_deps) {
   RAY_LOG(DEBUG) << "Generating priority of task " << spec.TaskId();
-  Priority pri = Priority();
-  Priority &max_priority = pri;
+  Priority dummy_pri = Priority();
+  Priority &max_priority = dummy_pri;
   for (const ObjectID &argument_id : task_deps) {
     Priority &p = reference_counter_->GetObjectPriority(argument_id);
     if(max_priority > p){
       max_priority = p;
 	}
   }
+
+  Priority pri;
   pri.SetFromParentPriority(max_priority, new_priority_s++);
   spec.SetPriority(pri);
   return pri;
