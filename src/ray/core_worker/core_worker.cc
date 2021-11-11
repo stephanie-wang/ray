@@ -1683,13 +1683,13 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitTask(
   RAY_LOG(DEBUG) << "Submit task " << task_spec.DebugString();
   std::vector<rpc::ObjectReference> returned_refs;
   if (options_.is_local_mode) {
-	  //TODO(Jae) Stephanie what is this is_local_mode?
     returned_refs = ExecuteTaskLocalMode(task_spec);
   } else {
     returned_refs = task_manager_->AddPendingTask(task_spec.CallerAddress(), task_spec,
                                                   CurrentCallSite(), max_retries);
     io_service_.post(
         [this, task_spec]() {
+		//(Jae) This is the reason why tasks are not placed with priority
           RAY_UNUSED(direct_task_submitter_->SubmitTask(task_spec));
         },
         "CoreWorker.SubmitTask");

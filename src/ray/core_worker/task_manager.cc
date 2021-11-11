@@ -30,8 +30,7 @@ const int64_t kTaskFailureThrottlingThreshold = 50;
 // Throttle task failure logs to once this interval.
 const int64_t kTaskFailureLoggingFrequencyMillis = 5000;
 
-//TODO(Jae) you stopped here
-//Delete object priority when a task is finished
+//TODO(Jae) Delete object priority when a task is finished
 Priority TaskManager::GenerateTaskPriority(
 		TaskSpecification &spec, std::vector<ObjectID> &task_deps) {
   RAY_LOG(DEBUG) << "Generating priority of task " << spec.TaskId();
@@ -75,8 +74,6 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
     const auto actor_creation_return_id = spec.ActorCreationDummyObjectId();
     task_deps.push_back(actor_creation_return_id);
   }
-  // TODO: Get the priority of this task's dependencies. Use this to compute
-  // the priority of this task's return Refs.
   reference_counter_->UpdateSubmittedTaskReferences(task_deps);
 
   // Add new owned objects for the return values of the task.
@@ -93,7 +90,6 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
       // publish the WaitForRefRemoved message that we are now a borrower for
       // the inner IDs. Note that this message can be received *before* the
       // PushTaskReply.
-      // TODO: Set the priority of this task's return Refs.
       reference_counter_->AddOwnedObject(spec.ReturnId(i),
                                          /*inner_ids=*/{}, caller_address, call_site, -1,
                                          /*is_reconstructable=*/true);
@@ -103,7 +99,6 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
     ref.set_object_id(spec.ReturnId(i).Binary());
     ref.mutable_owner_address()->CopyFrom(caller_address);
     ref.set_call_site(call_site);
-	//reference_counter_->UpdateObjectPriority(ObjectID::FromBinary(ref.object_id()), task_priority);
 	reference_counter_->UpdateObjectPriority(spec.ReturnId(i), task_priority);
     returned_refs.push_back(std::move(ref));
   }

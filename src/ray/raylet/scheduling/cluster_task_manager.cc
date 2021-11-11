@@ -75,8 +75,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // tasks from being scheduled.
       Priority task_priority = work_it->first.first;
       if(task_priority >= block_requested_priority_){
-  	//TODO(Jae) Do not schedule it
-  	return did_schedule;
+		return did_schedule;
       }
       const std::shared_ptr<Work> &work = work_it->second;
       RayTask task = work->task;
@@ -1195,15 +1194,14 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
   return false;
 }
 
-void ClusterTaskManager::BlockTasks(ray::Priority base_priority) {
+void ClusterTaskManager::BlockTasks(Priority base_priority) {
   block_requested_priority_ = base_priority;
   
   for (auto &entry : leased_workers_) {
     std::shared_ptr<WorkerInterface> worker = entry.second;
-    ray::Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
+    Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
     //Smaller priority have higher priority
     //Does not have less than check it
-    // TODO(Jae) Comback Here revise less than or equal
     if(priority >= base_priority){
       //Consider Using CancelTask instead of DestroyWorker
       destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);

@@ -37,6 +37,8 @@ def test_ray_pipeline():
 
     @ray.remote(num_cpus=1) 
     def producer(): 
+        for i in range(1000000):
+            pass
         return np.zeros(OBJECT_SIZE // 8)
         
     num_fill_object_store = OBJECT_STORE_SIZE//OBJECT_SIZE 
