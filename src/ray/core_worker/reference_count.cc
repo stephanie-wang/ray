@@ -263,21 +263,26 @@ void ReferenceCounter::RemoveLocalReference(const ObjectID &object_id,
 }
 
 Priority& ReferenceCounter::GetObjectPriority(const ObjectID &object_id){
-	auto it = object_id_priority_.find(object_id);
-    if (it == object_id_priority_.end()) {
-      // This happens if a large argument is transparently passed by reference
-      // because we don't hold a Python reference to its ObjectID.
-	  // When an object is made with Put() Priority is not set. Should to this Jae
-	  return Priority();
-      it = object_id_priority_.emplace(object_id, Priority()).first;
-    }
-	return it->second;
+  absl::MutexLock lock(&mutex_);
+  auto it = object_id_priority_.find(object_id);
+  if (it == object_id_priority_.end()) {
+    // This happens if a large argument is transparently passed by reference
+    // because we don't hold a Python reference to its ObjectID.
+ // When an object is made with Put() Priority is not set. Should to this Jae
+  /*
+    Priority pri = Priority();
+    return pri;
+    it = object_id_priority_.emplace(object_id, Priority()).first;
+	*/
+  }
+  return it->second;
 }
 
 void ReferenceCounter::UpdateObjectPriority(
 		const ObjectID &object_id,
 		const Priority &priority){
-  object_id_priority_.[object_id] =  priority;
+  absl::MutexLock lock(&mutex_);
+  object_id_priority_[object_id] =  priority;
 }
 
 void ReferenceCounter::UpdateSubmittedTaskReferences(

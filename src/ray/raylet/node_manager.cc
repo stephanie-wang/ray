@@ -227,9 +227,15 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return GetLocalObjectManager().IsSpillingInProgress();
           },
           /*on_object_creation_blocked_callback=*/
-          [this](const Priority &priority) {
+          [this](const Priority &base_priority) {
             //cluster_task_manager_->BlockTasks(priority);
-            return false;
+			//TODO(Jae) Remove this line and set the actual value for should_spill
+			//from the ClusterTaskManager
+			cluster_task_manager_->BlockTasks(base_priority);
+			bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
+			io_service_.post([this, should_spill](){
+				object_manager_.SetShouldSpill(should_spill);
+		    },"");
           },
           /*object_store_full_callback=*/
           [this]() {
@@ -344,7 +350,10 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
              std::vector<std::unique_ptr<RayObject>> *results) {
         return GetObjectsFromPlasma(object_ids, results);
       },
-      max_task_args_memory));
+      max_task_args_memory,
+	  [this](bool should_spill){
+	    object_manager_.SetShouldSpill(should_spill);
+	  }));
   placement_group_resource_manager_ = std::make_shared<NewPlacementGroupResourceManager>(
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),
       // TODO (Alex): Ideally we could do these in a more robust way (retry

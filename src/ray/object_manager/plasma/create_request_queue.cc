@@ -143,6 +143,10 @@ Status CreateRequestQueue::ProcessFirstRequest() {
   return Status::OK();
 }
 
+void CreateRequestQueue::SetShouldSpill(bool should_spill){
+	should_spill_ = should_spill;
+}
+
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
@@ -169,8 +173,11 @@ Status CreateRequestQueue::ProcessRequests() {
         oom_start_time_ns_ = now;
       }
 
-      bool wait = on_object_creation_blocked_callback_(queue_it->first.first);
-      if (wait) {
+      //bool wait = on_object_creation_blocked_callback_(queue_it->first.first);
+      //if (wait) {
+      on_object_creation_blocked_callback_(queue_it->first.first);
+	  if(!should_spill_){
+		  //TODO(Jae actually call BlockTasks)
         RAY_LOG(INFO) << "Object creation of priority " << queue_it->first.first << " blocked";
         return Status::TransientObjectStoreFull("Waiting for higher priority tasks to finish");
       }
@@ -215,7 +222,7 @@ Status CreateRequestQueue::ProcessRequests() {
 }
 
 void CreateRequestQueue::FinishRequest(
-    absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it) {
+	absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it) {
   // Fulfill the request.
   //auto &request = *(queue_it->second);
   auto it = fulfilled_requests_.find(queue_it->second->request_id);

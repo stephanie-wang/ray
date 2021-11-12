@@ -105,6 +105,11 @@ class PlasmaStore {
     callback(available);
   }
 
+  void SetShouldSpill(bool should_spill){
+	  absl::MutexLock lock(&mutex_);
+	  return create_request_queue_.SetShouldSpill(should_spill);
+  }
+
  private:
   /// Create a new object. The client must do a call to release_object to tell
   /// the store when it is done with the object.
@@ -261,6 +266,11 @@ class PlasmaStore {
 
   /// The percentage of object store memory used above which spilling is triggered.
   const float object_spilling_threshold_;
+
+  /// The percentage of object store memory used above which 
+  //blocking new tasks is triggerted 
+  const float block_request_threshold_ = 0.8;
+  const float evict_request_threshold_ = 0.8;
 
   /// A timer that is set when the first request in the queue is not
   /// serviceable because there is not enough memory. The request will be

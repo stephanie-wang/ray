@@ -37,6 +37,7 @@ def test_ray_pipeline():
 
     @ray.remote(num_cpus=1) 
     def producer(): 
+        time.sleep(0.1)
         for i in range(1000000):
             pass
         return np.zeros(OBJECT_SIZE // 8)

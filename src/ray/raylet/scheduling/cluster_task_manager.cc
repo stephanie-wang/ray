@@ -40,7 +40,8 @@ ClusterTaskManager::ClusterTaskManager(
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
-    size_t max_pinned_task_arguments_bytes)
+    size_t max_pinned_task_arguments_bytes,
+	SetShouldSpillCallback set_should_spill)
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
@@ -53,11 +54,13 @@ ClusterTaskManager::ClusterTaskManager(
       report_worker_backlog_(RayConfig::instance().report_worker_backlog()),
       worker_pool_(worker_pool),
       leased_workers_(leased_workers),
+	  block_requested_priority_(Priority()),
       get_task_arguments_(get_task_arguments),
       max_pinned_task_arguments_bytes_(max_pinned_task_arguments_bytes),
       metric_tasks_queued_(0),
       metric_tasks_dispatched_(0),
-      metric_tasks_spilled_(0) {}
+      metric_tasks_spilled_(0),
+      set_should_spill_(set_should_spill){}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
@@ -1194,9 +1197,8 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
   return false;
 }
 
-void ClusterTaskManager::BlockTasks(Priority base_priority) {
-  block_requested_priority_ = base_priority;
-  
+bool ClusterTaskManager::EvictTasks(Priority base_priority) {
+  bool should_spill = true;
   for (auto &entry : leased_workers_) {
     std::shared_ptr<WorkerInterface> worker = entry.second;
     Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
@@ -1205,10 +1207,16 @@ void ClusterTaskManager::BlockTasks(Priority base_priority) {
     if(priority >= base_priority){
       //Consider Using CancelTask instead of DestroyWorker
       destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
+	  should_spill = false;
     }
   }
   //Check Deadlock corner cases
   //Finer granularity preemption is not considered, kill all the lower priorities
+  return should_spill;
+}
+
+void ClusterTaskManager::BlockTasks(Priority base_priority) {
+  block_requested_priority_ = base_priority;
 }
 
 void ClusterTaskManager::ScheduleAndDispatchTasks() {
