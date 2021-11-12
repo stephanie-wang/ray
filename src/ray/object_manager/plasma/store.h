@@ -60,7 +60,8 @@ class PlasmaStore {
               std::function<void()> object_store_full_callback,
               ray::AddObjectCallback add_object_callback,
               ray::DeleteObjectCallback delete_object_callback,
-              ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback);
+              ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback,
+              ray::StopObjectCreationBlockCallback on_stop_object_creation_block_callback);
 
   ~PlasmaStore();
 
@@ -271,6 +272,7 @@ class PlasmaStore {
   //blocking new tasks is triggerted 
   const float block_request_threshold_ = 0.8;
   const float evict_request_threshold_ = 0.8;
+  const float stop_block_threshold_ = 0.7;
 
   /// A timer that is set when the first request in the queue is not
   /// serviceable because there is not enough memory. The request will be

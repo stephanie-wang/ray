@@ -76,6 +76,12 @@ bool ObjectStore::DeleteObject(const ObjectID &object_id) {
   }
   allocator_.Free(std::move(entry->allocation));
   object_table_.erase(object_id);
+  const int64_t footprint_limit = allocator_.GetFootprintLimit();
+  const float allocated_percentage =
+        static_cast<float>(allocator_.Allocated()) / footprint_limit;
+  if(allocated_percentage <= stop_block_tasks_threshold_){
+	  unblockTasks();
+  }
   return true;
 }
 

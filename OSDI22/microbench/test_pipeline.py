@@ -12,11 +12,11 @@ from time import perf_counter
 ####################
 parser = argparse.ArgumentParser()
 parser.add_argument('--WORKING_SET_RATIO', '-w', type=int, default=1)
-parser.add_argument('--OBJECT_STORE_SIZE', '-o', type=int, default=1_000_000_000)
-parser.add_argument('--OBJECT_SIZE', '-os', type=int, default=1_000_000)
+parser.add_argument('--OBJECT_STORE_SIZE', '-o', type=int, default=5_000_000_000)
+parser.add_argument('--OBJECT_SIZE', '-os', type=int, default=40_000_000)
 parser.add_argument('--RESULT_PATH', '-r', type=str, default="../data/pipeline_16.csv")
-parser.add_argument('--NUM_STAGES', '-ns', type=int, default=1)
-parser.add_argument('--NUM_TRIAL', '-t', type=int, default=5)
+parser.add_argument('--NUM_STAGES', '-ns', type=int, default=16)
+parser.add_argument('--NUM_TRIAL', '-t', type=int, default=1)
 args = parser.parse_args()
 params = vars(args)
 
@@ -107,10 +107,12 @@ for i in range(NUM_TRIAL):
     base_time.append(test_baseline_pipeline())
 
 #header = ['working_set_ratio', 'num_stages', 'object_store_size','object_size','baseline_pipeline','ray_pipeline']
+'''
 data = [WORKING_SET_RATIO, NUM_STAGES, OBJECT_STORE_SIZE, OBJECT_SIZE, sum(base_time)/NUM_TRIAL, sum(ray_time)/NUM_TRIAL]
 with open(RESULT_PATH, 'a', encoding='UTF-8', newline='') as f:
     writer = csv.writer(f)
     writer.writerow(data)
+'''
 
 print(f"Baseline Pipieline time: {sum(base_time)/NUM_TRIAL}")
 print(f"Ray Pipieline time: {sum(ray_time)/NUM_TRIAL}")

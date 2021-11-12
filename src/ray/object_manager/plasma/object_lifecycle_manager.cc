@@ -24,7 +24,7 @@ namespace plasma {
 using namespace flatbuf;
 
 ObjectLifecycleManager::ObjectLifecycleManager(
-    IAllocator &allocator, ray::DeleteObjectCallback delete_object_callback)
+    IAllocator &allocator, ray::DeleteObjectCallback delete_object_callback, ray::StopObjectCreationBlockCallback)
     : object_store_(std::make_unique<ObjectStore>(allocator)),
       eviction_policy_(std::make_unique<EvictionPolicy>(*object_store_, allocator)),
       delete_object_callback_(delete_object_callback),
