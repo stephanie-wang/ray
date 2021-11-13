@@ -5,7 +5,7 @@ from ray.workflow import workflow_context
 from ray.workflow import serialization
 from ray.workflow.common import (Workflow, StepID, WorkflowRef,
                                  WorkflowStaticRef, WorkflowExecutionResult,
-                                 StepType)
+                                 StepType, WorkflowActorBase)
 from ray.workflow import storage
 from ray.workflow import workflow_storage
 from ray.workflow.step_function import WorkflowStepFunction
@@ -51,9 +51,10 @@ def _recover_workflow_step(args: List[Any], kwargs: Dict[str, Any],
     return func(*args, **kwargs)
 
 
-def _reconstruct_wait_step(reader: workflow_storage.WorkflowStorage,
-                           result: workflow_storage.StepInspectResult,
-                           input_map: Dict[StepID, Any]):
+def _reconstruct_wait_step(
+        reader: workflow_storage.WorkflowStorage, step_id: StepID,
+        result: workflow_storage.StepInspectResult,
+        input_map: Dict[StepID, Any], actor_map: Dict[str, WorkflowActorBase]):
     input_workflows = []
     step_options = result.step_options
     wait_options = step_options.ray_options.get("wait_options", {})
@@ -64,7 +65,7 @@ def _reconstruct_wait_step(reader: workflow_storage.WorkflowStorage,
             r = input_map[_step_id]
         else:
             r = _construct_resume_workflow_from_step(reader, _step_id,
-                                                     input_map)
+                                                     input_map, actor_map)
             input_map[_step_id] = r
         if isinstance(r, Workflow):
             input_workflows.append(r)
@@ -79,12 +80,56 @@ def _reconstruct_wait_step(reader: workflow_storage.WorkflowStorage,
             input_workflows.append(wf)
 
     from ray import workflow
-    return workflow.wait(input_workflows, **wait_options)
+    wait_step = workflow.wait(input_workflows, **wait_options)
+    # override step id
+    wait_step._step_id = step_id
+    return wait_step
+
+
+def _reconstruct_workflow_actor(reader: workflow_storage.WorkflowStorage,
+                                actor_id: str, state_index: int):
+    from ray.workflow.workflow_actor import WorkflowActorClass
+    base_class = reader.load_physical_actor_class_body(actor_id)
+    actor_cls = WorkflowActorClass._from_class(base_class)
+    args, kwargs = reader.load_physical_actor_state(actor_id, 0)
+    actor = actor_cls._create(actor_id, None, *args, **kwargs)
+    if state_index > 0:
+        state = reader.load_physical_actor_state(actor_id, state_index)
+        actor.ray_actor_handle().__setstate__.remote(state)
+    return actor
+
+
+def _reconstruct_workflow_actor_step(
+        reader: workflow_storage.WorkflowStorage, step_id: StepID,
+        result: workflow_storage.StepInspectResult,
+        input_map: Dict[StepID, Any], actor_map: Dict[str, WorkflowActorBase]):
+    workflow_actor_options = result.step_options.ray_options[
+        "workflow_actor_options"]
+    actor_id = workflow_actor_options["actor_id"]
+    state_index = workflow_actor_options["state_index"]
+    method_name = workflow_actor_options["method_name"]
+    if actor_id in actor_map:
+        assert actor_map[actor_id].state_index() == state_index
+    else:
+        print(f"[recovery] Reconstruct actor {actor_id} with "
+              f"state_index={state_index} for actor step {step_id}.")
+        actor_map[actor_id] = _reconstruct_workflow_actor(
+            reader, actor_id, state_index)
+    actor = actor_map[actor_id]
+    actor_step_method = getattr(actor, method_name)
+    # TODO(suquark): load dependence
+    args, kwargs = reader.load_step_args(
+        step_id, workflows=[], workflow_refs=[], workflow_actors=[])
+    actor_step = actor_step_method.step(*args, **kwargs)
+    # override step id
+    actor_step._step_id = step_id
+    return actor_step
 
 
 def _construct_resume_workflow_from_step(
         reader: workflow_storage.WorkflowStorage, step_id: StepID,
-        input_map: Dict[StepID, Any]) -> Union[Workflow, StepID]:
+        input_map: Dict[StepID, Any],
+        actor_map: Dict[str, WorkflowActorBase]) -> Union[Workflow, StepID]:
     """Try to construct a workflow (step) that recovers the workflow step.
     If the workflow step already has an output checkpointing file, we return
     the workflow step id instead.
@@ -105,7 +150,7 @@ def _construct_resume_workflow_from_step(
         return step_id
     if isinstance(result.output_step_id, str):
         return _construct_resume_workflow_from_step(
-            reader, result.output_step_id, input_map)
+            reader, result.output_step_id, input_map, actor_map)
     # output does not exists or not valid. try to reconstruct it.
     if not result.is_recoverable():
         raise WorkflowStepNotRecoverableError(step_id)
@@ -113,7 +158,11 @@ def _construct_resume_workflow_from_step(
     step_options = result.step_options
     # Process the wait step as a special case.
     if step_options.step_type == StepType.WAIT:
-        return _reconstruct_wait_step(reader, result, input_map)
+        return _reconstruct_wait_step(reader, step_id, result, input_map,
+                                      actor_map)
+    elif step_options.step_type == StepType.PHYSICAL_ACTOR_METHOD:
+        return _reconstruct_workflow_actor_step(reader, step_id, result,
+                                                input_map, actor_map)
 
     with serialization.objectref_cache():
         input_workflows = []
@@ -124,7 +173,7 @@ def _construct_resume_workflow_from_step(
                 r = input_map[_step_id]
             else:
                 r = _construct_resume_workflow_from_step(
-                    reader, _step_id, input_map)
+                    reader, _step_id, input_map, actor_map)
                 input_map[_step_id] = r
             if isinstance(r, Workflow):
                 input_workflows.append(r)
@@ -134,8 +183,38 @@ def _construct_resume_workflow_from_step(
                 input_workflows.append(reader.load_step_output(r))
         workflow_refs = list(map(WorkflowRef, result.workflow_refs))
 
-        args, kwargs = reader.load_step_args(step_id, input_workflows,
-                                             workflow_refs)
+        # reconstruct workflow actor inputs
+        input_workflow_actors = []
+        for i, (actor_id, state_index) in enumerate(result.workflow_actors):
+            if actor_id in actor_map:
+                # TODO(suquark): In theory we should check if the actor
+                # state is consistent with the state recorded in the step.
+                # But it could be possible that some workflow actor step
+                # is scheduled before this step, so the actor state is
+                # already updated. So we just use the actor without
+                # checking its state.
+                #
+                # assert actor_map[actor_id].state_index() == state_index, (
+                #     f"Assertion failed when recovering step {step_id}. "
+                #     f"Expected state index = {state_index} for "
+                #     f"actor {actor_id}, but get "
+                #     f"{actor_map[actor_id].state_index()}")
+                print(f"[recovery] Use reconstructed actor {actor_id} "
+                      f"with state_index={actor_map[actor_id].state_index()} "
+                      f"for workflow step {step_id}.")
+            else:
+                print(f"[recovery] Reconstruct actor {actor_id} with "
+                      f"state_index={state_index} for workflow step "
+                      f"{step_id}.")
+                actor_map[actor_id] = _reconstruct_workflow_actor(
+                    reader, actor_id, state_index)
+            input_workflow_actors.append(actor_map[actor_id])
+
+        args, kwargs = reader.load_step_args(
+            step_id,
+            input_workflows,
+            workflow_refs,
+            workflow_actors=input_workflow_actors)
         recovery_workflow: Workflow = _recover_workflow_step.step(
             args, kwargs, input_workflows, workflow_refs)
         recovery_workflow._step_id = step_id
@@ -164,7 +243,7 @@ class ResumeWorkflowStepExecutor:
         try:
             store = storage.create_storage(store_url)
             wf_store = workflow_storage.WorkflowStorage(workflow_id, store)
-            r = _construct_resume_workflow_from_step(wf_store, step_id, {})
+            r = _construct_resume_workflow_from_step(wf_store, step_id, {}, {})
         except Exception as e:
             raise WorkflowNotResumableError(workflow_id) from e
 

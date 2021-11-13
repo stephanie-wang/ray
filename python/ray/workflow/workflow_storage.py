@@ -14,7 +14,7 @@ from ray._private import signature
 from ray.workflow import storage
 from ray.workflow.common import (
     Workflow, StepID, WorkflowMetaData, WorkflowStatus, WorkflowRef,
-    WorkflowNotFoundError, WorkflowStepRuntimeOptions)
+    WorkflowNotFoundError, WorkflowStepRuntimeOptions, WorkflowActorBase)
 from ray.workflow import workflow_context
 from ray.workflow import serialization
 from ray.workflow import serialization_context
@@ -49,6 +49,10 @@ WORKFLOW_PROGRESS = "progress.json"
 # many duplicates.
 DUPLICATE_NAME_COUNTER = "duplicate_name_counter"
 
+ACTORS_DIR = "actors"
+ACTOR_CONSTRUCTOR_ARGS = "constructor_args.pkl"
+STEP_ACTOR_METADATA = "actor.json"
+
 
 # TODO: Get rid of this and use asyncio.run instead once we don't support py36
 def asyncio_run(coro):
@@ -72,6 +76,8 @@ class StepInspectResult:
     workflows: Optional[List[str]] = None
     # The dynamically referenced workflows in the input of the workflow.
     workflow_refs: Optional[List[str]] = None
+    # The workflow actors used by the step (actor_id, state_index).
+    workflow_actors: Optional[List[Tuple[str, int]]] = None
     # The options of the workflow step.
     step_options: Optional[WorkflowStepRuntimeOptions] = None
     # step throw exception
@@ -192,9 +198,10 @@ class WorkflowStorage:
 
         return asyncio_run(_gen_step_id())
 
-    def load_step_args(
-            self, step_id: StepID, workflows: List[Any],
-            workflow_refs: List[WorkflowRef]) -> Tuple[List, Dict[str, Any]]:
+    def load_step_args(self, step_id: StepID, workflows: List[Any],
+                       workflow_refs: List[WorkflowRef],
+                       workflow_actors: List[WorkflowActorBase]
+                       ) -> Tuple[List, Dict[str, Any]]:
         """Load the input arguments of the workflow step. This must be
         done under a serialization context, otherwise the arguments would
         not be reconstructed successfully.
@@ -203,13 +210,13 @@ class WorkflowStorage:
             step_id: ID of the workflow step.
             workflows: The workflows in the original arguments,
                 replaced by the actual workflow outputs.
-            object_refs: The object refs in the original arguments.
-
+            workflow_refs: The workflow refs in the original arguments.
+            workflow_actors: The workflow actors in the original arguments.
         Returns:
             Args and kwargs.
         """
         with serialization_context.workflow_args_resolving_context(
-                workflows, workflow_refs):
+                workflows, workflow_refs, workflow_actors):
             flattened_args = asyncio_run(
                 self._get(self._key_step_args(step_id)))
             # dereference arguments like Ray remote functions
@@ -337,6 +344,7 @@ class WorkflowStorage:
                 func_body_valid=(STEP_FUNC_BODY in keys),
                 workflows=metadata["workflows"],
                 workflow_refs=metadata["workflow_refs"],
+                workflow_actors=metadata["workflow_actors"],
                 step_options=WorkflowStepRuntimeOptions.from_dict(
                     metadata["step_options"]),
                 step_raised_exception=(STEP_EXCEPTION in keys),
@@ -610,6 +618,25 @@ class WorkflowStorage:
         if not scan:
             raise WorkflowNotFoundError(self._workflow_id)
 
+    def save_physical_actor_class_body(self, actor_id, cls) -> None:
+        asyncio_run(self._put(self._key_actor_class_body(actor_id), cls))
+
+    def load_physical_actor_class_body(self, actor_id):
+        return asyncio_run(self._get(self._key_actor_class_body(actor_id)))
+
+    def save_physical_actor_state(self, actor_id, index, state) -> None:
+        asyncio_run(self._put(self._key_actor_state(actor_id, index), state))
+
+    def load_physical_actor_state(self, actor_id, index):
+        return asyncio_run(self._get(self._key_actor_state(actor_id, index)))
+
+    def save_step_actor_metadata(self, step_id: StepID, metadata) -> None:
+        asyncio_run(
+            self._put(self._key_step_actor_metadata(step_id), metadata, True))
+
+    def load_step_actor_metadata(self, step_id: StepID):
+        asyncio_run(self._get(self._key_step_actor_metadata(step_id), True))
+
     async def _put(self, paths: List[str], data: Any,
                    is_json: bool = False) -> str:
         """
@@ -731,6 +758,17 @@ class WorkflowStorage:
 
     def _key_num_steps_with_name(self, name):
         return [self._workflow_id, DUPLICATE_NAME_COUNTER, name]
+
+    def _key_actor_class_body(self, actor_id):
+        return [self._workflow_id, ACTORS_DIR, actor_id, CLASS_BODY]
+
+    def _key_actor_state(self, actor_id, state_index):
+        return [
+            self._workflow_id, ACTORS_DIR, actor_id, f"state_{state_index}.pkl"
+        ]
+
+    def _key_step_actor_metadata(self, step_id):
+        return [self._workflow_id, STEPS_DIR, step_id, STEP_ACTOR_METADATA]
 
 
 def get_workflow_storage(workflow_id: Optional[str] = None) -> WorkflowStorage:

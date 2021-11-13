@@ -5,7 +5,8 @@ import ray
 import ray.cloudpickle
 from ray.util.serialization import register_serializer, deregister_serializer
 
-from ray.workflow.common import (Workflow, WorkflowInputs, WorkflowRef)
+from ray.workflow.common import (Workflow, WorkflowInputs, WorkflowRef,
+                                 WorkflowActorBase)
 
 
 def _resolve_workflow_outputs(index: int) -> Any:
@@ -16,9 +17,14 @@ def _resolve_workflow_refs(index: int) -> Any:
     raise ValueError("There is no context for resolving workflow refs.")
 
 
+def _resolve_workflow_actors(index: int) -> Any:
+    raise ValueError("There is no context for resolving workflow actors.")
+
+
 @contextlib.contextmanager
 def workflow_args_serialization_context(
-        workflows: List[Workflow], workflow_refs: List[WorkflowRef]) -> None:
+        workflows: List[Workflow], workflow_refs: List[WorkflowRef],
+        actors: List[WorkflowActorBase]) -> None:
     """
     This serialization context reduces workflow input arguments to three
     parts:
@@ -46,8 +52,10 @@ def workflow_args_serialization_context(
         workflows: Workflow list output.
         workflow_refs: Workflow reference output list.
     """
+    from ray.workflow.workflow_actor import WorkflowActor
     workflow_deduplicator: Dict[Workflow, int] = {}
     workflowref_deduplicator: Dict[WorkflowRef, int] = {}
+    actor_deduplicator: Dict[WorkflowActor, int] = {}
 
     def workflow_serializer(workflow):
         if workflow in workflow_deduplicator:
@@ -75,17 +83,32 @@ def workflow_args_serialization_context(
         serializer=workflow_ref_serializer,
         deserializer=_resolve_workflow_refs)
 
+    def workflow_actor_serializer(actor):
+        if actor in actor_deduplicator:
+            return actor_deduplicator[actor]
+        i = len(actor_deduplicator)
+        actors.append(actor)
+        actor_deduplicator[actor] = i
+        return i
+
+    register_serializer(
+        WorkflowActor,
+        serializer=workflow_actor_serializer,
+        deserializer=_resolve_workflow_actors)
+
     try:
         yield
     finally:
         # we do not want to serialize Workflow objects in other places.
         deregister_serializer(Workflow)
         deregister_serializer(WorkflowRef)
+        deregister_serializer(WorkflowActor)
 
 
 @contextlib.contextmanager
 def workflow_args_resolving_context(workflow_output_mapping: List[Any],
-                                    workflow_ref_mapping: List[Any]) -> None:
+                                    workflow_ref_mapping: List[Any],
+                                    workflow_actor_mapping: List[Any]) -> None:
     """
     This context resolves workflows and objectrefs inside workflow
     arguments into correct values.
@@ -96,17 +119,21 @@ def workflow_args_resolving_context(workflow_output_mapping: List[Any],
     """
     global _resolve_workflow_outputs
     global _resolve_workflow_refs
+    global _resolve_workflow_actors
     _resolve_workflow_outputs_bak = _resolve_workflow_outputs
     _resolve_workflow_refs_bak = _resolve_workflow_refs
+    _resolve_workflow_actors_bak = _resolve_workflow_actors
 
     _resolve_workflow_outputs = workflow_output_mapping.__getitem__
     _resolve_workflow_refs = workflow_ref_mapping.__getitem__
+    _resolve_workflow_actors = workflow_actor_mapping.__getitem__
 
     try:
         yield
     finally:
         _resolve_workflow_outputs = _resolve_workflow_outputs_bak
         _resolve_workflow_refs = _resolve_workflow_refs_bak
+        _resolve_workflow_actors = _resolve_workflow_actors_bak
 
 
 class _KeepWorkflowOutputs:
@@ -125,6 +152,14 @@ class _KeepWorkflowRefs:
         return _resolve_workflow_refs, (self._index, )
 
 
+class _KeepWorkflowActors:
+    def __init__(self, index: int):
+        self._index = index
+
+    def __reduce__(self):
+        return _resolve_workflow_actors, (self._index, )
+
+
 @contextlib.contextmanager
 def workflow_args_keeping_context() -> None:
     """
@@ -133,8 +168,10 @@ def workflow_args_keeping_context() -> None:
     """
     global _resolve_workflow_outputs
     global _resolve_workflow_refs
+    global _resolve_workflow_actors
     _resolve_workflow_outputs_bak = _resolve_workflow_outputs
     _resolve_workflow_refs_bak = _resolve_workflow_refs
+    _resolve_workflow_actors_bak = _resolve_workflow_actors
 
     # we must capture the old functions to prevent self-referencing.
     def _keep_workflow_outputs(index: int):
@@ -143,20 +180,26 @@ def workflow_args_keeping_context() -> None:
     def _keep_workflow_refs(index: int):
         return _KeepWorkflowRefs(index)
 
+    def _keep_workflow_actors(index: int):
+        return _KeepWorkflowActors(index)
+
     _resolve_workflow_outputs = _keep_workflow_outputs
     _resolve_workflow_refs = _keep_workflow_refs
+    _resolve_workflow_actors = _keep_workflow_actors
 
     try:
         yield
     finally:
         _resolve_workflow_outputs = _resolve_workflow_outputs_bak
         _resolve_workflow_refs = _resolve_workflow_refs_bak
+        _resolve_workflow_actors = _resolve_workflow_actors_bak
 
 
 def make_workflow_inputs(args_list: List[Any]) -> WorkflowInputs:
     workflows: List[Workflow] = []
     workflow_refs: List[WorkflowRef] = []
-    with workflow_args_serialization_context(workflows, workflow_refs):
+    actors: List[WorkflowActorBase] = []
+    with workflow_args_serialization_context(workflows, workflow_refs, actors):
         # NOTE: When calling 'ray.put', we trigger python object
         # serialization. Under our serialization context,
         # Workflows are separated from the arguments,
@@ -166,4 +209,4 @@ def make_workflow_inputs(args_list: List[Any]) -> WorkflowInputs:
         # semantics. See "tests/test_variable_mutable.py" as
         # an example.
         input_placeholder: ray.ObjectRef = ray.put(args_list)
-    return WorkflowInputs(input_placeholder, workflows, workflow_refs)
+    return WorkflowInputs(input_placeholder, workflows, workflow_refs, actors)

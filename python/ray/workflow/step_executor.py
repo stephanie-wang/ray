@@ -29,7 +29,8 @@ from ray.workflow.common import (
 )
 
 if TYPE_CHECKING:
-    from ray.workflow.common import (WorkflowRef, WorkflowStepRuntimeOptions)
+    from ray.workflow.common import (WorkflowRef, WorkflowStepRuntimeOptions,
+                                     WorkflowActorBase)
     from ray.workflow.workflow_context import WorkflowStepContext
 
 WaitResult = Tuple[List[Any], List[Workflow]]
@@ -127,11 +128,29 @@ def _execute_workflow(workflow: "Workflow") -> "WorkflowExecutionResult":
     baked_inputs = _BakedWorkflowInputs(
         args=workflow_data.inputs.args,
         workflow_outputs=workflow_outputs,
-        workflow_refs=inputs.workflow_refs)
+        workflow_refs=inputs.workflow_refs,
+        workflow_actors=inputs.workflow_actors,
+    )
 
     # Stage 2: match executors
     step_options = workflow_data.step_options
-    if step_options.allow_inplace:
+    if step_options.step_type == StepType.PHYSICAL_ACTOR_METHOD:
+        workflow_actor = workflow._workflow_actor
+        actor_options = step_options.ray_options["workflow_actor_options"]
+        actor_method = getattr(workflow_actor.ray_actor_handle(),
+                               actor_options["actor_method_name"])
+
+        def _executor(actor_id, state_index, *args, **kwargs):
+            output, _ = actor_method.options(num_returns=2).remote(
+                actor_id, state_index, *args, **kwargs)
+            workflow_actor._state_index += 1
+            # TODO(suquark): inject checkpointing
+            return output, None  # workflow._workflow_actor
+
+        executor = functools.partial(_executor, workflow_actor.actor_id(),
+                                     workflow_actor.state_index() + 1)
+
+    elif step_options.allow_inplace:
         # TODO(suquark): For inplace execution, it is impossible
         # to get the ObjectRef of the output before execution.
         # Here we use a dummy ObjectRef, because _record_step_status does not
@@ -376,7 +395,7 @@ def _wrap_run(func: Callable, runtime_options: "WorkflowStepRuntimeOptions",
                                     status)
                 logger.info(get_step_status_info(status))
             raise exception
-        if step_type == StepType.FUNCTION:
+        if step_type in (StepType.FUNCTION, StepType.PHYSICAL_ACTOR_METHOD):
             persisted_output, volatile_output = result, None
         elif step_type == StepType.ACTOR_METHOD:
             persisted_output, volatile_output = result
@@ -547,6 +566,7 @@ class _BakedWorkflowInputs:
     args: "ObjectRef"
     workflow_outputs: "List[WorkflowStaticRef]"
     workflow_refs: "List[WorkflowRef]"
+    workflow_actors: "List[WorkflowActorBase]"
 
     def resolve(self) -> Tuple[List, Dict]:
         """
@@ -574,7 +594,7 @@ class _BakedWorkflowInputs:
             self.workflow_refs)
 
         with serialization_context.workflow_args_resolving_context(
-                objects_mapping, workflow_ref_mapping):
+                objects_mapping, workflow_ref_mapping, self.workflow_actors):
             # reconstruct input arguments under correct serialization context
             flattened_args: List[Any] = ray.get(self.args)
 
@@ -614,7 +634,7 @@ class _BakedWorkflowInputs:
 
     def __reduce__(self):
         return _BakedWorkflowInputs, (self.args, self.workflow_outputs,
-                                      self.workflow_refs)
+                                      self.workflow_refs, self.workflow_actors)
 
 
 def _record_step_status(step_id: "StepID",

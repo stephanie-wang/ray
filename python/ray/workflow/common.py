@@ -1,3 +1,4 @@
+import abc
 import base64
 from ray import cloudpickle
 from collections import deque
@@ -123,6 +124,7 @@ class StepType(str, Enum):
     ACTOR_METHOD = "ACTOR_METHOD"
     READONLY_ACTOR_METHOD = "READONLY_ACTOR_METHOD"
     WAIT = "WAIT"
+    PHYSICAL_ACTOR_METHOD = "PHYSICAL_ACTOR_METHOD"
 
 
 @dataclass
@@ -134,6 +136,8 @@ class WorkflowInputs:
     workflows: "List[Workflow]"
     # The dynamic refs of workflows in the arguments.
     workflow_refs: List[WorkflowRef]
+    # The workflow actors.
+    workflow_actors: "List[WorkflowActorBase]"
 
 
 @ray.remote
@@ -244,6 +248,8 @@ class WorkflowData:
             "name": get_module(f) + "." + get_qualname(f),
             "workflows": [w.step_id for w in self.inputs.workflows],
             "workflow_refs": [wr.step_id for wr in self.inputs.workflow_refs],
+            "workflow_actors": [(a.actor_id(), a.state_index())
+                                for a in self.inputs.workflow_actors],
             "step_options": self.step_options.to_dict(),
             "user_metadata": self.user_metadata,
         }
@@ -379,7 +385,8 @@ class Workflow(Generic[T]):
 
     @classmethod
     def from_ref(cls, workflow_ref: WorkflowStaticRef) -> "Workflow":
-        inputs = WorkflowInputs(args=None, workflows=[], workflow_refs=[])
+        inputs = WorkflowInputs(
+            args=None, workflows=[], workflow_refs=[], workflow_actors=[])
         data = WorkflowData(
             func_body=None,
             inputs=inputs,
@@ -502,3 +509,17 @@ class WorkflowRunningError(Exception):
         self.message = f"{operation} couldn't be completed becasue " \
                        f"Workflow[id={workflow_id}] is still running."
         super().__init__(self.message)
+
+
+class WorkflowActorBase(metaclass=abc.ABCMeta):
+    @abc.abstractmethod
+    def ray_actor_handle(self) -> "ray.actor.ActorHandle":
+        """Get the raw actor handler."""
+
+    @abc.abstractmethod
+    def actor_id(self) -> str:
+        """The actor ID of the actor."""
+
+    @abc.abstractmethod
+    def state_index(self) -> int:
+        """The index of the actor state."""
