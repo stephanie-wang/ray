@@ -15,20 +15,25 @@ struct Priority {
  public:
   Priority() : Priority(0) {}
 
-  Priority(int64_t depth) {
+  Priority(uint64_t depth) {
     extend(depth + 1);
   }
 
   Priority(const std::vector<int> &s) : score(s) {}
 
-  void extend(int64_t size) const;
+  void extend(uint64_t size) const;
 
   void SetFromParentPriority(Priority &parent, int);
 
   bool operator==(const Priority &rhs) const {
-    rhs.extend(score.size());
-    extend(rhs.score.size());
-    return score == rhs.score;
+    size_t r = rhs.score.size();
+    size_t l = score.size();
+	
+	if(l == r){
+      return score == rhs.score;
+	}else{
+		return false;
+	}
   }
 
   bool operator!=(const Priority &rhs) const {

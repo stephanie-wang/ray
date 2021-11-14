@@ -22,6 +22,7 @@
 
 namespace ray {
 
+  /*
 TEST(TaskPriorityTest, TestEquals) {
   Priority priority1({1, 2, 3});
   Priority priority2({1, 2, 3});
@@ -150,7 +151,33 @@ TEST(TaskPriorityTest, TestDataStructures) {
   ASSERT_TRUE(task_key_hash_set.count(vec[2]));
   ASSERT_FALSE(task_key_hash_set.count(TaskKey(p4, ObjectID::FromRandom().TaskId())));
 }
+  */
 
+TEST(TaskPriorityTest, TestDataStructuresSet) {
+  Priority p1({1, 2, 3});
+  Priority p2({1, 2});
+  Priority p3({1, 3, 5});
+
+  std::vector<std::pair<Priority, TaskID>> vec = {
+    std::make_pair(p1, ObjectID::FromRandom().TaskId()),
+    std::make_pair(p2, ObjectID::FromRandom().TaskId()),
+    std::make_pair(p3, ObjectID::FromRandom().TaskId())
+  };
+
+  absl::btree_set<TaskKey> set;
+  for (auto &p : vec) {
+    ASSERT_TRUE(set.emplace(p).second);
+    ASSERT_TRUE(set.find(p) != set.end());
+  }
+  {
+    auto it = set.begin();
+    for (int i = 0; i < 3; i++) {
+      //ASSERT_EQ(*it, vec[i]);
+	  RAY_LOG(INFO) << it->first.score;
+      it++;
+    }
+  }
+}
 }  // namespace ray
 
 int main(int argc, char **argv) {
