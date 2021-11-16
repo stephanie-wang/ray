@@ -265,16 +265,7 @@ void ReferenceCounter::RemoveLocalReference(const ObjectID &object_id,
 Priority& ReferenceCounter::GetObjectPriority(const ObjectID &object_id){
   absl::MutexLock lock(&mutex_);
   auto it = object_id_priority_.find(object_id);
-  if (it == object_id_priority_.end()) {
-    // This happens if a large argument is transparently passed by reference
-    // because we don't hold a Python reference to its ObjectID.
- // When an object is made with Put() Priority is not set. Should to this Jae
-  /*
-    Priority pri = Priority();
-    return pri;
-    it = object_id_priority_.emplace(object_id, Priority()).first;
-	*/
-  }
+  RAY_CHECK(it != object_id_priority_.end()) << "Object priority not found " << object_id;
   return it->second;
 }
 
