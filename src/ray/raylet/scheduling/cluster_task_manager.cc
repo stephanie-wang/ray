@@ -1219,10 +1219,6 @@ void ClusterTaskManager::BlockTasks(Priority base_priority) {
   block_requested_priority_ = base_priority;
 }
 
-void ClusterTaskManager::StopBlockTasks() {
-  block_requested_priority_ = Priority();
-}
-
 void ClusterTaskManager::ScheduleAndDispatchTasks() {
   SchedulePendingTasks();
   DispatchScheduledTasksToWorkers(worker_pool_, leased_workers_);

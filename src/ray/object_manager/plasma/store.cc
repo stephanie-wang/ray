@@ -74,8 +74,7 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, IAllocator &allo
                          std::function<void()> object_store_full_callback,
                          ray::AddObjectCallback add_object_callback,
                          ray::DeleteObjectCallback delete_object_callback,
-                         ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback,
-                         ray::StopObjectCreationBlockCallback on_stop_object_creation_block_callback)
+                         ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback)
     : io_context_(main_service),
       socket_name_(socket_name),
       acceptor_(main_service, ParseUrlEndpoint(socket_name)),
@@ -83,7 +82,7 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, IAllocator &allo
       allocator_(allocator),
       add_object_callback_(add_object_callback),
       delete_object_callback_(delete_object_callback),
-      object_lifecycle_mgr_(allocator_, delete_object_callback_, on_stop_object_creation_block_callback),
+      object_lifecycle_mgr_(allocator_, delete_object_callback_),
       delay_on_oom_ms_(delay_on_oom_ms),
       object_spilling_threshold_(object_spilling_threshold),
       create_request_queue_(

@@ -107,9 +107,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   //Preempt currently running tasks with a lower priority
   //Block new tasks from being scheduled with this priority
-  bool EvictTasks(Priority) override;
   void BlockTasks(Priority) override;
-  void StopBlockTasks() override;
+  bool EvictTasks(Priority) override;
 
   /// (Step 1) Queue tasks and schedule.
   /// Queue task and schedule. This hanppens when processing the worker lease request.
