@@ -1213,7 +1213,9 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
     Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
     //Smaller priority have higher priority
     //Does not have less than check it
-    if (priority >= base_priority){
+    if (priority > block_requested_priority_){
+      RAY_LOG(INFO) << "Preempting task " << worker->GetAssignedTask().GetTaskSpecification().TaskId() << " on worker " << worker->WorkerId()
+        << ", priority " << priority << ", current blocked priority: " << block_requested_priority_;
       workers_to_kill.push_back(worker);
       should_spill = false;
     }

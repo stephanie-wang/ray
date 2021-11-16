@@ -63,5 +63,9 @@ def test_ray_pipeline():
 
     return ray_pipeline_end - ray_pipeline_begin
 
-ray.init(object_store_memory=OBJECT_STORE_SIZE)
+ray.init(object_store_memory=OBJECT_STORE_SIZE,
+        _system_config={
+            "worker_lease_timeout_milliseconds": 0,
+            "task_retry_delay_ms": 0,
+            })
 print(test_ray_pipeline())

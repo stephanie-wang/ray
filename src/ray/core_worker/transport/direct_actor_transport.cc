@@ -507,6 +507,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
 
         // The object is nullptr if it already existed in the object store.
         const auto &result = return_objects[i];
+        RAY_CHECK(result) << "No return object " << id;
         return_object->set_size(result->GetSize());
         if (result->GetData() != nullptr && result->GetData()->IsPlasmaBuffer()) {
           return_object->set_in_plasma(true);
