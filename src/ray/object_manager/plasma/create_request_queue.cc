@@ -173,11 +173,9 @@ Status CreateRequestQueue::ProcessRequests() {
         oom_start_time_ns_ = now;
       }
 
-      //bool wait = on_object_creation_blocked_callback_(queue_it->first.first);
-      //if (wait) {
+      // Notify the scheduler that object creation is blocked at this priority.
       on_object_creation_blocked_callback_(queue_it->first.first);
-	  if(!should_spill_){
-		  //TODO(Jae actually call BlockTasks)
+      if (!should_spill_) {
         RAY_LOG(INFO) << "Object creation of priority " << queue_it->first.first << " blocked";
         return Status::TransientObjectStoreFull("Waiting for higher priority tasks to finish");
       }

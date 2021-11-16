@@ -41,7 +41,7 @@ ClusterTaskManager::ClusterTaskManager(
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
     size_t max_pinned_task_arguments_bytes,
-	SetShouldSpillCallback set_should_spill)
+    SetShouldSpillCallback set_should_spill)
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),

@@ -215,7 +215,7 @@ class CreateRequestQueue {
 
   size_t num_bytes_pending_ = 0;
 
-  //Shared between the object store thread and the scheduler thread.
+  // Shared between the object store thread and the scheduler thread.
   bool should_spill_ = false;
 
   friend class CreateRequestQueueTest;

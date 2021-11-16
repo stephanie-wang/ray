@@ -105,9 +105,9 @@ class PlasmaStore {
     callback(available);
   }
 
-  void SetShouldSpill(bool should_spill){
-	  absl::MutexLock lock(&mutex_);
-	  return create_request_queue_.SetShouldSpill(should_spill);
+  void SetShouldSpill(bool should_spill) {
+    absl::MutexLock lock(&mutex_);
+    return create_request_queue_.SetShouldSpill(should_spill);
   }
 
  private:

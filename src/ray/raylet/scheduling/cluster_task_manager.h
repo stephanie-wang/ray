@@ -359,6 +359,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   uint64_t metric_tasks_spilled_;
 
   const SetShouldSpillCallback set_should_spill_;
+
   /// Determine whether a task should be immediately dispatched,
   /// or placed on a wait queue.
   ///

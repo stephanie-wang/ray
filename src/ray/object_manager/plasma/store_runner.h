@@ -32,8 +32,8 @@ class PlasmaStoreRunner {
                        "PlasmaStoreRunner.GetAvailableMemory");
   }
 
-  void SetShouldSpill(bool should_spill){
-	  store_->SetShouldSpill(should_spill);
+  void SetShouldSpill(bool should_spill) {
+    store_->SetShouldSpill(should_spill);
   }
 
  private:
