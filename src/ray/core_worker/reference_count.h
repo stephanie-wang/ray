@@ -476,9 +476,6 @@ class ReferenceCounter : public ReferenceCounterInterface,
       LOCKS_EXCLUDED(mutex_);
 
  private:
-  // TODO: Add priority to the Reference struct.
-  // TODO: Track how many tasks have been submitted so far that depend on an
-  // object, use for DFS-based priority calculation.
   struct Reference {
     /// Constructor for a reference whose origin is unknown.
     Reference() {}

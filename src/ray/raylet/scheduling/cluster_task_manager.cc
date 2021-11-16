@@ -78,8 +78,9 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // tasks from being scheduled.
       Priority task_priority = work_it->first.first;
       if(task_priority >= block_requested_priority_){
-		return did_schedule;
+        return did_schedule;
       }
+
       const std::shared_ptr<Work> &work = work_it->second;
       RayTask task = work->task;
       RAY_LOG(DEBUG) << "Scheduling pending task "
@@ -293,6 +294,13 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
         work_it++;
         continue;
       }
+
+      // Block tasks of a lower priority.
+      Priority task_priority = work_it->first.first;
+      if(task_priority >= block_requested_priority_){
+        break;
+      }
+
 
       bool args_missing = false;
       bool success = PinTaskArgsIfMemoryAvailable(spec, &args_missing);
@@ -1199,17 +1207,23 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {
   bool should_spill = true;
+  std::vector<std::shared_ptr<WorkerInterface>> workers_to_kill;
   for (auto &entry : leased_workers_) {
     std::shared_ptr<WorkerInterface> worker = entry.second;
     Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
     //Smaller priority have higher priority
     //Does not have less than check it
-    if(priority >= base_priority){
-      //Consider Using CancelTask instead of DestroyWorker
-      destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
-	  should_spill = false;
+    if (priority >= base_priority){
+      workers_to_kill.push_back(worker);
+      should_spill = false;
     }
   }
+
+  for (auto &worker : workers_to_kill) {
+    //Consider Using CancelTask instead of DestroyWorker
+    destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
+  }
+
   //Check Deadlock corner cases
   //Finer granularity preemption is not considered, kill all the lower priorities
   return should_spill;
