@@ -81,7 +81,7 @@ Status CoreWorkerDirectTaskSubmitter::SubmitTask(TaskSpecification task_spec) {
         const auto task_key = inserted.first->second.task_key;
         auto &scheduling_key_entry = scheduling_key_entries_[scheduling_key];
         RAY_CHECK(scheduling_key_entry.task_priority_queue.emplace(task_key).second) << task_spec.TaskId();
-        RAY_LOG(DEBUG) << "Placed task " << task_key.second << " " << task_key.first
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] Placed task " << task_key.second << " " << task_key.first
                        << " queue size is now " << scheduling_key_entry.task_priority_queue.size();
         scheduling_key_entry.resource_spec = task_spec;
 
@@ -342,7 +342,9 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
     RAY_CHECK(scheduling_key_entry.active_workers.size() >= 1);
 
     // Return the worker only if there are no tasks in flight
+	RAY_LOG(DEBUG)<<"[JAE_DEBUG][OnWorkerIdle] was_error";
     if (lease_entry.tasks_in_flight == 0) {
+	RAY_LOG(DEBUG)<<"[JAE_DEBUG][OnWorkerIdle] calling StealTasksOrRetunWorker()";
       StealTasksOrReturnWorker(addr, was_error, scheduling_key, assigned_resources);
     }
   } else {
@@ -374,6 +376,7 @@ void CoreWorkerDirectTaskSubmitter::OnWorkerIdle(
       CancelWorkerLeaseIfNeeded(scheduling_key);
     }
   }
+  RAY_LOG(DEBUG)<<"[JAE_DEBUG][OnWorkerIdle] Request new worker";
   RequestNewWorkerIfNeeded(scheduling_key);
 }
 
@@ -648,10 +651,11 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
             // need to do anything here.
             return;
           } else if (!status.ok() || !is_actor_creation) {
-            RAY_LOG(DEBUG) << "Task failed with error: " << status;
+            RAY_LOG(DEBUG) << "[JAE_DEBUG] calling OnWorkerIdle Task failed with error: " << status;
             // Successful actor creation leases the worker indefinitely from the raylet.
             OnWorkerIdle(addr, scheduling_key,
                          /*error=*/!status.ok(), assigned_resources);
+            RAY_LOG(DEBUG) << "[JAE_DEBUG] OnWorkerIdle finished ";
           }
         }
 
@@ -660,6 +664,7 @@ void CoreWorkerDirectTaskSubmitter::PushNormalTask(
           // failure (e.g., by contacting the raylet). If it was a process
           // failure, it may have been an application-level error and it may
           // not make sense to retry the task.
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] PendingTaskFailed";
           RAY_UNUSED(task_finisher_->PendingTaskFailed(
               task_id,
               is_actor ? rpc::ErrorType::ACTOR_DIED : rpc::ErrorType::WORKER_DIED,

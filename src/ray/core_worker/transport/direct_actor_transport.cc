@@ -459,6 +459,7 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     return;
   }
 
+
   if (task_spec.IsActorCreationTask()) {
     SetMaxActorConcurrency(task_spec.IsAsyncioActor(), task_spec.MaxActorConcurrency());
   }
@@ -500,13 +501,17 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
 
     bool objects_valid = return_objects.size() == num_returns;
     if (objects_valid) {
+  RAY_LOG(DEBUG) << "SEGV Find before for size is " << return_objects.size();
       for (size_t i = 0; i < return_objects.size(); i++) {
         auto return_object = reply->add_return_objects();
         ObjectID id = ObjectID::FromIndex(task_spec.TaskId(), /*index=*/i + 1);
         return_object->set_object_id(id.Binary());
 
         // The object is nullptr if it already existed in the object store.
+  RAY_LOG(DEBUG) << "SEGV Find inside for size is " << return_objects.size();
         const auto &result = return_objects[i];
+  RAY_LOG(DEBUG) << "SEGV Find result is " << result<<"!!";
+  RAY_LOG(DEBUG) << "SEGV Find result size is " << result->GetSize();
         return_object->set_size(result->GetSize());
         if (result->GetData() != nullptr && result->GetData()->IsPlasmaBuffer()) {
           return_object->set_in_plasma(true);

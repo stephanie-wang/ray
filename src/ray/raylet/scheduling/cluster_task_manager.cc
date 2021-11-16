@@ -1199,15 +1199,17 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {
   bool should_spill = true;
-  for (auto &entry : leased_workers_) {
+  auto leased_worker_copy = leased_workers_;
+  for (auto &entry : leased_worker_copy) {
     std::shared_ptr<WorkerInterface> worker = entry.second;
     Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
     //Smaller priority have higher priority
     //Does not have less than check it
     if(priority >= base_priority){
       //Consider Using CancelTask instead of DestroyWorker
-      destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
+	  RAY_LOG(DEBUG) << "[JAE_DEBUG] EvictTasks called on priority "<<base_priority.score <<" destroying worker "<<worker->WorkerId()<< " with pirority "<<priority.score;
 	  should_spill = false;
+      destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
     }
   }
   //Check Deadlock corner cases
@@ -1216,6 +1218,7 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
 }
 
 void ClusterTaskManager::BlockTasks(Priority base_priority) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] BlockTasks called on priority "<<base_priority.score;
   block_requested_priority_ = base_priority;
 }
 
