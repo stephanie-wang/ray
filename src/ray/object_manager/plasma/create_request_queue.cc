@@ -185,6 +185,7 @@ Status CreateRequestQueue::ProcessRequests() {
       }
 
 	  if(RayConfig::instance().call_EvictTasks() && evict_tasks_required){
+   	    on_object_creation_blocked_callback_(queue_it->first.first);
    	    on_object_evict_callback_(queue_it->first.first);
 	    if(!should_spill_){
 	  	  //TODO(Jae) actually call BlockTasks
