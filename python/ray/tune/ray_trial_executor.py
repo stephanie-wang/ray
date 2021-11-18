@@ -100,7 +100,7 @@ class _TrialCleanup:
     def __init__(self,
                  threshold: int = TRIAL_CLEANUP_THRESHOLD,
                  force_cleanup: int = 0):
-        self.threshold = threshold
+        self.threshold = 0
         self._cleanup_map = {}
         if force_cleanup < 0:
             force_cleanup = 0
@@ -136,6 +136,7 @@ class _TrialCleanup:
         # self._cleanup_map (forceful termination case) will cause Ray
         # to kill the actors during garbage collection.
         logger.debug("Cleaning up futures")
+        print("Cleaning up futures")
         num_to_keep = int(self.threshold) / 2 if partial else 0
         while len(self._cleanup_map) > num_to_keep:
             dones, _ = ray.wait(
@@ -143,6 +144,7 @@ class _TrialCleanup:
                 timeout=DEFAULT_GET_TIMEOUT
                 if not self._force_cleanup else self._force_cleanup)
             if not dones:
+                print("XXX")
                 logger.warning(
                     "Skipping cleanup - trainable.stop did not return in "
                     "time. Consider making `stop` a faster operation.")
@@ -152,6 +154,7 @@ class _TrialCleanup:
                     self._cleanup_map = {}
                     return
             else:
+                print("YYY")
                 done = dones[0]
                 del self._cleanup_map[done]
 
@@ -549,6 +552,7 @@ class RayTrialExecutor(TrialExecutor):
                         and (len(self._cached_actor_pg) <
                              (self._cached_actor_pg.maxlen or float("inf")))):
                     logger.debug("Reusing actor for %s", trial.runner)
+                    print(f"Reusing actor for {trial.runner}")
                     # Move PG into cache (disassociate from trial)
                     pg = self._pg_manager.cache_trial_pg(trial)
                     if pg:
@@ -566,6 +570,7 @@ class RayTrialExecutor(TrialExecutor):
                         should_destroy_actor = True
                 else:
                     should_destroy_actor = True
+                print(f"Should destroy actor? {should_destroy_actor} {trial}")
 
                 if should_destroy_actor:
                     logger.debug("Trial %s: Destroying actor.", trial)

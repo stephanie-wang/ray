@@ -170,13 +170,14 @@ async def dump_to_storage(paths: List[str],
     # table which is shared with `ray.put`. See
     # https://github.com/cloudpipe/cloudpickle/issues/437
     class ObjectRefPickler(cloudpickle.CloudPickler):
-        _object_ref_reducer = {
-            ray.ObjectRef: lambda ref: _reduce_objectref(
-                workflow_id, storage, ref, tasks)
-        }
-        dispatch_table = ChainMap(_object_ref_reducer,
-                                  cloudpickle.CloudPickler.dispatch_table)
-        dispatch = dispatch_table
+        #_object_ref_reducer = {
+        #    ray.ObjectRef: lambda ref: _reduce_objectref(
+        #        workflow_id, storage, ref, tasks)
+        #}
+        #dispatch_table = ChainMap(_object_ref_reducer,
+        #                          cloudpickle.CloudPickler.dispatch_table)
+        #dispatch = dispatch_table
+        pass
 
     key = storage.make_key(*paths)
 

@@ -159,6 +159,7 @@ def execute_workflow(workflow: "Workflow") -> "WorkflowExecutionResult":
                                 [volatile_output])
 
     result = WorkflowExecutionResult(persisted_output, volatile_output)
+    # TODO(swang): Should we skip this?
     workflow._result = result
     workflow._executed = True
     return result
@@ -201,6 +202,9 @@ def commit_step(store: workflow_storage.WorkflowStorage, step_id: "StepID",
         exception: The exception caught by the step.
     """
     from ray.workflow.common import Workflow
+    if step_id:
+        return
+
     if isinstance(ret, Workflow):
         assert not ret.executed
         tasks = [
