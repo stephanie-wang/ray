@@ -11,11 +11,11 @@ from time import perf_counter
 ## Argument Parse ##
 ####################
 parser = argparse.ArgumentParser()
-parser.add_argument('--WORKING_SET_RATIO', '-w', type=int, default=1)
+parser.add_argument('--WORKING_SET_RATIO', '-w', type=int, default=2)
 parser.add_argument('--OBJECT_STORE_SIZE', '-o', type=int, default=1_000_000_000)
 parser.add_argument('--OBJECT_SIZE', '-os', type=int, default=100_000_000)
 parser.add_argument('--NUM_STAGES', '-ns', type=int, default=1)
-parser.add_argument('--NUM_TRIAL', '-t', type=int, default=5)
+parser.add_argument('--NUM_TRIAL', '-t', type=int, default=1)
 args = parser.parse_args()
 params = vars(args)
 
@@ -52,10 +52,7 @@ def test_ray_pipeline():
             refs[stage].append(consumer.remote(r))
     '''
     del produced_objs
-    #ray.get(refs[-1])
-    for r in refs[0]:
-        print(r)
-        ray.get(r)
+    ray.get(refs[-1])
     '''
     for ref in refs:
         for r in ref:
@@ -99,10 +96,8 @@ def test_baseline_pipeline():
 ray.init(object_store_memory=OBJECT_STORE_SIZE)
 
 ray_time = []
-base_time = []
 for i in range(NUM_TRIAL):
     ray_time.append(test_ray_pipeline())
-    print('===========================================================')
 
 
 print(f"Ray Pipieline time: {sum(ray_time)/NUM_TRIAL}")
