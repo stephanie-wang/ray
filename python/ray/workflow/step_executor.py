@@ -279,6 +279,8 @@ def commit_step(store: workflow_storage.WorkflowStorage, step_id: "StepID",
         ret: The returned object of the workflow step.
         exception: The exception caught by the step.
     """
+    if step_id:
+        return
     from ray.workflow.common import Workflow
     if isinstance(ret, Workflow):
         assert not ret.executed

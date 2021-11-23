@@ -142,6 +142,18 @@ class PlacementGroup:
         if not self.bundle_cache:
             self.bundle_cache = _get_bundle_cache(self.id)
 
+    def __eq__(self, other):
+        return isinstance(
+            other, PlacementGroup
+        ) and self.id == other.id and self.bundle_cache == other.bundle_cache
+
+    def __hash__(self):
+        # TODO: also include bundle cache
+        return hash(self.id)
+
+    def __reduce__(self):
+        return PlacementGroup.from_dict, (self.to_dict(), )
+
 
 @client_mode_wrap
 def _call_placement_group_ready(pg_id: PlacementGroupID,
