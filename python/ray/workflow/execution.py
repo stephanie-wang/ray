@@ -21,12 +21,16 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+from ray.workflow import step_executor
+
 
 def run(entry_workflow: Workflow,
         workflow_id: Optional[str] = None,
         metadata: Optional[Dict] = None) -> ray.ObjectRef:
     """Run a workflow asynchronously.
     """
+    if isinstance(entry_workflow, step_executor._WorkflowHolder):
+        entry_workflow = entry_workflow.extract()
     if metadata is not None:
         if not isinstance(metadata, dict):
             raise ValueError("metadata must be a dict.")
@@ -71,15 +75,21 @@ def run(entry_workflow: Workflow,
         # TODO (yic): follow up with force rerun
         if is_growing or not wf_exists:
             commit_step(ws, "", entry_workflow, exception=None)
-        workflow_manager = get_or_create_management_actor()
-        ignore_existing = is_growing
-        # NOTE: It is important to 'ray.get' the returned output. This
-        # ensures caller of 'run()' holds the reference to the workflow
-        # result. Otherwise if the actor removes the reference of the
-        # workflow output, the caller may fail to resolve the result.
-        result: "WorkflowExecutionResult" = ray.get(
-            workflow_manager.run_or_resume.remote(workflow_id,
-                                                  ignore_existing))
+
+        if entry_workflow.data.step_options.allow_inplace:
+            wf = step_executor._WorkflowHolder(entry_workflow)
+            del entry_workflow
+            result = step_executor.execute_workflow(wf)
+        else:
+            workflow_manager = get_or_create_management_actor()
+            ignore_existing = is_growing
+            # NOTE: It is important to 'ray.get' the returned output. This
+            # ensures caller of 'run()' holds the reference to the workflow
+            # result. Otherwise if the actor removes the reference of the
+            # workflow output, the caller may fail to resolve the result.
+            result: "WorkflowExecutionResult" = ray.get(
+                workflow_manager.run_or_resume.remote(workflow_id,
+                                                      ignore_existing))
         if not is_growing:
             return flatten_workflow_output(workflow_id,
                                            result.persisted_output)
