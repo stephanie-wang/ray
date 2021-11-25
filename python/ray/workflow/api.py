@@ -484,7 +484,8 @@ WaitResult = Tuple[List[Any], List[Workflow]]
 @PublicAPI(stability="beta")
 def wait(workflows: List[Workflow],
          num_returns: int = 1,
-         timeout: Optional[float] = None) -> Workflow[WaitResult]:
+         timeout: Optional[float] = None,
+         inplace: bool = False) -> Workflow[WaitResult]:
     """Return a list of result of workflows that are ready and a list of
     workflows that are pending.
 
@@ -522,6 +523,7 @@ def wait(workflows: List[Workflow],
         num_returns (int): The number of workflows that should be returned.
         timeout (float): The maximum amount of time in seconds to wait before
             returning.
+        inplace: If True, execute "workflow.wait" in the current step.
 
     Returns:
         A list of ready workflow results that are ready and a list of the
@@ -545,6 +547,7 @@ def wait(workflows: List[Workflow],
                 "timeout": timeout,
             }
         },
+        allow_inplace=inplace,
     )
     workflow_data = WorkflowData(
         func_body=None,
