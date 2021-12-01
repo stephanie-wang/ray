@@ -175,3 +175,16 @@ def get_step_status_info(status: WorkflowStatus) -> str:
 
 def get_scope():
     return _context.workflow_scope
+
+
+def inherit_checkpoint_context(checkpoint: "Optional[CheckpointModeType]"):
+    # If checkpoint option is not specified, inherit checkpoint
+    # options from context (i.e. checkpoint options of the outer
+    # step). If it is still not specified, it's True by default.
+    global _context
+    if checkpoint is None:
+        if _context is not None:
+            return _context.checkpoint_context.checkpoint
+    if checkpoint is None:
+        return True
+    return checkpoint

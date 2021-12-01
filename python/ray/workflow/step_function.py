@@ -14,19 +14,6 @@ if TYPE_CHECKING:
     from ray.workflow.common import CheckpointModeType
 
 
-def _inherit_checkpoint_option(checkpoint: "Optional[CheckpointModeType]"):
-    # If checkpoint option is not specified, inherit checkpoint
-    # options from context (i.e. checkpoint options of the outer
-    # step). If it is still not specified, it's True by default.
-    context = workflow_context.get_workflow_step_context()
-    if checkpoint is None:
-        if context is not None:
-            return context.checkpoint_context.checkpoint
-    if checkpoint is None:
-        return True
-    return checkpoint
-
-
 class WorkflowStepFunction:
     """This class represents a workflow step."""
 
@@ -69,8 +56,9 @@ class WorkflowStepFunction:
                     step_type=StepType.FUNCTION)
             # We could have "checkpoint=None" when we use @workflow.step
             # with arguments. Avoid this by updating it here.
-            step_options.checkpoint = _inherit_checkpoint_option(
-                step_options.checkpoint)
+            step_options.checkpoint = (
+                workflow_context.inherit_checkpoint_context(
+                    step_options.checkpoint))
 
             workflow_data = WorkflowData(
                 func_body=self._func,
@@ -123,12 +111,13 @@ class WorkflowStepFunction:
         # TODO(suquark): The options seems drops items that we did not
         # specify (e.g., the name become "None" if we did not pass
         # name to the options). This does not seem correct to me.
+        checkpoint = workflow_context.inherit_checkpoint_context(checkpoint)
         step_options = WorkflowStepRuntimeOptions.make(
             step_type=StepType.FUNCTION,
             catch_exceptions=catch_exceptions,
             max_retries=max_retries,
             allow_inplace=allow_inplace,
-            checkpoint=_inherit_checkpoint_option(checkpoint),
+            checkpoint=checkpoint,
             ray_options=ray_options,
         )
         return WorkflowStepFunction(
