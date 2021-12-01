@@ -93,8 +93,15 @@ def _reconstruct_workflow_actor(reader: workflow_storage.WorkflowStorage,
     actor_cls = WorkflowActorClass._from_class(base_class)
     args, kwargs = reader.load_physical_actor_state(actor_id, 0)
     actor = actor_cls._create(actor_id, None, *args, **kwargs)
+    # FIXME(suquark): This is a temporary patch for a race condition issue.
     if state_index > 0:
-        state = reader.load_physical_actor_state(actor_id, state_index)
+        while True:
+            try:
+                state = reader.load_physical_actor_state(actor_id, state_index)
+                break
+            except Exception:
+                state_index -= 1
+                assert state_index >= 0
         actor.ray_actor_handle().__setstate__.remote(state)
     return actor
 
