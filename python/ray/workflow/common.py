@@ -405,6 +405,10 @@ class Workflow(Generic[T]):
 
     @classmethod
     def from_ref(cls, workflow_ref: WorkflowStaticRef) -> "Workflow":
+        from ray.workflow.workflow_context import inherit_checkpoint_context
+        # TODO(suquark): This is a temporary patch. The checkpoint option
+        # should come from the original step.
+        checkpoint = inherit_checkpoint_context(None)
         inputs = WorkflowInputs(
             args=None, workflows=[], workflow_refs=[], workflow_actors=[])
         data = WorkflowData(
@@ -412,7 +416,7 @@ class Workflow(Generic[T]):
             inputs=inputs,
             name=None,
             step_options=WorkflowStepRuntimeOptions.make(
-                step_type=StepType.FUNCTION),
+                step_type=StepType.FUNCTION, checkpoint=checkpoint),
             user_metadata={})
         wf = Workflow(data)
         wf._ref = workflow_ref

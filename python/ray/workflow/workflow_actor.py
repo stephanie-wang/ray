@@ -52,11 +52,14 @@ def _patch_class(base_class: type, ignore_init: bool):
                                                  baked_inputs, runtime_options)
 
                 from ray.workflow import workflow_context
-                workflow_context.update_workflow_step_context(context, step_id)
-                store = workflow_storage.get_workflow_storage(
-                    context.workflow_id)
-                store.save_physical_actor_state(actor_id, state_index,
-                                                self.__getstate__())
+                if runtime_options.checkpoint:
+                    workflow_context.update_workflow_step_context(
+                        context, step_id)
+                    store = workflow_storage.get_workflow_storage(
+                        context.workflow_id)
+                    store.save_physical_actor_state(actor_id, state_index,
+                                                    self.__getstate__())
+
                 return result
 
             setattr(cls, PATCHED_PREFIX + method_name, _func)
@@ -147,8 +150,8 @@ class ActorMethod(ActorMethodBase):
         # TODO(suquark): handle the case where options are directly passed to
         # the class method decorator. We havn't support class method decorator
         # yet.
-        from ray.workflow.step_function import _inherit_checkpoint_option
-        self._options.checkpoint = _inherit_checkpoint_option(
+        from ray.workflow.workflow_context import inherit_checkpoint_context
+        self._options.checkpoint = inherit_checkpoint_context(
             self._options.checkpoint)
 
         workflow_data = WorkflowData(
@@ -338,10 +341,14 @@ class WorkflowActorClass(WorkflowActorClassBase):
         """Create a workflow actor."""
         _actor_id = _actor_id or uuid.uuid4().hex
         # TODO(suquark): Save "ray_options".
-        # Checkpoint initial actor state at creation.
-        store = workflow_storage.get_workflow_storage()
-        store.save_physical_actor_class_body(_actor_id, self._metadata.cls)
-        store.save_physical_actor_state(_actor_id, 0, (args, kwargs))
+        from ray.workflow.workflow_context import inherit_checkpoint_context
+        # TODO(suquark): This is a temporary way of getting checkpointing
+        # options. The checkpoint option should come from arguments.
+        if inherit_checkpoint_context(None):
+            # Checkpoint initial actor state at creation.
+            store = workflow_storage.get_workflow_storage()
+            store.save_physical_actor_class_body(_actor_id, self._metadata.cls)
+            store.save_physical_actor_state(_actor_id, 0, (args, kwargs))
         return self._create(_actor_id, _ray_options, *args, **kwargs)
 
     def _create(self, actor_id, ray_options, *args, **kwargs):
