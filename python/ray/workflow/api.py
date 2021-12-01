@@ -550,6 +550,7 @@ def wait(workflows: List[Workflow],
             }
         },
         allow_inplace=inplace,
+        checkpoint=False,
     )
     workflow_data = WorkflowData(
         func_body=None,

@@ -131,6 +131,7 @@ class ActorMethod(ActorMethodBase):
 
         self._options = WorkflowStepRuntimeOptions.make(
             step_type=StepType.PHYSICAL_ACTOR_METHOD,
+            checkpoint=None,
             ray_options={
                 "workflow_actor_options": {
                     "actor_id": self._workflow_actor().actor_id(),
@@ -142,6 +143,13 @@ class ActorMethod(ActorMethodBase):
                     "actor_method_name": PATCHED_PREFIX + self._method_name,
                 }
             })
+
+        # TODO(suquark): handle the case where options are directly passed to
+        # the class method decorator. We havn't support class method decorator
+        # yet.
+        from ray.workflow.step_function import _inherit_checkpoint_option
+        self._options.checkpoint = _inherit_checkpoint_option(
+            self._options.checkpoint)
 
         workflow_data = WorkflowData(
             func_body=self._original_method,
