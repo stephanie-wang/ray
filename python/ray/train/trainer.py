@@ -108,6 +108,7 @@ class Trainer:
             resources_per_worker: Optional[Dict[str, float]] = None,
             logdir: Optional[str] = None,
             max_retries: int = 3,
+            do_checkpoint: bool = True,
     ):
         if num_workers <= 0:
             raise ValueError("`num_workers` must be a positive integer.")
@@ -153,11 +154,16 @@ class Trainer:
             additional_resources_per_worker=resources_per_worker,
             max_retries=max_retries)
 
-        if self._is_tune_enabled():
-            self.checkpoint_manager = TuneCheckpointManager()
+        if do_checkpoint:
+            if self._is_tune_enabled():
+                self.checkpoint_manager = TuneCheckpointManager()
+            else:
+                self.checkpoint_manager = CheckpointManager()
+            self.checkpoint_manager.on_init()
         else:
-            self.checkpoint_manager = CheckpointManager()
-        self.checkpoint_manager.on_init()
+            self.checkpoint_manager = None
+
+        self.iterator = None
 
     def create_logdir(self, log_dir: Optional[Union[str, Path]]) -> Path:
         """Create logdir for the Trainer."""
@@ -601,11 +607,16 @@ class TrainingIterator:
                         checkpoint,
                         checkpoint_strategy,
                         latest_checkpoint_id=None):
-        self._checkpoint_manager.on_start_training(
-            checkpoint_strategy=checkpoint_strategy,
-            run_dir=run_dir,
-            latest_checkpoint_id=latest_checkpoint_id)
-        checkpoint_dict = self._checkpoint_manager._load_checkpoint(checkpoint)
+        checkpoint_dict = None
+        if self._checkpoint_manager:
+            self._checkpoint_manager.on_start_training(
+                checkpoint_strategy=checkpoint_strategy,
+                run_dir=run_dir,
+                latest_checkpoint_id=latest_checkpoint_id)
+            checkpoint_dict = self._checkpoint_manager._load_checkpoint(checkpoint)
+        else:
+            # Actually an ObjectRef.
+            checkpoint_dict = checkpoint
         self._run_with_error_handling(
             lambda: ray.get(self._backend_executor_actor.start_training.remote(
                 train_func=train_func,
@@ -624,10 +635,10 @@ class TrainingIterator:
                 self._train_func,
                 self._run_dir,
                 self._dataset,
-                self._checkpoint_manager.latest_checkpoint,
+                self._checkpoint_manager.latest_checkpoint if self._checkpoint_manager else None,
                 self._checkpoint_strategy,
-                latest_checkpoint_id=self._checkpoint_manager.
-                latest_checkpoint_id)
+                latest_checkpoint_id=self._checkpoint_manager.latest_checkpoint_id
+                if self._checkpoint_manager else None)
             return self._run_with_error_handling(func)
         except InactiveWorkerGroupError:
             raise RuntimeError(
@@ -681,8 +692,13 @@ class TrainingIterator:
                 ]
                 return result_data
             elif result_type is TrainingResultType.CHECKPOINT:
-                self._checkpoint_manager._process_checkpoint(
-                    results, decode_checkpoint_fn=self._backend.decode_data)
+                if self._checkpoint_manager:
+                    self._checkpoint_manager._process_checkpoint(
+                        results, decode_checkpoint_fn=self._backend.decode_data)
+                else:
+                    checkpoint = results[0].data
+                    checkpoint_ref = ray.put(self._backend.decode_data(checkpoint))
+                    return checkpoint_ref
                 # Iterate until next REPORT call or training has finished.
             else:
                 raise TrainBackendError(f"Unexpected result type: "
@@ -699,8 +715,9 @@ class TrainingIterator:
             result_type = results[0].type
             # Process checkpoints and ignore other result types.
             if result_type is TrainingResultType.CHECKPOINT:
-                self._checkpoint_manager._process_checkpoint(
-                    results, decode_checkpoint_fn=self._backend.decode_data)
+                if self._checkpoint_manager:
+                    self._checkpoint_manager._process_checkpoint(
+                        results, decode_checkpoint_fn=self._backend.decode_data)
 
     def _finish_training(self):
         """Finish training and return final results. Propagate any exceptions.
