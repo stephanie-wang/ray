@@ -7,6 +7,8 @@ from ray.data.impl.progress_bar import ProgressBar, \
     set_progress_bars
 from ray.types import ObjectRef
 
+import os
+
 if TYPE_CHECKING:
     from ray.data.dataset_pipeline import DatasetPipeline
 
@@ -27,8 +29,12 @@ class PipelineExecutor:
         self._pipeline: "DatasetPipeline[T]" = pipeline
         self._stages: List[ObjectRef[Dataset[
             Any]]] = [None] * (len(self._pipeline._stages) + 1)
+
+        self._pipeline_resource = os.getenv("RAY_DATASET_pipeline_resource", None)
+
         self._iter = iter(self._pipeline._base_iterable)
-        self._stages[0] = pipeline_stage.remote(
+        self._stages[0] = pipeline_stage.options(
+                resources={self._pipeline_resource: 0.001} if self._pipeline_resource else None).remote(
             next(self._iter), DatasetContext.get_current())
 
         if self._pipeline._length and self._pipeline._length != float("inf"):
@@ -78,13 +84,15 @@ class PipelineExecutor:
                     output = result
                 else:
                     fn = self._pipeline._stages[i]
-                    self._stages[i + 1] = pipeline_stage.remote(
+                    self._stages[i + 1] = pipeline_stage.options(
+                        resources={self._pipeline_resource: 0.001} if self._pipeline_resource else None).remote(
                         lambda: fn(result), DatasetContext.get_current())
 
             # Pull a new element for the initial slot if possible.
             if self._stages[0] is None:
                 try:
-                    self._stages[0] = pipeline_stage.remote(
+                    self._stages[0] = pipeline_stage.options(
+                        resources={self._pipeline_resource: 0.001} if self._pipeline_resource else None).remote(
                         next(self._iter), DatasetContext.get_current())
                 except StopIteration:
                     pass

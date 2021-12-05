@@ -47,19 +47,19 @@ class DatasetContext:
                     block_splitting_enabled=DEFAULT_BLOCK_SPLITTING_ENABLED,
                     target_max_block_size=DEFAULT_TARGET_MAX_BLOCK_SIZE)
 
-            if _default_context.block_owner is None:
-                owner = _DesignatedBlockOwner.options(
-                    lifetime="detached").remote()
-                ray.get(owner.ping.remote())
+            #if _default_context.block_owner is None:
+            #    owner = _DesignatedBlockOwner.options(
+            #        lifetime="detached").remote()
+            #    ray.get(owner.ping.remote())
 
-                # Clear the actor handle after Ray reinits since it's no longer
-                # valid.
-                def clear_owner():
-                    if _default_context:
-                        _default_context.block_owner = None
+            #    # Clear the actor handle after Ray reinits since it's no longer
+            #    # valid.
+            #    def clear_owner():
+            #        if _default_context:
+            #            _default_context.block_owner = None
 
-                ray.worker._post_init_hooks.append(clear_owner)
-                _default_context.block_owner = owner
+            #    ray.worker._post_init_hooks.append(clear_owner)
+            #    _default_context.block_owner = owner
 
             return _default_context
 
