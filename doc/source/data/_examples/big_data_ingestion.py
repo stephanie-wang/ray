@@ -39,6 +39,8 @@ import pyarrow
 import ray
 from ray.data.dataset_pipeline import DatasetPipeline
 from ray.data.datasource.datasource import RandomIntRowDatasource
+from ray.cluster_utils import Cluster
+import os
 
 #######################################################################
 # Build shuffle ingestion pipeline
@@ -98,6 +100,7 @@ class TrainingWorker:
             # Following code emulates epoch based SGD training.
             print(f"Training... worker: {self.rank}, epoch: {epoch}")
             for i, batch in enumerate(training_dataset.iter_batches()):
+                print(f"Batch {len(batch)} rows on worker {self.rank}")
                 # TODO: replace the code for real training.
                 pass
 
@@ -126,13 +129,21 @@ args, _ = parser.parse_known_args()
 
 if not args.large_scale_test:
 
-    NUM_TRAINING_WORKERS = 4
+    NUM_TRAINING_WORKERS = 2
     NUM_EPOCHS = 5
     NUM_COLUMNS = 10
-    SIZE_100MiB = 100 * 1024 * 1024
+    SIZE_100MiB = 10 * 1024 * 1024
 
-    # create a local ray cluster.
-    ray.init()
+    cluster = Cluster()
+    # Head node.
+    cluster.add_node(num_cpus=0, resources={"head": 1})
+    ray.init(address=cluster.address)
+
+    # Shuffle node.
+    cluster.add_node(num_cpus=4, object_store_memory=500 * 1024 * 1024)
+    node_to_kill = cluster.add_node(num_cpus=4, object_store_memory=500 * 1024 * 1024)
+    # Training worker node.
+    cluster.add_node(num_gpus=NUM_TRAINING_WORKERS, num_cpus=0, object_store_memory=500 * 1024 * 1024)
 
     def generate_example_files(size_bytes: int) -> str:
         tmpdir = tempfile.mkdtemp()
@@ -148,12 +159,16 @@ if not args.large_scale_test:
                                      NUM_TRAINING_WORKERS)
 
     training_workers = [
-        TrainingWorker.remote(rank, shard) for rank, shard in enumerate(splits)
+        TrainingWorker.options(num_gpus=1, num_cpus=0).remote(rank, shard) for rank, shard in enumerate(splits)
     ]
 
     # Let's run the e2e pipeline
     start = time.time()
-    ray.get([worker.train.remote() for worker in training_workers])
+    results = [worker.train.remote() for worker in training_workers]
+    time.sleep(60)
+    cluster.remove_node(node_to_kill)
+    cluster.add_node(num_cpus=4, object_store_memory=500 * 1024 * 1024)
+    ray.get(results)
     print(f"total ingestion time: {int(time.time() - start)}s")
 
     # -> Write Progress: 100%|████████████████████| 201/201 [00:00<00:00, 228.67it/s]
@@ -214,15 +229,23 @@ def create_large_shuffle_pipeline(data_size_bytes: int, num_epochs: int,
 # Now, it's time to implement the 500GiB shuffle ingestion pipeline.
 
 if args.large_scale_test:
-    NUM_TRAINING_WORKERS = 16
+    NUM_TRAINING_WORKERS = 2
     NUM_EPOCHS = 5
     NUM_COLUMNS = 10
     GiB = 1024 * 1024 * 1024
-    SIZE_500GiB = 500 * GiB
-    TOTAL_NUM_NODES = 70 + 16 + 1
+    SIZE_500GiB = 1 * GiB
+    TOTAL_NUM_NODES = 3
 
+    cluster = Cluster()
+    # Head node.
+    cluster.add_node(num_cpus=0)
     # use the AWS cluster we just set up.
-    ray.init(address="auto")
+    ray.init(address=cluster.address)
+
+    # Shuffle node.
+    cluster.add_node(num_cpus=4)
+    # Training worker node.
+    cluster.add_node(num_gpus=NUM_TRAINING_WORKERS, num_cpus=0)
 
     # waiting for cluster nodes to come up.
     while len(ray.nodes()) < TOTAL_NUM_NODES:
