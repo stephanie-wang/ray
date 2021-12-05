@@ -433,9 +433,9 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
       [this](const ObjectID &object_id, rpc::ErrorType reason, bool pin_object) {
         RAY_LOG(DEBUG) << "Failed to recover object " << object_id << " due to "
                        << rpc::ErrorType_Name(reason);
-        RAY_CHECK_OK(Put(RayObject(reason),
+        Put(RayObject(reason),
                          /*contained_object_ids=*/{}, object_id,
-                         /*pin_object=*/pin_object));
+                         /*pin_object=*/pin_object);
       });
 
   // Start the IO thread after all other members have been initialized, in case
