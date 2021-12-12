@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING, Any, Tuple, Dict, Callable
 import uuid
 import json
 import weakref
+import asyncio
 import ray
 from ray.util.inspect import (is_function_or_method, is_class_method,
                               is_static_method)
 from ray._private import signature
 
 from ray.workflow.common import (slugify, WorkflowData, Workflow, WorkflowRef,
-                                 StepType, WorkflowStepRuntimeOptions)
+                                 StepType, WorkflowStepRuntimeOptions, MANAGEMENT_ACTOR_NAMESPACE)
 from ray.workflow import serialization_context
 from ray.workflow.storage import Storage, get_global_storage
 from ray.workflow.workflow_storage import WorkflowStorage
@@ -171,6 +172,54 @@ def __setstate(instance, v):
         instance.__dict__ = json.loads(v)
 
 
+def create_actor_serializer(actor_id, store, cls):
+    actor = ActorExecutionSerializer.options(
+            num_cpus=0,
+            name=f"ExecutionSerializer:{actor_id}",
+            namespace=MANAGEMENT_ACTOR_NAMESPACE,
+            lifetime="detached").remote(actor_id, store, cls)
+    ray.get(actor.ready.remote())
+
+def get_actor_serializer(actor_id):
+    return ray.get_actor(
+        f"ExecutionSerializer:{actor_id}",
+        namespace=MANAGEMENT_ACTOR_NAMESPACE)
+
+@ray.remote(num_cpus=0)
+class ActorExecutionSerializer:
+    def __init__(self, actor_id, store, cls):
+        self._actor_id = actor_id
+        self._workflow_manager = get_or_create_management_actor()
+        self._ws = WorkflowStorage(actor_id, store)
+        self._cls = cls
+
+        self._instance = self._cls.__new__(self._cls)
+        self._lock = asyncio.Semaphore()
+
+    def ready(self):
+        return
+
+    async def exec(self, method_name, *args, **kwargs):
+        await self._lock.acquire()
+        method = getattr(self._instance, method_name)
+        output = method(*args, **kwargs)
+        if hasattr(self._instance, "__getstate__"):
+            state = self._instance.__getstate__()
+        else:
+            try:
+                state = json.dumps(self._instance.__dict__)
+            except TypeError as e:
+                raise ValueError("The virtual actor contains fields that can't be "
+                                 "converted to JSON. Please define `__getstate__` "
+                                 "and `__setstate__` explicitly:"
+                                 f" {self._instance.__dict__}") from e
+        print("method", method_name, state, output, args)
+        return state, output
+
+    async def release(self):
+        self._lock.release()
+
+
 class _VirtualActorMethodHelper:
     """This is a helper class for managing options and creating workflow steps
     from raw class methods."""
@@ -212,7 +261,7 @@ class _VirtualActorMethodHelper:
     def readonly(self) -> bool:
         return self._options.step_type == StepType.READONLY_ACTOR_METHOD
 
-    def step(self, *args, **kwargs):
+    def step(self, execution_serializer, *args, **kwargs):
         flattened_args = signature.flatten_args(self._signature, args, kwargs)
         actor_id = workflow_context.get_current_workflow_id()
         if not self.readonly:
@@ -221,6 +270,7 @@ class _VirtualActorMethodHelper:
             else:
                 ws = WorkflowStorage(actor_id, get_global_storage())
                 state_ref = WorkflowRef(ws.get_entrypoint_step_id())
+            state_ref = execution_serializer
             # This is a hack to insert a positional argument.
             flattened_args = [signature.DUMMY_TYPE, state_ref] + flattened_args
         workflow_inputs = serialization_context.make_workflow_inputs(
@@ -470,19 +520,21 @@ def _wrap_actor_method(cls: type, method_name: str):
         return args
 
     @functools.wraps(getattr(cls, method_name))
-    def _actor_method(state, *args, **kwargs):
-        instance = cls.__new__(cls)
-        if method_name != "__init__":
-            __setstate(instance, state)
-        method = getattr(instance, method_name)
-        output = method(*args, **kwargs)
-        if isinstance(output, Workflow):
-            if output.data.step_options.step_type == StepType.FUNCTION:
-                next_step = deref.step(__getstate(instance), output)
-                next_step.data.step_options.step_type = StepType.ACTOR_METHOD
-                return next_step, None
-            return __getstate(instance), output
-        return __getstate(instance), output
+    def _actor_method(actor_handle, *args, **kwargs):
+        return ray.get(actor_handle.exec.remote(method_name, *args, **kwargs))
+
+        #instance = cls.__new__(cls)
+        #if method_name != "__init__":
+        #    __setstate(instance, state)
+        #method = getattr(instance, method_name)
+        #output = method(*args, **kwargs)
+        #if isinstance(output, Workflow):
+        #    if output.data.step_options.step_type == StepType.FUNCTION:
+        #        next_step = deref.step(__getstate(instance), output)
+        #        next_step.data.step_options.step_type = StepType.ACTOR_METHOD
+        #        return next_step, None
+        #    return __getstate(instance), output
+        #return __getstate(instance), output
 
     return _actor_method
 
@@ -495,6 +547,12 @@ class VirtualActor:
         self._metadata = metadata
         self._actor_id = actor_id
         self._storage = storage
+        workflow_manager = get_or_create_management_actor()
+        try:
+            create_actor_serializer(self._actor_id, self._storage, self._metadata.cls)
+        except Exception:
+            pass
+        self._execution_serializer = get_actor_serializer(self._actor_id)
 
     def _create(self, args: Tuple[Any], kwargs: Dict[str, Any]):
         workflow_storage = WorkflowStorage(self._actor_id, self._storage)
@@ -527,7 +585,7 @@ class VirtualActor:
                            args, kwargs) -> "ObjectRef":
         with workflow_context.workflow_step_context(self._actor_id,
                                                     self._storage.storage_url):
-            wf = method_helper.step(*args, **kwargs)
+            wf = method_helper.step(self._execution_serializer, *args, **kwargs)
             if method_helper.readonly:
                 return execute_workflow(wf).volatile_output
             else:

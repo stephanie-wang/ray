@@ -107,6 +107,24 @@ def test_actor_ready(workflow_start_regular):
     assert actor.readonly_get.run() == 42
 
 
+@workflow.step
+def foo(actor_name=None):
+    if actor_name is None:
+        return
+    actor = Counter.get_or_create("Counter", 0)
+    ray.get(actor.ready())
+    ([actor.add.run(1) for i in range(10)])
+    print("DONE")
+    return
+
+@workflow.step
+def sync(a, b):
+    print("SYNC")
+    actor = Counter.get_or_create("Counter", 0)
+    ray.get(actor.ready())
+    return actor.add.run(0)
+
+
 @pytest.mark.parametrize(
     "workflow_start_regular",
     [{
@@ -116,21 +134,10 @@ def test_actor_ready(workflow_start_regular):
     indirect=True)
 def test_actor_writer_1(workflow_start_regular):
     actor = Counter.get_or_create("Counter", 0)
-    ray.get(actor.ready())
-    assert actor.readonly_get.run() == 0
-    array = []
-    s = 0
-    for i in range(1, 10):
-        s += i
-        array.append(s)
-    assert [actor.add.run(i) for i in range(1, 10)] == array
-    assert actor.readonly_get.run() == 45
-
-    array = []
-    for i in range(10, 20):
-        s += i
-        array.append(s)
-    assert ray.get([actor.add.run_async(i) for i in range(10, 20)]) == array
+    x = foo.step("Counter")
+    y = foo.step("Counter")
+    z = sync.step(x, y)
+    print(z.run())
 
 
 @pytest.mark.parametrize(

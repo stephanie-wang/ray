@@ -564,6 +564,13 @@ def _workflow_step_executor(func: Callable,
             store.advance_progress(step_id)
         _record_step_status(step_id, WorkflowStatus.SUCCESSFUL)
     logger.info(get_step_status_info(WorkflowStatus.SUCCESSFUL))
+
+    if step_type == StepType.ACTOR_METHOD:
+        # Allow the shared actor to continue to the next step.
+        assert isinstance(args[0][0], ray.actor.ActorHandle), args
+        shared_actor_serializer = args[0][0]
+        ray.get(shared_actor_serializer.release.remote())
+
     if isinstance(volatile_output, Workflow):
         # This is the case where a step method is called in the virtual actor.
         # We need to run the method to get the final result.
