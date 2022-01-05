@@ -1,5 +1,7 @@
 base_image: "anyscale/ray-ml:nightly-py37-gpu"
-env_vars: {"RAY_lineage_pinning_enabled": "1", "RAY_record_ref_creation_sites": "1"}
+env_vars: {"RAY_lineage_pinning_enabled": "1", "RAY_record_ref_creation_sites": "1",
+           "RAY_event_stats": "1",
+           "RAY_BACKEND_LOG_LEVEL": "debug"}
 python:
   pip_packages:
     - pyarrow
