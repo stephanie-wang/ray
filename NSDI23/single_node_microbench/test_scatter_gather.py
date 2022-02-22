@@ -25,8 +25,6 @@ NUM_TRIAL = params['NUM_TRIAL']
 OBJECT_STORE_BUFFER_SIZE = 5_000_000 #this value is to add some space in ObjS for nprand metadata and ray object metadata
 
 def test_ray_scatter_gather():
-    scatter_gather_start = perf_counter()
-
     @ray.remote
     def scatter(npartitions, object_store_size):
         size = (object_store_size // 8)//npartitions
@@ -34,12 +32,15 @@ def test_ray_scatter_gather():
         return tuple(np.random.randint(1<<31, size=size) for i in range(npartitions))
 
     @ray.remote
-    def worker(partition):
-        return np.average(partition)
+    def worker(partitions):
+        np.sort(partitions[:8388608])
+        return np.average(partitions)
 
     @ray.remote
     def gather(*avgs):
         return np.average(avgs)
+
+    scatter_gather_start = perf_counter()
 
     npartitions = OBJECT_STORE_SIZE//OBJECT_SIZE 
     scatter_outputs = [scatter.options(num_returns=npartitions).remote(npartitions, OBJECT_STORE_SIZE) for _ in range(WORKING_SET_RATIO)]
@@ -59,8 +60,6 @@ def test_ray_scatter_gather():
     return scatter_gather_end - scatter_gather_start
 
 def test_baseline_scatter_gather():
-    scatter_gather_start = perf_counter()
-
     @ray.remote
     def scatter(npartitions, object_store_size):
         size = (object_store_size // 8)//npartitions
@@ -68,11 +67,14 @@ def test_baseline_scatter_gather():
 
     @ray.remote
     def worker(partitions):
+        np.sort(partitions[:8388608])
         return np.average(partitions)
 
     @ray.remote
     def gather(*avgs):
         return np.average(avgs)
+
+    scatter_gather_start = perf_counter()
 
     npartitions = OBJECT_STORE_SIZE//OBJECT_SIZE 
     for _ in range(WORKING_SET_RATIO):

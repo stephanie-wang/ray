@@ -25,8 +25,6 @@ NUM_TRIAL = params['NUM_TRIAL']
 OBJECT_STORE_BUFFER_SIZE = 5_000_000 #this value is to add some space in ObjS for nprand metadata and ray object metadata
 
 def test_ray_shuffle():
-    shuffle_start = perf_counter()
-
     @ray.remote
     def map(npartitions):
         data = np.random.rand(OBJECT_SIZE // 8)
@@ -35,7 +33,10 @@ def test_ray_shuffle():
 
     @ray.remote
     def reduce(*partitions):
+        np.sort(partitions[0][:8388608])
         return True
+
+    shuffle_start = perf_counter()
 
     npartitions = OBJECT_STORE_SIZE//OBJECT_SIZE 
     refs = []
@@ -54,8 +55,6 @@ def test_ray_shuffle():
     return shuffle_end - shuffle_start
 
 def test_baseline_shuffle():
-    shuffle_start = perf_counter()
-
     @ray.remote
     def map(npartitions):
         data = np.random.rand(OBJECT_SIZE // 8)
@@ -64,7 +63,10 @@ def test_baseline_shuffle():
 
     @ray.remote
     def reduce(*partitions):
+        np.sort(partitions[0][:8388608])
         return True
+
+    shuffle_start = perf_counter()
 
     npartitions = OBJECT_STORE_SIZE//OBJECT_SIZE 
     for _ in range(WORKING_SET_RATIO):
@@ -90,7 +92,7 @@ ray_time = []
 base_time = []
 for i in range(NUM_TRIAL):
     ray_time.append(test_ray_shuffle())
-    #base_time.append(test_baseline_shuffle())
+    base_time.append(test_baseline_shuffle())
 
 print(f"Ray Shuffle time: {sum(ray_time)/NUM_TRIAL}")
 print(f"Baseline Shuffle time: {sum(base_time)/NUM_TRIAL}")
