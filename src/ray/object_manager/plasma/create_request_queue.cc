@@ -151,6 +151,10 @@ void CreateRequestQueue::SetShouldSpill(bool should_spill) {
   should_spill_ = should_spill;
 }
 
+void CreateRequestQueue::SetNumLeasedWorkers(size_t num_leased_workers){
+  num_leased_workers_ = num_leased_workers;
+}
+
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
@@ -200,6 +204,10 @@ Status CreateRequestQueue::ProcessRequests() {
 		}
 		if(!RayConfig::instance().enable_BlockTasksSpill()){
 		  spill_objects_callback_();
+		}else{
+			on_object_creation_blocked_callback_(lowest_pri, false, false);
+			if(!spinning_tasks_.RegisterSpinningTasks(task_id, num_leased_workers_))
+		      spill_objects_callback_();
 		}
         if (!should_spill_) {
           // should_spill_ is set false in default.
@@ -276,6 +284,7 @@ void CreateRequestQueue::FinishRequest(
     absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it) {
   // Fulfill the request.
   // auto &request = *(queue_it->second);
+  spinning_tasks_.UnRegisterSpinningTasks(queue_it->first);
   auto it = fulfilled_requests_.find(queue_it->second->request_id);
   RAY_CHECK(it != fulfilled_requests_.end());
   RAY_CHECK(it->second == nullptr);

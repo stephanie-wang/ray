@@ -109,6 +109,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   //Block new tasks from being scheduled with this priority
   void BlockTasks(Priority) override;
   bool EvictTasks(Priority) override;
+  size_t GetNumLeasedWorkers() override;
 
   /// (Step 1) Queue tasks and schedule.
   /// Queue task and schedule. This hanppens when processing the worker lease request.

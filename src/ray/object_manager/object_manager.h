@@ -267,6 +267,10 @@ class ObjectManager : public ObjectManagerInterface,
 	  plasma::plasma_store_runner->SetShouldSpill(should_spill);
   }
 
+  void SetNumLeasedWorkers(size_t num_leased_workers){
+	  plasma::plasma_store_runner->SetNumLeasedWorkers(num_leased_workers);
+  }
+
  private:
   friend class TestObjectManager;
 

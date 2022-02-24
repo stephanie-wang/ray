@@ -236,6 +236,11 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
               io_service_.post([this, should_spill](){
                 object_manager_.SetShouldSpill(should_spill);
               },"");
+			}else if(!enable_BlockTasks){
+			  size_t num_leased_workers = cluster_task_manager_->GetNumLeasedWorkers();
+              io_service_.post([this, num_leased_workers](){
+                object_manager_.SetNumLeasedWorkers(num_leased_workers);
+              },"");
 			}
 		  },
           /*object_store_full_callback=*/

@@ -31,6 +31,28 @@
 
 namespace plasma {
 
+class SpinningTasks{
+  public:
+	//Return false if it is deadlock (all workers spinning)
+    bool RegisterSpinningTasks(ray::TaskKey task_id, size_t num_leased_workers){
+      spinning_tasks.insert(task_id);
+	  if(spinning_tasks.size() == num_leased_workers){
+		  return false;
+	  }
+	  return true;
+    }
+
+    void UnRegisterSpinningTasks(ray::TaskKey task_id){
+	  auto it = spinning_tasks.find(task_id);
+	  auto end = spinning_tasks.end();
+	  if(it != end)
+		  spinning_tasks.erase(it);
+    }
+
+  private:
+    absl::flat_hash_set<ray::TaskKey> spinning_tasks;
+};
+
 class CreateRequestQueue {
  public:
   using CreateObjectCallback = std::function<PlasmaError(
@@ -121,6 +143,8 @@ class CreateRequestQueue {
   size_t NumPendingBytes() const { return num_bytes_pending_; }
 
   void SetShouldSpill(bool should_spill);
+
+  void SetNumLeasedWorkers(size_t num_leased_workers);
 
  private:
   struct CreateRequest {
@@ -219,6 +243,10 @@ class CreateRequestQueue {
 
   // Shared between the object store thread and the scheduler thread.
   bool should_spill_ = false;
+
+  size_t num_leased_workers_ = -1;
+
+  SpinningTasks spinning_tasks_;
 
   friend class CreateRequestQueueTest;
 };
