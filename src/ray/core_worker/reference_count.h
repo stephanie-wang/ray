@@ -480,17 +480,26 @@ class ReferenceCounter : public ReferenceCounterInterface,
   void ReleaseAllLocalReferences();
 
  private:
+  struct InternalReference {
+    /// Object size if known, otherwise -1;
+    int64_t object_size = -1;
+    /// If this object is owned by us and stored in plasma, this contains all
+    /// object locations.
+    absl::flat_hash_set<NodeID> locations;
+  };
+
   struct Reference {
     /// Constructor for a reference whose origin is unknown.
     Reference() {}
     Reference(std::string call_site, const int64_t object_size)
-        : call_site(call_site), object_size(object_size) {}
+        : call_site(call_site) {}
+        //object_size(object_size) {}
     /// Constructor for a reference that we created.
     Reference(const rpc::Address &owner_address, std::string call_site,
               const int64_t object_size, bool is_reconstructable,
               const absl::optional<NodeID> &pinned_at_raylet_id)
         : call_site(call_site),
-          object_size(object_size),
+          //object_size(object_size),
           owned_by_us(true),
           foreign_owner_already_monitoring(false),
           owner_address(owner_address),
@@ -547,10 +556,10 @@ class ReferenceCounter : public ReferenceCounterInterface,
       }
     }
 
+    absl::flat_hash_map<ObjectIDIndexType, InternalReference> internal_refs;
+
     /// Description of the call site where the reference was created.
     std::string call_site = "<unknown>";
-    /// Object size if known, otherwise -1;
-    int64_t object_size = -1;
 
     /// Whether we own the object. If we own the object, then we are
     /// responsible for tracking the state of the task that creates the object
@@ -571,9 +580,6 @@ class ReferenceCounter : public ReferenceCounterInterface,
     /// counting is enabled, then some raylet must be pinning the object value.
     /// This is the address of that raylet.
     absl::optional<NodeID> pinned_at_raylet_id;
-    /// If this object is owned by us and stored in plasma, this contains all
-    /// object locations.
-    absl::flat_hash_set<NodeID> locations;
     // Whether this object can be reconstructed via lineage. If false, then the
     // object's value will be pinned as long as it is referenced by any other
     // object's lineage. This should be set to false if the object was created
@@ -653,7 +659,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
     std::function<void(const ObjectID &)> on_ref_removed;
   };
 
-  using ReferenceTable = absl::flat_hash_map<ObjectID, Reference>;
+  using ReferenceTable = absl::flat_hash_map<TaskID, Reference>;
 
   void SetNestedRefInUseRecursive(ReferenceTable::iterator inner_ref_it)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -786,7 +792,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
   ///
   /// \param[in] it The reference iterator for the object.
   /// \param[in] node_id The new object location to be added.
-  void AddObjectLocationInternal(ReferenceTable::iterator it, const NodeID &node_id)
+  void AddObjectLocationInternal(ReferenceTable::iterator it, ObjectIDIndexType object_idx, const NodeID &node_id)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   /// Remove a location for the given object. The owner must have the object ref in
@@ -794,7 +800,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
   ///
   /// \param[in] it The reference iterator for the object.
   /// \param[in] node_id The object location to be removed.
-  void RemoveObjectLocationInternal(ReferenceTable::iterator it, const NodeID &node_id)
+  void RemoveObjectLocationInternal(ReferenceTable::iterator it, ObjectIDIndexType object_idx, const NodeID &node_id)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   void UpdateObjectPendingCreation(const ObjectID &object_id, bool pending_creation)
@@ -803,11 +809,12 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// Publish object locations to all subscribers.
   ///
   /// \param[in] it The reference iterator for the object.
-  void PushToLocationSubscribers(ReferenceTable::iterator it)
+  void PushToLocationSubscribers(ReferenceTable::iterator it, ObjectIDIndexType object_idx)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
   /// Fill up the object information for the given iterator.
   void FillObjectInformationInternal(ReferenceTable::iterator it,
+                                     ObjectIDIndexType object_idx,
                                      rpc::WorkerObjectLocationsPubMessage *object_info)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
 
