@@ -195,10 +195,6 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
     // the inner objects until the outer object ID goes out of scope.
     AddNestedObjectIdsInternal(object_id, inner_ids, rpc_address_);
   }
-  if (pinned_at_raylet_id.has_value()) {
-    // We eagerly add the pinned location to the set of object locations.
-    AddObjectLocationInternal(it, object_id.ObjectIndex(), pinned_at_raylet_id.value());
-  }
 
   reconstructable_owned_objects_.emplace_back(object_id);
   auto back_it = reconstructable_owned_objects_.end();
@@ -212,6 +208,11 @@ void ReferenceCounter::AddOwnedObject(const ObjectID &object_id,
   auto object_idx = object_id.ObjectIndex();
   RAY_CHECK(it->second.internal_refs.emplace(object_idx, InternalReference()).second)
       << "Tried to create an owned object that already exists: " << object_id;
+
+  if (pinned_at_raylet_id.has_value()) {
+    // We eagerly add the pinned location to the set of object locations.
+    AddObjectLocationInternal(it, object_id.ObjectIndex(), pinned_at_raylet_id.value());
+  }
 }
 
 void ReferenceCounter::UpdateObjectSize(const ObjectID &object_id, int64_t object_size) {
@@ -837,8 +838,7 @@ bool ReferenceCounter::GetAndClearLocalBorrowersInternal(const ObjectID &object_
   }
 
   if (for_ref_removed || !it->second.foreign_owner_already_monitoring) {
-    auto borrowed_it = borrowed_refs->emplace(object_id.TaskId(), it->second).first;
-    borrowed_it->second.internal_refs.emplace(object_id.ObjectIndex(), InternalReference());
+    borrowed_refs->emplace(object_id.TaskId(), it->second).first;
     // Clear the local list of borrowers that we have accumulated. The receiver
     // of the returned borrowed_refs must merge this list into their own list
     // until all active borrowers are merged into the owner.
@@ -1163,9 +1163,8 @@ bool ReferenceCounter::AddObjectLocation(const ObjectID &object_id,
 
 void ReferenceCounter::AddObjectLocationInternal(ReferenceTable::iterator it, ObjectIDIndexType object_idx,
                                                  const NodeID &node_id) {
-  RAY_LOG(DEBUG) << "Adding location " << node_id << " for object " << it->first;
-  RAY_CHECK(it->second.internal_refs.contains(object_idx));
-  if (it->second.internal_refs[object_idx].locations.emplace(node_id).second) {
+  if (it->second.internal_refs.contains(object_idx) && it->second.internal_refs[object_idx].locations.emplace(node_id).second) {
+    RAY_LOG(DEBUG) << "Adding location " << node_id << " for object " << it->first;
     // Only push to subscribers if we added a new location. We eagerly add the pinned
     // location without waiting for the object store notification to trigger a location
     // report, so there's a chance that we already knew about the node_id location.
@@ -1190,9 +1189,10 @@ bool ReferenceCounter::RemoveObjectLocation(const ObjectID &object_id,
 
 void ReferenceCounter::RemoveObjectLocationInternal(ReferenceTable::iterator it, ObjectIDIndexType object_idx,
                                                     const NodeID &node_id) {
-  RAY_CHECK(it->second.internal_refs.contains(object_idx));
-  it->second.internal_refs[object_idx].locations.erase(node_id);
-  PushToLocationSubscribers(it, object_idx);
+  if (it->second.internal_refs.contains(object_idx)) {
+    it->second.internal_refs[object_idx].locations.erase(node_id);
+    PushToLocationSubscribers(it, object_idx);
+  }
 }
 
 void ReferenceCounter::UpdateObjectPendingCreation(const ObjectID &object_id,
