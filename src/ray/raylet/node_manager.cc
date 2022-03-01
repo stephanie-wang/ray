@@ -227,18 +227,17 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return GetLocalObjectManager().IsSpillingInProgress();
           },
           /*on_object_creation_blocked_callback=*/
-          [this](const Priority &base_priority, bool enable_BlockTasks, bool enable_EvictTasks,
-				  get_num_leased_workers) {
-		    if(enable_BlockTasks){
+          [this](const Priority &base_priority, int flags) {
+		    if(flags & (1<<0)){
               cluster_task_manager_->BlockTasks(base_priority);
 			}
-			if(enable_EvictTasks){
+			if(flags & (1<<2)){
               bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
               io_service_.post([this, should_spill](){
                 object_manager_.SetShouldSpill(should_spill);
               },"");
 			}
-			if(get_num_leased_workers){
+			if(flags & (1<<1)){
 			  size_t num_leased_workers = cluster_task_manager_->GetNumLeasedWorkers();
               io_service_.post([this, num_leased_workers](){
                 object_manager_.SetNumLeasedWorkers(num_leased_workers);
