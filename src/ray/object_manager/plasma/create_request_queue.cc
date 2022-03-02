@@ -155,30 +155,19 @@ void CreateRequestQueue::SetNumLeasedWorkers(size_t num_leased_workers){
   num_leased_workers_ = num_leased_workers;
 }
 
-static inline int set_BlockEvictSpill_flag(){
-  int BlockEvictSpill_flag = 0;
-  if(RayConfig::instance().enable_BlockTasks()){
-    BlockEvictSpill_flag += (1<<0);
-  }
-  if(RayConfig::instance().enable_BlockTasksSpill()){
-    BlockEvictSpill_flag += (1<<1);
-  }
-  if(RayConfig::instance().enable_EvictTasks()){
-    BlockEvictSpill_flag += (1<<2);
-  }
-  return BlockEvictSpill_flag;
-}
-
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
-  int BlockEvictSpill_flag = set_BlockEvictSpill_flag();
+  bool enable_blocktasks = RayConfig::instance().enable_BlockTasks();
+  bool enable_blocktasks_spill = RayConfig::instance().enable_BlockTasksSpill();
+  bool enable_evicttasks = RayConfig::instance().enable_EvictTasks();
 
   while (!queue_.empty()) {
     auto queue_it = queue_.begin();
     bool spilling_required = false;
     bool block_tasks_required = false;
     bool evict_tasks_required = false;
+    bool block_spill;
     std::unique_ptr<CreateRequest> &request = queue_it->second;
     ray::Priority lowest_pri;
     ray::TaskKey task_id = queue_it->first;
@@ -189,15 +178,16 @@ Status CreateRequestQueue::ProcessRequests() {
       spill_objects_callback_();
     }
 
-	int blockevictspill_flag = BlockEvictSpill_flag;
-	if ((blockevictspill_flag&(1<<1)) && !block_tasks_required) {
-	  blockevictspill_flag -= (1<<1);
-	}
-	if ((blockevictspill_flag&(1<<2)) && !evict_tasks_required) {
-	  blockevictspill_flag -= (1<<2);
-	}
-	if (blockevictspill_flag) {
-	  on_object_creation_blocked_callback_(lowest_pri, blockevictspill_flag);
+    //Turn these flags on only when matching flags are on
+	block_tasks_required = (block_tasks_required&enable_blocktasks); 
+	evict_tasks_required = (evict_tasks_required&enable_evicttasks);
+	block_spill = (enable_blocktasks_spill&block_tasks_required); 
+
+	if (block_tasks_required || evict_tasks_required) {
+	  on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
+			  evict_tasks_required, block_spill);
+      block_spill = spinning_tasks_.RegisterSpinningTasks(queue_it->first,
+			  num_leased_workers_, enable_blocktasks_spill);
 	}
 
     auto now = get_time_();
@@ -215,13 +205,19 @@ Status CreateRequestQueue::ProcessRequests() {
         oom_start_time_ns_ = now;
       }
 
-	  if (BlockEvictSpill_flag) {
-        RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback " 
-			<< BlockEvictSpill_flag << " on priority "
+	  if (enable_blocktasks || enable_evicttasks) {
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
+			<< enable_blocktasks <<" " << enable_evicttasks << " " 
+			<< block_spill << ") on priority "
 			<< lowest_pri;
-	    on_object_creation_blocked_callback_(lowest_pri, BlockEvictSpill_flag);
-	    if (BlockEvictSpill_flag&(1<<1) || (BlockEvictSpill_flag&(1<<2)&&!should_spill_)
-		  /*if evictTasks is enabled, do not trigger spill unless should_spill_ is set*/) {
+		if(!block_tasks_required && !evict_tasks_required){
+	      on_object_creation_blocked_callback_(lowest_pri,
+				  enable_blocktasks , enable_evicttasks, enable_blocktasks_spill);
+          block_spill = spinning_tasks_.RegisterSpinningTasks(queue_it->first,
+			      num_leased_workers_, enable_blocktasks_spill);
+		}
+	    if (block_spill || (enable_evicttasks && (!should_spill_))
+		  /*if evictTasks is enabled, do not trigger spill unless should_spill_ is set*/) { 
           return Status::TransientObjectStoreFull(
               "Waiting for higher priority tasks to finish");
 		}
@@ -245,9 +241,9 @@ Status CreateRequestQueue::ProcessRequests() {
                                 /*spilling_required=*/nullptr, nullptr, nullptr, nullptr);
         if (!status.ok()) {
           std::string dump = "";
-          if (dump_debug_info_callback_ && !*logged_oom) {
+          if (dump_debug_info_callback_ && !logged_oom) {
             dump = dump_debug_info_callback_();
-            *logged_oom = true;
+            logged_oom = true;
           }
         RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
           << (request)->object_id << " of size "
@@ -263,7 +259,7 @@ Status CreateRequestQueue::ProcessRequests() {
   // run new tasks again.
   if (RayConfig::instance().enable_BlockTasks()) {
     RAY_LOG(DEBUG) << "[JAE_DEBUG] resetting object_creation_blocked_callback priority";
-    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false));
+    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false, false));
   }
 
   return Status::OK();

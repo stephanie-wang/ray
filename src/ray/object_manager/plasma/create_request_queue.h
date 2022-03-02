@@ -33,19 +33,21 @@ namespace plasma {
 
 class SpinningTasks{
   public:
-	//Return false if it is deadlock (all workers spinning)
-    bool RegisterSpinningTasks(ray::TaskKey task_id, size_t num_leased_workers){
+    //Return false if it is deadlock (all workers spinning)
+	//This is deadlock detection #1. There exists false-positive but the 
+	//implementation is simple
+    bool RegisterSpinningTasks(ray::TaskKey task_id, size_t num_leased_workers,
+			bool enable_blocktasks_spill){
       spinning_tasks.insert(task_id);
 	  if(spinning_tasks.size() == num_leased_workers){
-		  return false;
+		return false;
 	  }
-	  return true;
+	  return enable_blocktasks_spill;
     }
 
     void UnRegisterSpinningTasks(ray::TaskKey task_id){
 	  auto it = spinning_tasks.find(task_id);
-	  auto end = spinning_tasks.end();
-	  if(it != end)
+	  if(it != spinning_tasks.end())
 		  spinning_tasks.erase(it);
     }
 
