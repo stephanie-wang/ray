@@ -34,7 +34,8 @@ namespace plasma {
 class CreateRequestQueue {
  public:
   using CreateObjectCallback = std::function<PlasmaError(
-      bool fallback_allocator, PlasmaObject *result, bool *spilling_required)>;
+      bool fallback_allocator, PlasmaObject *result, bool *spilling_required,
+	  bool *block_tasks_required, bool *evict_tasks_required, ray::Priority *lowest_pri)>;
 
   CreateRequestQueue(int64_t oom_grace_period_s,
                      ray::SpillObjectsCallback spill_objects_callback,
@@ -158,7 +159,8 @@ class CreateRequestQueue {
   /// returned by the request handler inside. Returns OK if the request can be
   /// finished.
   Status ProcessRequest(bool fallback_allocator, std::unique_ptr<CreateRequest> &request,
-                        bool *spilling_required);
+                        bool *spilling_required, bool *block_tasks_required, 
+						bool *evict_tasks_required, ray::Priority *lowest_pri);
 
   /// Finish a queued request and remove it from the queue.
   void FinishRequest(absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it);

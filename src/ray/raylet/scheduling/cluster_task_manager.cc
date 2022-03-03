@@ -31,7 +31,8 @@ ClusterTaskManager::ClusterTaskManager(
     const NodeID &self_node_id,
     std::shared_ptr<ClusterResourceScheduler> cluster_resource_scheduler,
     TaskDependencyManagerInterface &task_dependency_manager,
-    std::function<void(std::shared_ptr<WorkerInterface>, rpc::WorkerExitType)> destroy_worker,
+    std::function<void(std::shared_ptr<WorkerInterface>, rpc::WorkerExitType)>
+        destroy_worker,
     std::function<bool(const WorkerID &, const NodeID &)> is_owner_alive,
     NodeInfoGetter get_node_info,
     std::function<void(const RayTask &)> announce_infeasible_task,
@@ -40,8 +41,7 @@ ClusterTaskManager::ClusterTaskManager(
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
-    size_t max_pinned_task_arguments_bytes,
-    SetShouldSpillCallback set_should_spill)
+    size_t max_pinned_task_arguments_bytes, SetShouldSpillCallback set_should_spill)
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
@@ -54,13 +54,13 @@ ClusterTaskManager::ClusterTaskManager(
       report_worker_backlog_(RayConfig::instance().report_worker_backlog()),
       worker_pool_(worker_pool),
       leased_workers_(leased_workers),
-	  block_requested_priority_(Priority()),
+      block_requested_priority_(Priority()),
       get_task_arguments_(get_task_arguments),
       max_pinned_task_arguments_bytes_(max_pinned_task_arguments_bytes),
       metric_tasks_queued_(0),
       metric_tasks_dispatched_(0),
       metric_tasks_spilled_(0),
-      set_should_spill_(set_should_spill){}
+      set_should_spill_(set_should_spill) {}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
@@ -77,7 +77,12 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // there are not enough available resources blocks other
       // tasks from being scheduled.
       Priority task_priority = work_it->first.first;
-      if(task_priority >= block_requested_priority_){
+      RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks task " << 
+		  work_it->second->task.GetTaskSpecification().TaskId() << "priority:" << task_priority
+                     << " block requested is " << block_requested_priority_;
+      if (task_priority >= block_requested_priority_) {
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task "
+                       << task_priority;
         return did_schedule;
       }
 
@@ -148,7 +153,8 @@ bool ClusterTaskManager::WaitForTaskArgsRequests(std::shared_ptr<Work> work) {
         task_dependency_manager_.RequestTaskDependencies(task_id, task.GetDependencies());
     if (args_ready) {
       RAY_LOG(DEBUG) << "Args already ready, task can be dispatched " << task_id;
-      tasks_to_dispatch_[scheduling_key].emplace(task.GetTaskSpecification().GetTaskKey(), work);
+      tasks_to_dispatch_[scheduling_key].emplace(task.GetTaskSpecification().GetTaskKey(),
+                                                 work);
     } else {
       RAY_LOG(DEBUG) << "Waiting for args for task: "
                      << task.GetTaskSpecification().TaskId();
@@ -159,7 +165,8 @@ bool ClusterTaskManager::WaitForTaskArgsRequests(std::shared_ptr<Work> work) {
   } else {
     RAY_LOG(DEBUG) << "No args, task can be dispatched "
                    << task.GetTaskSpecification().TaskId();
-    tasks_to_dispatch_[scheduling_key].emplace(task.GetTaskSpecification().GetTaskKey(), work);
+    tasks_to_dispatch_[scheduling_key].emplace(task.GetTaskSpecification().GetTaskKey(),
+                                               work);
   }
   return can_dispatch;
 }
@@ -288,7 +295,6 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
       auto &work = work_it->second;
       const auto &task = work->task;
       const auto spec = task.GetTaskSpecification();
-      //TODO (Jae) NodeManager.cc
       TaskID task_id = spec.TaskId();
       if (work->status == WorkStatus::WAITING_FOR_WORKER) {
         work_it++;
@@ -297,10 +303,14 @@ void ClusterTaskManager::DispatchScheduledTasksToWorkers(
 
       // Block tasks of a lower priority.
       Priority task_priority = work_it->first.first;
-      if(task_priority >= block_requested_priority_){
+      RAY_LOG(DEBUG) << "[JAE_DEBUG] DispatchScheduledTasksToWorkers task "
+                     << task_priority << " block requested is "
+                     << block_requested_priority_;
+      if (task_priority >= block_requested_priority_) {
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] DispatchScheduledTasksToWorkers blocked task "
+                       << task_priority;
         break;
       }
-
 
       bool args_missing = false;
       bool success = PinTaskArgsIfMemoryAvailable(spec, &args_missing);
@@ -440,9 +450,11 @@ void ClusterTaskManager::QueueAndScheduleTask(
   // If the scheduling class is infeasible, just add the work to the infeasible queue
   // directly.
   if (infeasible_tasks_.count(scheduling_class) > 0) {
-    infeasible_tasks_[scheduling_class].emplace(task.GetTaskSpecification().GetTaskKey(), work);
+    infeasible_tasks_[scheduling_class].emplace(task.GetTaskSpecification().GetTaskKey(),
+                                                work);
   } else {
-    tasks_to_schedule_[scheduling_class].emplace(task.GetTaskSpecification().GetTaskKey(), work);
+    tasks_to_schedule_[scheduling_class].emplace(task.GetTaskSpecification().GetTaskKey(),
+                                                 work);
   }
   AddToBacklogTracker(task);
   ScheduleAndDispatchTasks();
@@ -461,7 +473,8 @@ void ClusterTaskManager::TasksUnblocked(const std::vector<TaskID> &ready_ids) {
       const auto &scheduling_key = task.GetTaskSpecification().GetSchedulingClass();
       RAY_LOG(DEBUG) << "Args ready, task can be dispatched "
                      << task.GetTaskSpecification().TaskId();
-      tasks_to_dispatch_[scheduling_key].emplace(task.GetTaskSpecification().GetTaskKey(), work);
+      tasks_to_dispatch_[scheduling_key].emplace(task.GetTaskSpecification().GetTaskKey(),
+                                                 work);
       waiting_task_queue_.erase(it->second);
       waiting_tasks_index_.erase(it);
     }
@@ -529,7 +542,8 @@ bool ClusterTaskManager::PinTaskArgsIfMemoryAvailable(const TaskSpecification &s
     ReleaseTaskArgs(spec.TaskId());
     RAY_LOG(DEBUG) << "Cannot dispatch task " << spec.TaskId()
                    << " with arguments of size " << task_arg_bytes
-                   << " current pinned bytes is " << pinned_task_arguments_bytes_;
+                   << " current pinned bytes is " << pinned_task_arguments_bytes_
+                   << " max_pinned_task_arguments_bytes is " << max_pinned_task_arguments_bytes_;
     return false;
   }
 
@@ -928,10 +942,11 @@ bool ClusterTaskManager::AnyPendingTasks(RayTask *exemplar, bool *any_pending,
 std::string ClusterTaskManager::DebugStr() const {
   // TODO(Shanly): This method will be replaced with `DebugString` once we remove the
   // legacy scheduler.
-  auto accumulator = [](size_t state,
-                        const std::pair<int, absl::btree_map<TaskKey, std::shared_ptr<Work>>> &pair) {
-    return state + pair.second.size();
-  };
+  auto accumulator =
+      [](size_t state,
+         const std::pair<int, absl::btree_map<TaskKey, std::shared_ptr<Work>>> &pair) {
+        return state + pair.second.size();
+      };
   size_t num_infeasible_tasks = std::accumulate(
       infeasible_tasks_.begin(), infeasible_tasks_.end(), (size_t)0, accumulator);
   size_t num_tasks_to_schedule = std::accumulate(
@@ -1211,21 +1226,19 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
   for (auto &entry : leased_workers_) {
     std::shared_ptr<WorkerInterface> worker = entry.second;
     Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
-    //Smaller priority have higher priority
-    //Does not have less than check it
-    if (priority >= base_priority){
+    if (priority > base_priority) {
       workers_to_kill.push_back(worker);
       should_spill = false;
     }
   }
 
   for (auto &worker : workers_to_kill) {
-    //Consider Using CancelTask instead of DestroyWorker
+    // Consider Using CancelTask instead of DestroyWorker
     destroy_worker_(worker, rpc::WorkerExitType::INTENDED_EXIT);
   }
 
-  //Check Deadlock corner cases
-  //Finer granularity preemption is not considered, kill all the lower priorities
+  // Check Deadlock corner cases
+  // Finer granularity preemption is not considered, kill all the lower priorities
   return should_spill;
 }
 

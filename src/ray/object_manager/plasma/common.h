@@ -109,6 +109,8 @@ class LocalObject {
 
   const plasma::flatbuf::ObjectSource &GetSource() const { return source; }
 
+  ray::Priority &GetPriority() { return object_info.priority; }
+
   void ToPlasmaObject(PlasmaObject *object, bool check_sealed) const {
     RAY_DCHECK(object != nullptr);
     if (check_sealed) {

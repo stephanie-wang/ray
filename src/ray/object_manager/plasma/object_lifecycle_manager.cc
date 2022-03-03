@@ -49,6 +49,10 @@ std::pair<const LocalObject *, flatbuf::PlasmaError> ObjectLifecycleManager::Cre
   return {entry, PlasmaError::OK};
 }
 
+ray::Priority ObjectLifecycleManager::GetLowestPriObject() {
+  return object_store_->GetLowestPriObject();
+}
+
 const LocalObject *ObjectLifecycleManager::GetObject(const ObjectID &object_id) const {
   return object_store_->GetObject(object_id);
 }
@@ -133,7 +137,8 @@ bool ObjectLifecycleManager::AddReference(const ObjectID &object_id) {
   entry->ref_count++;
   stats_collector_.OnObjectRefIncreased(*entry);
   RAY_LOG(DEBUG) << "Object " << object_id << " reference has incremented"
-                 << ", num bytes in use is now " << GetNumBytesInUse();
+                 << ", num bytes in use is now " << GetNumBytesInUse()
+                 << " ref_count is " << entry->ref_count;
   return true;
 }
 
@@ -147,6 +152,8 @@ bool ObjectLifecycleManager::RemoveReference(const ObjectID &object_id) {
   }
 
   entry->ref_count--;
+  RAY_LOG(DEBUG) << "Object " << object_id << " reference has decremented ref_count is "
+	  << entry->ref_count;
   stats_collector_.OnObjectRefDecreased(*entry);
 
   if (entry->ref_count > 0) {

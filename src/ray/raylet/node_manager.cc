@@ -227,16 +227,17 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return GetLocalObjectManager().IsSpillingInProgress();
           },
           /*on_object_creation_blocked_callback=*/
-          [this](const Priority &base_priority) {
-            //cluster_task_manager_->BlockTasks(priority);
-            //TODO(Jae) Remove this line and set the actual value for should_spill
-            //from the ClusterTaskManager
-            cluster_task_manager_->BlockTasks(base_priority);
-            bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
-            io_service_.post([this, should_spill](){
-              object_manager_.SetShouldSpill(should_spill);
+          [this](const Priority &base_priority, bool block_tasks, bool evict_tasks) {
+		    if(block_tasks){
+              cluster_task_manager_->BlockTasks(base_priority);
+			}
+			if(evict_tasks){
+              bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
+              io_service_.post([this, should_spill](){
+                object_manager_.SetShouldSpill(should_spill);
               },"");
-          },
+			}
+		  },
           /*object_store_full_callback=*/
           [this]() {
             // Post on the node manager's event loop since this
@@ -332,9 +333,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
   }
   auto destroy_worker = [this](std::shared_ptr<WorkerInterface> worker,
                                 rpc::WorkerExitType disconnect_type) {
-    DisconnectClient(worker->Connection(), disconnect_type);
-    worker->MarkDead();
-    KillWorker(worker);
+	  DestroyWorker(worker, disconnect_type);
   };
   auto is_owner_alive = [this](const WorkerID &owner_worker_id,
                                const NodeID &owner_node_id) {
@@ -536,7 +535,6 @@ void NodeManager::KillWorker(std::shared_ptr<WorkerInterface> worker) {
   });
 }
 
-//when make a change in this function make sure to change destroy_worker lammbda function as well
 void NodeManager::DestroyWorker(std::shared_ptr<WorkerInterface> worker,
                                 rpc::WorkerExitType disconnect_type) {
   // We should disconnect the client first. Otherwise, we'll remove bundle resources
@@ -2109,9 +2107,7 @@ void NodeManager::HandlePinObjectIDs(const rpc::PinObjectIDsRequest &request,
     send_reply_callback(Status::Invalid("Failed to get objects."), nullptr, nullptr);
     return;
   }
-  local_object_manager_.PinObjects(object_ids, std::move(results), owner_address);
-  // Wait for the object to be freed by the owner, which keeps the ref count.
-  local_object_manager_.WaitForObjectFree(owner_address, object_ids);
+  local_object_manager_.PinObjectsAndWaitForFree(object_ids, std::move(results), owner_address);
   send_reply_callback(Status::OK(), nullptr, nullptr);
 }
 

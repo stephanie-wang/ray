@@ -67,14 +67,15 @@ ray::ObjectID GetCreateRequestObjectId(const std::vector<uint8_t> &message) {
 }
 }  // namespace
 
-PlasmaStore::PlasmaStore(instrumented_io_context &main_service, IAllocator &allocator,
-                         const std::string &socket_name, uint32_t delay_on_oom_ms,
-                         float object_spilling_threshold,
-                         ray::SpillObjectsCallback spill_objects_callback,
-                         std::function<void()> object_store_full_callback,
-                         ray::AddObjectCallback add_object_callback,
-                         ray::DeleteObjectCallback delete_object_callback,
-                         ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback)
+PlasmaStore::PlasmaStore(
+    instrumented_io_context &main_service, IAllocator &allocator,
+    const std::string &socket_name, uint32_t delay_on_oom_ms,
+    float object_spilling_threshold, float block_tasks_threshold,
+    float evict_tasks_threshold, ray::SpillObjectsCallback spill_objects_callback,
+    std::function<void()> object_store_full_callback,
+    ray::AddObjectCallback add_object_callback,
+    ray::DeleteObjectCallback delete_object_callback,
+    ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback)
     : io_context_(main_service),
       socket_name_(socket_name),
       acceptor_(main_service, ParseUrlEndpoint(socket_name)),
@@ -85,10 +86,11 @@ PlasmaStore::PlasmaStore(instrumented_io_context &main_service, IAllocator &allo
       object_lifecycle_mgr_(allocator_, delete_object_callback_),
       delay_on_oom_ms_(delay_on_oom_ms),
       object_spilling_threshold_(object_spilling_threshold),
+      block_tasks_threshold_(block_tasks_threshold),
+      evict_tasks_threshold_(evict_tasks_threshold),
       create_request_queue_(
           /*oom_grace_period_s=*/RayConfig::instance().oom_grace_period_s(),
-          spill_objects_callback,
-          on_object_creation_blocked_callback,
+          spill_objects_callback, on_object_creation_blocked_callback,
           object_store_full_callback,
           /*get_time=*/
           []() { return absl::GetCurrentTimeNanos(); },
@@ -137,11 +139,11 @@ void PlasmaStore::AddToClientObjectIds(const ObjectID &object_id,
   client->MarkObjectAsUsed(object_id);
 }
 
-PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client> &client,
-                                                   const std::vector<uint8_t> &message,
-                                                   bool fallback_allocator,
-                                                   PlasmaObject *object,
-                                                   bool *spilling_required) {
+PlasmaError PlasmaStore::HandleCreateObjectRequest(
+    const std::shared_ptr<Client> &client, const std::vector<uint8_t> &message,
+    bool fallback_allocator, PlasmaObject *object, bool *spilling_required,
+    bool *block_tasks_required, bool *evict_tasks_required,
+    ray::Priority *lowest_priority) {
   uint8_t *input = (uint8_t *)message.data();
   size_t input_size = message.size();
   ray::ObjectInfo object_info;
@@ -160,26 +162,38 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(const std::shared_ptr<Client>
                    << ", data_size=" << object_info.data_size
                    << ", metadata_size=" << object_info.metadata_size;
   }
-  //TODO(Jae) Erase this later
-  /*
   const int64_t footprint_limit = allocator_.GetFootprintLimit();
-  const float allocated_percentage =
-        static_cast<float>(allocator_.Allocated()) / footprint_limit;
-  if(allocated_percentage >= block_tasks_threshold_){
-	  blockTasks();
+  float allocated_percentage;
+
+  if (footprint_limit != 0) {
+    allocated_percentage = static_cast<float>(allocator_.Allocated()) / footprint_limit;
+  } else {
+    allocated_percentage = 0;
   }
-  if(allocated_percentage >= evict_tasks_threshold_){
-	  evictTasks();
+  if (block_tasks_required != nullptr) {
+    if (allocated_percentage >= block_tasks_threshold_) {
+      *block_tasks_required = true;
+    }
   }
-  */
+  if (evict_tasks_required != nullptr) {
+    if (allocated_percentage >= evict_tasks_threshold_) {
+      *evict_tasks_required = true;
+    }
+  }
+  if (lowest_priority != nullptr) {
+    //LocalObject *lowest_pri_obj = object_lifecycle_mgr_.GetLowestPriObject();
+    //lowest_priority = lowest_pri_obj->GetPriority();
+	ray::Priority p = object_lifecycle_mgr_.GetLowestPriObject();
+	int size = p.GetDepth();
+	int i;
+	for(i=0; i<size; i++){
+		lowest_priority->SetScore(i, p.GetScore(i));
+	}
+  }
 
   // Trigger object spilling if current usage is above the specified threshold.
   if (spilling_required != nullptr) {
-    const int64_t footprint_limit = allocator_.GetFootprintLimit();
     if (footprint_limit != 0) {
-	  const int64_t footprint_limit = allocator_.GetFootprintLimit();
-	  const float allocated_percentage =
-        static_cast<float>(allocator_.Allocated()) / footprint_limit;
       if (allocated_percentage > object_spilling_threshold_) {
         RAY_LOG(DEBUG) << "Triggering object spilling because current usage "
                        << allocated_percentage << "% is above threshold "
@@ -278,6 +292,7 @@ void PlasmaStore::ReleaseObject(const ObjectID &object_id,
   auto entry = object_lifecycle_mgr_.GetObject(object_id);
   RAY_CHECK(entry != nullptr);
   // Remove the client from the object's array of clients.
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] [ReleaseObject] Object " << object_id;
   RAY_CHECK(RemoveFromClientObjectIds(object_id, client) == 1);
 }
 
@@ -372,16 +387,21 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     for (size_t i = 0; i < request->priority()->size(); i++) {
       priority.score.push_back(request->priority()->Get(i));
     }
+    // Check the log and remove this if it gets a correct value
+    RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] priority passed is " << priority;
     ray::TaskKey key(priority, ObjectID::FromRandom().TaskId());
 
     // absl failed analyze mutex safety for lambda
-    auto handle_create = [this, client, message](
-                             bool fallback_allocator, PlasmaObject *result,
-                             bool *spilling_required) ABSL_NO_THREAD_SAFETY_ANALYSIS {
-      mutex_.AssertHeld();
-      return HandleCreateObjectRequest(client, message, fallback_allocator, result,
-                                       spilling_required);
-    };
+    auto handle_create =
+        [this, client, message](
+            bool fallback_allocator, PlasmaObject *result, bool *spilling_required,
+            bool *block_tasks_required, bool *evict_tasks_required,
+            ray::Priority *lowest_priority) ABSL_NO_THREAD_SAFETY_ANALYSIS {
+          mutex_.AssertHeld();
+          return HandleCreateObjectRequest(client, message, fallback_allocator, result,
+                                           spilling_required, block_tasks_required,
+                                           evict_tasks_required, lowest_priority);
+        };
 
     if (request->try_immediately()) {
       RAY_LOG(DEBUG) << "Received request to create object " << object_id
@@ -397,8 +417,8 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     } else {
       // Returns a request ID that the client can use to later get the result
       // (to allow async processing on the client).
-      auto req_id =
-          create_request_queue_.AddRequest(key, object_id, client, handle_create, object_size);
+      auto req_id = create_request_queue_.AddRequest(key, object_id, client,
+                                                     handle_create, object_size);
       RAY_LOG(DEBUG) << "Received create request for object " << object_id
                      << " assigned request ID " << req_id << ", " << object_size
                      << " bytes";

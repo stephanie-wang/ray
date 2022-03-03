@@ -51,6 +51,22 @@ const LocalObject *ObjectStore::CreateObject(const ray::ObjectInfo &object_info,
   return entry;
 }
 
+ray::Priority ObjectStore::GetLowestPriObject() {
+  // Return the lowest priority object in object_table
+  auto it = object_table_.begin();
+  if(it == object_table_.end())
+	return ray::Priority();
+  ray::Priority lowest_priority = it->second->GetPriority();
+  for (; it != object_table_.end(); it++){
+	ray::Priority p = it->second->GetPriority();
+    if(lowest_priority < p){
+      lowest_priority = p;
+	}
+  }
+  return lowest_priority;
+}
+
+
 const LocalObject *ObjectStore::GetObject(const ObjectID &object_id) const {
   auto it = object_table_.find(object_id);
   if (it == object_table_.end()) {
@@ -71,6 +87,7 @@ const LocalObject *ObjectStore::SealObject(const ObjectID &object_id) {
 
 bool ObjectStore::DeleteObject(const ObjectID &object_id) {
   auto entry = GetMutableObject(object_id);
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] object is freed:" << object_id;
   if (entry == nullptr) {
     return false;
   }

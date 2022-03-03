@@ -92,6 +92,8 @@ void PlasmaStoreRunner::Start(ray::SpillObjectsCallback spill_objects_callback,
     store_.reset(new PlasmaStore(main_service_, *allocator_, socket_name_,
                                  RayConfig::instance().object_store_full_delay_ms(),
                                  RayConfig::instance().object_spilling_threshold(),
+                                 RayConfig::instance().block_tasks_threshold(),
+                                 RayConfig::instance().evict_tasks_threshold(),
                                  spill_objects_callback, object_store_full_callback,
                                  add_object_callback, delete_object_callback,
                                  on_object_creation_blocked_callback));

@@ -44,6 +44,13 @@ class IObjectStore {
                                           plasma::flatbuf::ObjectSource source,
                                           bool fallback_allocate) = 0;
 
+  /// Get object of lowest priority.
+  ///
+  /// \return
+  ///   - nullptr if such object doesn't exist.
+  ///   - otherwise, pointer to the object.
+  virtual ray::Priority GetLowestPriObject() = 0;
+
   /// Get object by id.
   ///
   /// \param object_id Object ID of the object to be sealed.
@@ -78,6 +85,8 @@ class ObjectStore : public IObjectStore {
   const LocalObject *CreateObject(const ray::ObjectInfo &object_info,
                                   plasma::flatbuf::ObjectSource source,
                                   bool fallback_allocate) override;
+
+  ray::Priority GetLowestPriObject() override;
 
   const LocalObject *GetObject(const ObjectID &object_id) const override;
 
