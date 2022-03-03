@@ -172,7 +172,7 @@ Status CreateRequestQueue::ProcessRequests() {
     ray::Priority lowest_pri;
     ray::TaskKey task_id = queue_it->first;
     auto status =
-        ProcessRequest(/*fallback_allocator=*/true, request, &spilling_required,
+        ProcessRequest(/*fallback_allocator=*/false, request, &spilling_required,
                        &block_tasks_required, &evict_tasks_required, &lowest_pri);
     if (spilling_required) {
       spill_objects_callback_();
@@ -208,7 +208,7 @@ Status CreateRequestQueue::ProcessRequests() {
 	  if (enable_blocktasks || enable_evicttasks) {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
 			<< enable_blocktasks <<" " << enable_evicttasks << " " 
-			<< block_spill << ") on priority "
+			<< enable_blocktasks_spill << ") on priority "
 			<< lowest_pri;
 		if(!block_tasks_required && !evict_tasks_required){
 	      on_object_creation_blocked_callback_(lowest_pri,
