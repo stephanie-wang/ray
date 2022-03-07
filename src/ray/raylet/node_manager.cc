@@ -228,22 +228,22 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           },
           /*on_object_creation_blocked_callback=*/
           [this](const Priority &base_priority, bool block_tasks,
-				  bool evict_tasks, bool block_spill) {
-		    if(block_tasks){
-              cluster_task_manager_->BlockTasks(base_priority);
-			}
-			if(evict_tasks){
-              bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
-              io_service_.post([this, should_spill](){
-                object_manager_.SetShouldSpill(should_spill);
-              },"");
-			}
-			if(block_spill&block_tasks){//non-block tasks don't need #leasedWorkers
-			  size_t num_leased_workers = cluster_task_manager_->GetNumLeasedWorkers();
-              io_service_.post([this, num_leased_workers](){
-                object_manager_.SetNumLeasedWorkers(num_leased_workers);
-              },"");
-			}
+            bool evict_tasks, bool block_spill) {
+            if(block_tasks){
+                  cluster_task_manager_->BlockTasks(base_priority);
+            }
+            if(evict_tasks){
+                    bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
+                    io_service_.post([this, should_spill](){
+                      object_manager_.SetShouldSpill(should_spill);
+                    },"");
+            }
+            if(block_spill&block_tasks){//non-block tasks don't need #leasedWorkers
+              size_t num_leased_workers = cluster_task_manager_->GetNumLeasedWorkers();
+                    io_service_.post([this, num_leased_workers](){
+                      object_manager_.SetNumLeasedWorkers(num_leased_workers);
+                    },"");
+            }
 		  },
           /*object_store_full_callback=*/
           [this]() {
