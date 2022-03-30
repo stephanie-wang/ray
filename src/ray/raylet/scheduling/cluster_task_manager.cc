@@ -1220,8 +1220,8 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
   return false;
 }
 
-size_t ClusterTaskManager::GetNumLeasedWorkers() {
-	return leased_workers_.size();
+bool ClusterTaskManager::AllLeasedWorkersSpinning(int num_spinning_workers) {
+	return ((size_t)num_spinning_workers) == leased_workers_.size();
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {

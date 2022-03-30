@@ -36,10 +36,6 @@ class PlasmaStoreRunner {
     store_->SetShouldSpill(should_spill);
   }
 
-  void SetNumLeasedWorkers(size_t num_leased_workers) {
-    store_->SetNumLeasedWorkers(num_leased_workers);
-  }
-
  private:
   void Shutdown();
   mutable absl::Mutex store_runner_mutex_;

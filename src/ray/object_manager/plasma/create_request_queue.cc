@@ -151,10 +151,6 @@ void CreateRequestQueue::SetShouldSpill(bool should_spill) {
   should_spill_ = should_spill;
 }
 
-void CreateRequestQueue::SetNumLeasedWorkers(size_t num_leased_workers){
-  num_leased_workers_ = num_leased_workers;
-}
-
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
@@ -184,10 +180,9 @@ Status CreateRequestQueue::ProcessRequests() {
 	block_spill = (enable_blocktasks_spill&block_tasks_required); 
 
 	if (block_tasks_required || evict_tasks_required) {
+      int num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(queue_it->first);
 	  on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
-			  evict_tasks_required, block_spill);
-      block_spill = spinning_tasks_.RegisterSpinningTasks(queue_it->first,
-			  num_leased_workers_, enable_blocktasks_spill);
+			  evict_tasks_required, block_spill, num_spinning_workers);
 	}
 
     auto now = get_time_();
@@ -211,16 +206,21 @@ Status CreateRequestQueue::ProcessRequests() {
 			<< enable_blocktasks_spill << ") on priority "
 			<< lowest_pri;
 		if(!block_tasks_required && !evict_tasks_required){
-	      on_object_creation_blocked_callback_(lowest_pri,
-				  enable_blocktasks , enable_evicttasks, enable_blocktasks_spill);
-          block_spill = spinning_tasks_.RegisterSpinningTasks(queue_it->first,
-			      num_leased_workers_, enable_blocktasks_spill);
+          int num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(queue_it->first);
+	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks , 
+				  enable_evicttasks, enable_blocktasks_spill, num_spinning_workers);
 		}
-	    if (block_spill || (enable_evicttasks && (!should_spill_))
-		  /*if evictTasks is enabled, do not trigger spill unless should_spill_ is set*/) { 
+	    if ((block_spill || enable_evicttasks) && (!should_spill_)) { 
+		  //should_spill is set in 2 cases
+		  //1. block_spill callback gives #of spinning tasks to task_manager.
+		  //Task_manager sets should_spill if #spinning_tasks==#leased_workers
+		  //2. If evict_tasks does not evict any tasks
           return Status::TransientObjectStoreFull(
               "Waiting for higher priority tasks to finish");
 		}
+		//Alternative Design point. Always set should_spill_ from task_manager.
+		//Current design reduce callback function. But spill called once only
+		should_spill_ = false;
 	  }
 
       auto grace_period_ns = oom_grace_period_ns_;
@@ -259,7 +259,7 @@ Status CreateRequestQueue::ProcessRequests() {
   // run new tasks again.
   if (RayConfig::instance().enable_BlockTasks()) {
     RAY_LOG(DEBUG) << "[JAE_DEBUG] resetting object_creation_blocked_callback priority";
-    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false, false));
+    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0));
   }
 
   return Status::OK();

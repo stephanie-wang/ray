@@ -31,30 +31,6 @@
 
 namespace plasma {
 
-class SpinningTasks{
-  public:
-    //Return false if it is deadlock (all workers spinning)
-	//This is deadlock detection #1. There exists false-positive but the 
-	//implementation is simple
-    bool RegisterSpinningTasks(ray::TaskKey task_id, size_t num_leased_workers,
-			bool enable_blocktasks_spill){
-      spinning_tasks.insert(task_id);
-	  if(spinning_tasks.size() == num_leased_workers){
-		return false;
-	  }
-	  return enable_blocktasks_spill;
-    }
-
-    void UnRegisterSpinningTasks(ray::TaskKey task_id){
-	  auto it = spinning_tasks.find(task_id);
-	  if(it != spinning_tasks.end())
-		  spinning_tasks.erase(it);
-    }
-
-  private:
-    absl::flat_hash_set<ray::TaskKey> spinning_tasks;
-};
-
 class CreateRequestQueue {
  public:
   using CreateObjectCallback = std::function<PlasmaError(
@@ -146,8 +122,6 @@ class CreateRequestQueue {
 
   void SetShouldSpill(bool should_spill);
 
-  void SetNumLeasedWorkers(size_t num_leased_workers);
-
  private:
   struct CreateRequest {
     CreateRequest(const ObjectID &object_id, uint64_t request_id,
@@ -179,6 +153,26 @@ class CreateRequestQueue {
     // client once ready.
     PlasmaError error = PlasmaError::OK;
     PlasmaObject result = {};
+  };
+
+  class SpinningTasks{
+    public:
+      //Return false if it is deadlock (all workers spinning)
+  	  //This is deadlock detection #1. There exists false-positive but the 
+  	  //implementation is simple
+      int RegisterSpinningTasks(ray::TaskKey task_id){
+        spinning_tasks.insert(task_id);
+		return spinning_tasks.size();
+      }
+
+      void UnRegisterSpinningTasks(ray::TaskKey task_id){
+        auto it = spinning_tasks.find(task_id);
+	    if(it != spinning_tasks.end())
+		  spinning_tasks.erase(it);
+      }
+
+    private:
+      absl::flat_hash_set<ray::TaskKey> spinning_tasks;
   };
 
   /// Process a single request. Sets the request's error result to the error
@@ -245,8 +239,6 @@ class CreateRequestQueue {
 
   // Shared between the object store thread and the scheduler thread.
   bool should_spill_ = false;
-
-  size_t num_leased_workers_ = -1;
 
   SpinningTasks spinning_tasks_;
 
