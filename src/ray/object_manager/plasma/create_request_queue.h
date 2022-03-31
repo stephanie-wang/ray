@@ -160,19 +160,20 @@ class CreateRequestQueue {
       //Return false if it is deadlock (all workers spinning)
   	  //This is deadlock detection #1. There exists false-positive but the 
   	  //implementation is simple
-      int RegisterSpinningTasks(ray::TaskKey task_id){
-        spinning_tasks.insert(task_id);
+      size_t RegisterSpinningTasks(ray::Priority p){
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] RegisterSpinningTasks priority:" <<p;
+        spinning_tasks.insert(p);
 		return spinning_tasks.size();
       }
 
-      void UnRegisterSpinningTasks(ray::TaskKey task_id){
-        auto it = spinning_tasks.find(task_id);
+      void UnRegisterSpinningTasks(ray::Priority p){
+        auto it = spinning_tasks.find(p);
 	    if(it != spinning_tasks.end())
 		  spinning_tasks.erase(it);
       }
 
     private:
-      absl::flat_hash_set<ray::TaskKey> spinning_tasks;
+      absl::flat_hash_set<ray::Priority> spinning_tasks;
   };
 
   /// Process a single request. Sets the request's error result to the error

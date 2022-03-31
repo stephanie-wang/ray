@@ -83,6 +83,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       if (task_priority >= block_requested_priority_) {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task "
                        << task_priority;
+		  work_it++;
 	  	  continue;
       }
 
@@ -1220,8 +1221,8 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
   return false;
 }
 
-bool ClusterTaskManager::AllLeasedWorkersSpinning(int num_spinning_workers) {
-	return ((size_t)num_spinning_workers) == leased_workers_.size();
+bool ClusterTaskManager::AllLeasedWorkersSpinning(size_t num_spinning_workers) {
+	return num_spinning_workers == leased_workers_.size();
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {

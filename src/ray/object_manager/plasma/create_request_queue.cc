@@ -157,37 +157,39 @@ Status CreateRequestQueue::ProcessRequests() {
   bool enable_blocktasks = RayConfig::instance().enable_BlockTasks();
   bool enable_blocktasks_spill = RayConfig::instance().enable_BlockTasksSpill();
   bool enable_evicttasks = RayConfig::instance().enable_EvictTasks();
+  size_t num_spinning_workers = 0;
 
+  //TODO(Jae) Check if taskId differs within a same task with multiple objects
+  //Jae there are 2 choices for deadlock detection #1. 
+  //1. When the first task is blocked register all tasks from queue_ to spinning_tasks
+  //2. Iterate over other tasks in the queue and see if they fail too.
   while (!queue_.empty()) {
     auto queue_it = queue_.begin();
     bool spilling_required = false;
     bool block_tasks_required = false;
     bool evict_tasks_required = false;
-    bool block_spill;
     std::unique_ptr<CreateRequest> &request = queue_it->second;
     ray::Priority lowest_pri;
-    ray::TaskKey task_id = queue_it->first;
+    ray::TaskID task_id = queue_it->first.second;
     auto status =
         ProcessRequest(/*fallback_allocator=*/false, request, &spilling_required,
                        &block_tasks_required, &evict_tasks_required, &lowest_pri);
-    if (spilling_required) {
+    if (spilling_required && !enable_blocktasks_spill) {
       spill_objects_callback_();
     }
-
-    //Turn these flags on only when matching flags are on
-	block_tasks_required = (block_tasks_required&enable_blocktasks); 
-	evict_tasks_required = (evict_tasks_required&enable_evicttasks);
-	block_spill = (enable_blocktasks_spill&block_tasks_required); 
-
-	if (block_tasks_required || evict_tasks_required) {
-      int num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(queue_it->first);
-	  on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
-			  evict_tasks_required, block_spill, num_spinning_workers);
-	}
 
     auto now = get_time_();
 
     if (status.ok()) {
+      //Turn these flags on only when matching flags are on
+      block_tasks_required = (block_tasks_required&enable_blocktasks); 
+	  evict_tasks_required = (evict_tasks_required&enable_evicttasks);
+
+	  if(block_tasks_required || evict_tasks_required){
+	    on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
+	  		  evict_tasks_required, enable_blocktasks_spill, num_spinning_workers);
+	  }
+
       FinishRequest(queue_it);
       // Reset the oom start time since the creation succeeds.
       oom_start_time_ns_ = -1;
@@ -200,17 +202,22 @@ Status CreateRequestQueue::ProcessRequests() {
         oom_start_time_ns_ = now;
       }
 
-	  if (enable_blocktasks || enable_evicttasks) {
+	  if (enable_blocktasks || enable_evicttasks || enable_blocktasks_spill) {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
 			<< enable_blocktasks <<" " << enable_evicttasks << " " 
 			<< enable_blocktasks_spill << ") on priority "
 			<< lowest_pri;
-		if(!block_tasks_required && !evict_tasks_required){
-          int num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(queue_it->first);
-	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks , 
-				  enable_evicttasks, enable_blocktasks_spill, num_spinning_workers);
+		if(enable_blocktasks_spill){
+          RAY_LOG(DEBUG) << "[JAE_DEBUG] task " << task_id << " spins"; 
+		  for(auto it = queue_.begin(); it != queue_.end(); it++){
+            num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(it->first.first);
+		  }
 		}
-	    if ((block_spill || enable_evicttasks) && (!should_spill_)) { 
+		
+	    on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks , 
+		  enable_evicttasks, enable_blocktasks_spill, num_spinning_workers);
+
+	    if ((enable_blocktasks_spill || enable_evicttasks) && (!should_spill_)) { 
 		  //should_spill is set in 2 cases
 		  //1. block_spill callback gives #of spinning tasks to task_manager.
 		  //Task_manager sets should_spill if #spinning_tasks==#leased_workers
@@ -269,7 +276,7 @@ void CreateRequestQueue::FinishRequest(
     absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it) {
   // Fulfill the request.
   // auto &request = *(queue_it->second);
-  spinning_tasks_.UnRegisterSpinningTasks(queue_it->first);
+  spinning_tasks_.UnRegisterSpinningTasks(queue_it->first.first);
   auto it = fulfilled_requests_.find(queue_it->second->request_id);
   RAY_CHECK(it != fulfilled_requests_.end());
   RAY_CHECK(it->second == nullptr);
