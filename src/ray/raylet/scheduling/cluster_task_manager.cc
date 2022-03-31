@@ -83,8 +83,8 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       if (task_priority >= block_requested_priority_) {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task "
                        << task_priority;
-		  work_it++;
-	  	  continue;
+		    work_it++;
+        continue;
       }
 
       const std::shared_ptr<Work> &work = work_it->second;
