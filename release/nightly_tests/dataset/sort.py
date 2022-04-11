@@ -6,6 +6,8 @@ import psutil
 import resource
 import json
 from typing import List
+import csv
+import sys
 
 from ray.data.impl.arrow_block import ArrowRow
 from ray.data.impl.util import _check_pyarrow_version
@@ -14,6 +16,8 @@ from ray.data.block import Block, BlockMetadata
 from ray.data.datasource import Datasource, ReadTask
 from ray.internal.internal_api import memory_summary
 
+
+CSV_FIELDS = ["num_partitions", "partition_size", "time", "success", "peak_driver_memory", "rss","op"]
 
 class RandomIntRowDatasource(Datasource[ArrowRow]):
     """An example datasource that generates rows with random int64 columns.
@@ -95,6 +99,22 @@ if __name__ == "__main__":
         f"{partition_size / 1e9}GB partition size, "
         f"{num_partitions * partition_size / 1e9}GB total"
     )
+
+    op = "random_shuffle" if args.shuffle else "sort"
+    output_exists = bool(os.path.exists("out.csv") and os.stat("out.csv").st_size)
+    if output_exists:
+        try:
+            with open("out.csv", "r") as csvfile:
+                reader = csv.DictReader(csvfile)
+                for row in reader:
+                    if (int(row["num_partitions"]) == num_partitions and
+                            int(row["partition_size"]) == partition_size and
+                            row["op"] == op):
+                        print(f"Results already found for {op} on {num_partitions} {partition_size // 1e6}MB partitions, skipping.")
+                        sys.exit(0)
+        except Exception:
+            pass
+
     start_time = time.time()
     source = RandomIntRowDatasource()
     num_rows_per_partition = partition_size // 8
@@ -153,6 +173,20 @@ if __name__ == "__main__":
             ],
         }
         json.dump(results, out_file)
+
+    with open("out.csv", "a+") as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=CSV_FIELDS)
+        if not output_exists:
+            writer.writeheader()
+        writer.writerow({
+            "num_partitions": num_partitions,
+            "partition_size": partition_size,
+            "time": duration,
+            "success": 1 if exc is None else 0,
+            "peak_driver_memory": maxrss,
+            "rss": rss,
+            "op": "random_shuffle" if args.shuffle else "sort",
+            })
 
     if exc:
         raise exc

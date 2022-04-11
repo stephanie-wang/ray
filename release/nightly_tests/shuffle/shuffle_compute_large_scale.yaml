@@ -5,17 +5,18 @@ aws:
     BlockDeviceMappings:
         - DeviceName: /dev/sda1
           Ebs:
-            VolumeSize: 500
+            VolumeSize: 1000
 
 head_node_type:
     name: head_node
-    instance_type:  m5.4xlarge
-    resources: {"object_store_memory": 21474836480}
+    instance_type: r5.4xlarge
+    #resources: {"object_store_memory": 21474836480}
+    resources: {"cpu": 0}
 
 worker_node_types:
     - name: worker_node
       instance_type: m5.4xlarge
-      min_workers: 19
-      max_workers: 19
+      min_workers: 20
+      max_workers: 20
       use_spot: false
-      resources: {"object_store_memory": 21474836480}
+      #resources: {"object_store_memory": 21474836480}
