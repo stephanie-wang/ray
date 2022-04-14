@@ -47,6 +47,20 @@ class ShuffleOp:
         """
         raise NotImplementedError
 
+    @staticmethod
+    def _get_cluster_cpu_map():
+        nodes = ray.nodes()
+        # Map from per-node resource name to number of CPUs available on that
+        # node.
+        cpu_map = {}
+        for node in nodes:
+            resources = node["Resources"]
+            num_cpus = int(resources.get("CPU", 0))
+            if num_cpus == 0:
+                continue
+            cpu_map[node["NodeID"]] = num_cpus
+        return cpu_map
+
     def execute(
         self,
         input_blocks: BlockList,
@@ -63,17 +77,25 @@ class ShuffleOp:
             map_ray_remote_args = {}
         if reduce_ray_remote_args is None:
             reduce_ray_remote_args = {}
-        if "scheduling_strategy" not in reduce_ray_remote_args:
-            reduce_ray_remote_args = reduce_ray_remote_args.copy()
-            reduce_ray_remote_args["scheduling_strategy"] = "SPREAD"
+
+        try:
+            map_ray_remote_args.pop("scheduling_strategy")
+        except KeyError:
+            pass
+        try:
+            reduce_ray_remote_args.pop("scheduling_strategy")
+        except KeyError:
+            pass
 
         shuffle_map = cached_remote_fn(self.map)
         shuffle_reduce = cached_remote_fn(self.reduce)
 
+        node_ids = list(self._get_cluster_cpu_map())
         map_bar = ProgressBar("Shuffle Map", total=input_num_blocks)
 
         shuffle_map_out = [
             shuffle_map.options(
+                scheduling_strategy=NodeAffinitySchedulingStrategy(node_ids[i % len(node_ids)], soft=True),
                 **map_ray_remote_args,
                 num_returns=1 + output_num_blocks,
             ).remote(i, block, output_num_blocks, *self._map_args)
@@ -96,7 +118,9 @@ class ShuffleOp:
 
         reduce_bar = ProgressBar("Shuffle Reduce", total=output_num_blocks)
         shuffle_reduce_out = [
-            shuffle_reduce.options(**reduce_ray_remote_args, num_returns=2,).remote(
+            shuffle_reduce.options(
+                scheduling_strategy=NodeAffinitySchedulingStrategy(node_ids[j % len(node_ids)], soft=True),
+                **reduce_ray_remote_args, num_returns=2,).remote(
                 *self._reduce_args,
                 *[shuffle_map_out[i][j] for i in range(input_num_blocks)],
             )
@@ -211,7 +235,7 @@ class PushBasedShuffleOp(ShuffleOp):
         Returns list of [BlockMetadata, O1, O2, O3, ...output_num_blocks].
         """
         assert (
-            len(set(len(mapper_outputs) for mapper_outputs in all_mapper_outputs)) == 1
+            len({len(mapper_outputs) for mapper_outputs in all_mapper_outputs}) == 1
         ), "Received different number of map inputs"
         stats = BlockExecStats.builder()
         merged_outputs = []
@@ -223,20 +247,6 @@ class PushBasedShuffleOp(ShuffleOp):
             input_files=None, exec_stats=stats.build()
         )
         return [meta] + merged_outputs
-
-    @staticmethod
-    def _get_cluster_cpu_map():
-        nodes = ray.nodes()
-        # Map from per-node resource name to number of CPUs available on that
-        # node.
-        cpu_map = {}
-        for node in nodes:
-            resources = node["Resources"]
-            num_cpus = int(resources.get("CPU", 0))
-            if num_cpus == 0:
-                continue
-            cpu_map[node["NodeID"]] = num_cpus
-        return cpu_map
 
     @staticmethod
     def _compute_merge_task_args(
