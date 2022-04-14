@@ -990,7 +990,7 @@ def test_convert_types(ray_start_regular_shared):
 
     arrow_ds = ray.data.range_arrow(1)
     assert arrow_ds.map(lambda x: "plain_{}".format(x["value"])).take() == ["plain_0"]
-    assert arrow_ds.map(lambda x: {"a": (x["value"],)}).take() == [{"a": (0,)}]
+    assert arrow_ds.map(lambda x: {"a": (x["value"],)}).take() == [{"a": [0]}]
 
 
 def test_from_items(ray_start_regular_shared):
@@ -1474,6 +1474,12 @@ def test_map_batch(ray_start_regular_shared, tmp_path):
         ds_list = ds.map_batches(
             lambda df: 1, batch_size=2, batch_format="pyarrow"
         ).take()
+
+
+def test_map_batch_actors_preserves_order(ray_start_regular_shared):
+    # Test that actor compute model preserves block order.
+    ds = ray.data.range(10, parallelism=5)
+    assert ds.map_batches(lambda x: x, compute="actors").take() == list(range(10))
 
 
 def test_union(ray_start_regular_shared):
@@ -2567,6 +2573,27 @@ def test_groupby_map_groups_for_empty_dataset(ray_start_regular_shared):
     assert mapped.take_all() == []
 
 
+def test_groupby_map_groups_merging_empty_result(ray_start_regular_shared):
+    ds = ray.data.from_items([1, 2, 3])
+    # This needs to merge empty and non-empty results from different groups.
+    mapped = ds.groupby(lambda x: x).map_groups(lambda x: [] if x == [1] else x)
+    assert mapped.count() == 2
+    assert mapped.take_all() == [2, 3]
+
+
+def test_groupby_map_groups_merging_invalid_result(ray_start_regular_shared):
+    ds = ray.data.from_items([1, 2, 3])
+    grouped = ds.groupby(lambda x: x)
+
+    # The UDF returns None, which is invalid.
+    with pytest.raises(AssertionError):
+        grouped.map_groups(lambda x: None if x == [1] else x)
+
+    # The UDF returns a type that's different than the input type, which is invalid.
+    with pytest.raises(AssertionError):
+        grouped.map_groups(lambda x: pd.DataFrame([1]) if x == [1] else x)
+
+
 @pytest.mark.parametrize("num_parts", [1, 2, 30])
 def test_groupby_map_groups_for_none_groupkey(ray_start_regular_shared, num_parts):
     ds = ray.data.from_items(list(range(100)))
@@ -3017,43 +3044,6 @@ def test_groupby_simple_multi_agg(ray_start_regular_shared, num_parts):
             assert result == expected
 
 
-def test_sort_simple(ray_start_regular_shared):
-    num_items = 100
-    parallelism = 4
-    xs = list(range(num_items))
-    random.shuffle(xs)
-    ds = ray.data.from_items(xs, parallelism=parallelism)
-    assert ds.sort().take(num_items) == list(range(num_items))
-    # Make sure we have rows in each block.
-    assert len([n for n in ds.sort()._block_num_rows() if n > 0]) == parallelism
-    assert ds.sort(descending=True).take(num_items) == list(reversed(range(num_items)))
-    assert ds.sort(key=lambda x: -x).take(num_items) == list(reversed(range(num_items)))
-
-    # Test empty dataset.
-    ds = ray.data.from_items([])
-    s1 = ds.sort()
-    assert s1.count() == 0
-    assert s1.take() == ds.take()
-    ds = ray.data.range(10).filter(lambda r: r > 10).sort()
-    assert ds.count() == 0
-
-
-def test_sort_partition_same_key_to_same_block(ray_start_regular_shared):
-    num_items = 100
-    xs = [1] * num_items
-    ds = ray.data.from_items(xs)
-    sorted_ds = ds.repartition(num_items).sort()
-
-    # We still have 100 blocks
-    assert len(sorted_ds._block_num_rows()) == num_items
-    # Only one of them is non-empty
-    count = sum(1 for x in sorted_ds._block_num_rows() if x > 0)
-    assert count == 1
-    # That non-empty block contains all rows
-    total = sum(x for x in sorted_ds._block_num_rows() if x > 0)
-    assert total == num_items
-
-
 def test_column_name_type_check(ray_start_regular_shared):
     df = pd.DataFrame({"1": np.random.rand(10), "a": np.random.rand(10)})
     ds = ray.data.from_pandas(df)
@@ -3235,72 +3225,6 @@ def test_parquet_read_spread(ray_start_cluster, tmp_path):
     for block in blocks:
         locations.extend(location_data[block]["node_ids"])
     assert set(locations) == {node1_id, node2_id}
-
-
-@pytest.mark.parametrize("num_items,parallelism", [(100, 1), (1000, 4)])
-def test_sort_arrow(ray_start_regular, num_items, parallelism):
-    a = list(reversed(range(num_items)))
-    b = [f"{x:03}" for x in range(num_items)]
-    shard = int(np.ceil(num_items / parallelism))
-    offset = 0
-    dfs = []
-    while offset < num_items:
-        dfs.append(
-            pd.DataFrame(
-                {"a": a[offset : offset + shard], "b": b[offset : offset + shard]}
-            )
-        )
-        offset += shard
-    if offset < num_items:
-        dfs.append(pd.DataFrame({"a": a[offset:], "b": b[offset:]}))
-    ds = ray.data.from_pandas(dfs)
-
-    def assert_sorted(sorted_ds, expected_rows):
-        assert [tuple(row.values()) for row in sorted_ds.iter_rows()] == list(
-            expected_rows
-        )
-
-    assert_sorted(ds.sort(key="a"), zip(reversed(a), reversed(b)))
-    # Make sure we have rows in each block.
-    assert len([n for n in ds.sort(key="a")._block_num_rows() if n > 0]) == parallelism
-    assert_sorted(ds.sort(key="b"), zip(a, b))
-    assert_sorted(ds.sort(key="a", descending=True), zip(a, b))
-
-
-def test_sort_arrow_with_empty_blocks(ray_start_regular):
-    assert (
-        BlockAccessor.for_block(pa.Table.from_pydict({})).sample(10, "A").num_rows == 0
-    )
-
-    partitions = BlockAccessor.for_block(pa.Table.from_pydict({})).sort_and_partition(
-        [1, 5, 10], "A", descending=False
-    )
-    assert len(partitions) == 4
-    for partition in partitions:
-        assert partition.num_rows == 0
-
-    assert (
-        BlockAccessor.for_block(pa.Table.from_pydict({}))
-        .merge_sorted_blocks([pa.Table.from_pydict({})], "A", False)[0]
-        .num_rows
-        == 0
-    )
-
-    ds = ray.data.from_items([{"A": (x % 3), "B": x} for x in range(3)], parallelism=3)
-    ds = ds.filter(lambda r: r["A"] == 0)
-    assert [row.as_pydict() for row in ds.sort("A").iter_rows()] == [{"A": 0, "B": 0}]
-
-    # Test empty dataset.
-    ds = ray.data.range_arrow(10).filter(lambda r: r["value"] > 10)
-    assert (
-        len(
-            ray.data.impl.sort.sample_boundaries(
-                ds._plan.execute().get_blocks(), "value", 3
-            )
-        )
-        == 2
-    )
-    assert ds.sort("value").count() == 0
 
 
 @ray.remote
