@@ -103,7 +103,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
                          std::vector<std::unique_ptr<RayObject>> *results)>
           get_task_arguments,
       size_t max_pinned_task_arguments_bytes,
-	  SetShouldSpillCallback set_should_spill);
+	  SetShouldSpillCallback set_should_spill,
+      rpc::CoreWorkerClientPool &worker_rpc_pool_);
 
   //Preempt currently running tasks with a lower priority
   //Block new tasks from being scheduled with this priority
@@ -389,6 +390,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   void PinTaskArgs(const TaskSpecification &spec,
                    std::vector<std::unique_ptr<RayObject>> args);
   void ReleaseTaskArgs(const TaskID &task_id);
+
+  void RequestObjectWorkingSet(){
 
   friend class ClusterTaskManagerTest;
   FRIEND_TEST(ClusterTaskManagerTest, FeasibleToNonFeasible);

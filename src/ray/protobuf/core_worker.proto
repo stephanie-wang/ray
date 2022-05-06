@@ -157,6 +157,10 @@ message RayObject {
   repeated ObjectReference nested_inlined_refs = 3;
 }
 
+message GetObjectWorkingSetReply {
+  uint64 object_working_set = 1;
+}
+
 message GetObjectStatusReply {
   enum ObjectStatus {
     CREATED = 0;
@@ -348,6 +352,10 @@ message AssignObjectOwnerRequest {
 message AssignObjectOwnerReply {
 }
 
+message GetObjectWorkingSetRequest {
+  repeated bytes objectID = 1;
+}
+
 service CoreWorkerService {
   // Push a task directly to this worker from another.
   rpc PushTask(PushTaskRequest) returns (PushTaskReply);
@@ -358,6 +366,7 @@ service CoreWorkerService {
       returns (DirectActorCallArgWaitCompleteReply);
   // Ask the object's owner about the object's current status.
   rpc GetObjectStatus(GetObjectStatusRequest) returns (GetObjectStatusReply);
+  rpc GetObjectWorkingSet(GetObjectWorkingSetRequest) returns (GetObjectWorkingSetReply);
   // Wait for the actor's owner to decide that the actor has gone out of scope.
   // Replying to this message indicates that the client should force-kill the
   // actor process, if still alive.

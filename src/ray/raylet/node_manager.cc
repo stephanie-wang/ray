@@ -362,7 +362,8 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
       max_task_args_memory,
       [this](bool should_spill) {
         object_manager_.SetShouldSpill(should_spill);
-      }));
+      },
+      worker_rpc_pool_));
   placement_group_resource_manager_ = std::make_shared<NewPlacementGroupResourceManager>(
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),
       // TODO (Alex): Ideally we could do these in a more robust way (retry

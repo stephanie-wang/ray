@@ -2567,6 +2567,12 @@ void CoreWorker::HandleDirectActorCallArgWaitComplete(
 
   send_reply_callback(Status::OK(), nullptr, nullptr);
 }
+void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSet &request,
+        rpc::GetObjectWorkingSet *reply){
+    //reply->set_working_set(object_working_set);
+    reply->set_working_set(12345);
+    send_reply_callback(Status::OK(), nullptr,nullptr);
+}
 
 void CoreWorker::HandleGetObjectStatus(const rpc::GetObjectStatusRequest &request,
                                        rpc::GetObjectStatusReply *reply,

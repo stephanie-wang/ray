@@ -24,6 +24,14 @@
 namespace ray {
 namespace raylet {
 
+void RequestObjectWorkingSet(rpc::Address &address){
+    auto conn = worker_rpc_pool_.GetOrConnect(address);
+    rpc::RequestObjectWorkingSet request;
+    conn->GetObjectWorkingSet(request, [](const Status &status, const rpc::GetObjectWorkingSetReply &reply){
+            std::cout<< reply->object_working_set <<std::endl;})
+}
+
+
 // The max number of pending actors to report in node stats.
 const int kMaxPendingActorsToReport = 20;
 
@@ -41,7 +49,9 @@ ClusterTaskManager::ClusterTaskManager(
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
-    size_t max_pinned_task_arguments_bytes, SetShouldSpillCallback set_should_spill)
+    size_t max_pinned_task_arguments_bytes, SetShouldSpillCallback set_should_spill,
+    rpc::CoreWorkerClientPool &worker_rpc_pool
+    )
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
@@ -60,7 +70,8 @@ ClusterTaskManager::ClusterTaskManager(
       metric_tasks_queued_(0),
       metric_tasks_dispatched_(0),
       metric_tasks_spilled_(0),
-      set_should_spill_(set_should_spill) {}
+      set_should_spill_(set_should_spill),
+      worker_rpc_pool_(worker_rpc_pool){}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
