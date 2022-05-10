@@ -16,6 +16,42 @@ from ray.data.impl.block_list import BlockList
 from ray.data.impl.progress_bar import ProgressBar
 from ray.data.impl.remote_fn import cached_remote_fn
 
+import uuid
+import numpy as cp
+import ray
+import uuid
+from ray import ObjectRef
+
+
+class GpuObjectRef:
+    """Presents a reference to GPU buffer."""
+
+    def __init__(self, id: ObjectRef, group: uuid.UUID):
+        self.id = id
+        self.group = group
+
+
+class GpuActorBase:
+    def __init__(self):
+        self.group = None
+
+    def _setup(self, group):
+        assert self.group is None, "Gpu actor could only belong to one group."
+        self.group = group
+
+    def put_gpu_buffer(self, object) -> GpuObjectRef:
+        ref = GpuObjectRef(ray.put(object), self.group)
+        return ref
+
+    def get_gpu_buffer(self, ref: GpuObjectRef):
+        assert self.group == ref.group, f"{self.group} is different from {ref.group}"
+        numpy_obj = ray.get(ref.id)
+        return numpy_obj
+
+
+def setup_transfer_group(actors):
+    group_uuid = uuid.uuid4()
+    ray.get([actor._setup.remote(group_uuid) for actor in actors])
 T = TypeVar("T")
 U = TypeVar("U")
 
@@ -140,6 +176,7 @@ class ActorPoolStrategy(ComputeStrategy):
         self.min_size = min_size
         self.max_size = max_size or float("inf")
         self.max_tasks_in_flight_per_actor = max_tasks_in_flight_per_actor
+        self.workers = []
 
     def _apply(
         self,
@@ -161,28 +198,42 @@ class ActorPoolStrategy(ComputeStrategy):
         results = []
         map_bar = ProgressBar("Map Progress", total=orig_num_blocks)
 
-        class BlockWorker:
+        class BlockWorker(GpuActorBase):
             def ready(self):
                 return "ok"
 
             def map_block_split(
                 self, block: Block, input_files: List[str]
             ) -> BlockPartition:
-                return _map_block_split(block, fn, input_files)
+                block = _map_block_split(block, fn, input_files)
+                ref = self.put_gpu_buffer(block)
+                print("RETURNING", ref)
+                return ref
 
             @ray.method(num_returns=2)
             def map_block_nosplit(
-                self, block: Block, input_files: List[str]
+                self, fn, block: Block, input_files: List[str]
             ) -> Tuple[Block, BlockMetadata]:
-                return _map_block_nosplit(block, fn, input_files)
+                for i, row in enumerate(block):
+                    if isinstance(row, GpuObjectRef):
+                        block[i] = self.get_gpu_buffer(row)
+                block, meta = _map_block_nosplit(block, fn, input_files)
+                for i, row in enumerate(block):
+                    if isinstance(row, cp.ndarray):
+                        block[i] = self.put_gpu_buffer(row)
+                return block, meta
 
         if not remote_args:
             remote_args["num_cpus"] = 1
 
         BlockWorker = ray.remote(**remote_args)(BlockWorker)
 
-        workers = [BlockWorker.remote() for _ in range(self.min_size)]
-        tasks = {w.ready.remote(): w for w in workers}
+        if not self.workers:
+            while len(self.workers) < self.min_size:
+                self.workers.append(BlockWorker.remote())
+            setup_transfer_group(self.workers)
+
+        tasks = {w.ready.remote(): w for w in self.workers}
         tasks_in_flight = collections.defaultdict(int)
         metadata_mapping = {}
         block_indices = {}
@@ -194,15 +245,15 @@ class ActorPoolStrategy(ComputeStrategy):
             )
             if not ready:
                 if (
-                    len(workers) < self.max_size
-                    and len(ready_workers) / len(workers) > 0.8
+                    len(self.workers) < self.max_size
+                    and len(ready_workers) / len(self.workers) > 0.8
                 ):
                     w = BlockWorker.remote()
-                    workers.append(w)
+                    self.workers.append(w)
                     tasks[w.ready.remote()] = w
                     map_bar.set_description(
                         "Map Progress ({} actors {} pending)".format(
-                            len(ready_workers), len(workers) - len(ready_workers)
+                            len(ready_workers), len(self.workers) - len(ready_workers)
                         )
                     )
                 continue
@@ -219,7 +270,7 @@ class ActorPoolStrategy(ComputeStrategy):
                 ready_workers.add(worker)
                 map_bar.set_description(
                     "Map Progress ({} actors {} pending)".format(
-                        len(ready_workers), len(workers) - len(ready_workers)
+                        len(ready_workers), len(self.workers) - len(ready_workers)
                     )
                 )
 
@@ -233,7 +284,7 @@ class ActorPoolStrategy(ComputeStrategy):
                     ref = worker.map_block_split.remote(block, meta.input_files)
                 else:
                     ref, meta_ref = worker.map_block_nosplit.remote(
-                        block, meta.input_files
+                        fn, block, meta.input_files
                     )
                     metadata_mapping[ref] = meta_ref
                 tasks[ref] = worker
