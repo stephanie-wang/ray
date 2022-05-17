@@ -228,7 +228,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           },
           /*on_object_creation_blocked_callback=*/
           [this](const Priority &base_priority, bool block_tasks,
-            bool evict_tasks, bool block_spill, size_t num_spinning_workers) {
+            bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
             if(block_tasks){
                   cluster_task_manager_->BlockTasks(base_priority);
             }
@@ -237,8 +237,12 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
                     should_spill = cluster_task_manager_->EvictTasks(base_priority);
             }
             if(block_spill){
+			  //rpc::Address address = object_manager_.GetOwnerAddress();
+			  //std::vector<const ObjectID*> objects_in_obj_store;
+			  //object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
               should_spill =  (should_spill || 
-					  cluster_task_manager_->AllLeasedWorkersSpinning(num_spinning_workers));
+					  //cluster_task_manager_->CheckDeadlock(num_spinning_workers, address, objects_in_obj_store));
+					  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_));
             }
             RAY_LOG(DEBUG) << "[JAE_DEBUG] object_creation_blocked_callback num_spinning_workers:" 
 				<< num_spinning_workers <<" should spill:" << should_spill;
@@ -363,7 +367,8 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
       [this](bool should_spill) {
         object_manager_.SetShouldSpill(should_spill);
       },
-      worker_rpc_pool_));
+      io_service,
+	  object_manager_));
   placement_group_resource_manager_ = std::make_shared<NewPlacementGroupResourceManager>(
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),
       // TODO (Alex): Ideally we could do these in a more robust way (retry

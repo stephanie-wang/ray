@@ -132,7 +132,9 @@ class CoreWorkerClientInterface : public pubsub::SubscriberClientInterface {
   /// Ask the owner of an object about the object's current status.
   virtual void GetObjectStatus(const GetObjectStatusRequest &request,
                                const ClientCallback<GetObjectStatusReply> &callback) {}
-  virtual void GetObjectWorkingSet(){}
+
+  virtual void GetObjectWorkingSet(const GetObjectWorkingSetRequest &request,
+		  						   const ClientCallback<GetObjectWorkingSetReply> &callback){}
 
   /// Ask the actor's owner to reply when the actor has gone out of scope.
   virtual void WaitForActorOutOfScope(

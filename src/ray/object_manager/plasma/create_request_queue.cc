@@ -185,9 +185,10 @@ Status CreateRequestQueue::ProcessRequests() {
       block_tasks_required = (block_tasks_required&enable_blocktasks); 
 	  evict_tasks_required = (evict_tasks_required&enable_evicttasks);
 
+	  //TODO(Jae) check if this callback needs to do deadlock detection
 	  if(block_tasks_required || evict_tasks_required){
 	    on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
-	  		  evict_tasks_required, enable_blocktasks_spill, num_spinning_workers);
+	  		  evict_tasks_required, enable_blocktasks_spill, num_spinning_workers, 0);
 	  }
 
       FinishRequest(queue_it);
@@ -214,8 +215,8 @@ Status CreateRequestQueue::ProcessRequests() {
 		  }
 		}
 		
-	    on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks , 
-		  enable_evicttasks, enable_blocktasks_spill, num_spinning_workers);
+	    on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
+		  enable_evicttasks, enable_blocktasks_spill, num_spinning_workers, (request)->object_size);
 
 	    if ((enable_blocktasks_spill || enable_evicttasks) && (!should_spill_)) { 
 		  //should_spill is set in 2 cases
@@ -266,7 +267,7 @@ Status CreateRequestQueue::ProcessRequests() {
   // run new tasks again.
   if (RayConfig::instance().enable_BlockTasks()) {
     RAY_LOG(DEBUG) << "[JAE_DEBUG] resetting object_creation_blocked_callback priority";
-    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0));
+    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0));
   }
 
   return Status::OK();

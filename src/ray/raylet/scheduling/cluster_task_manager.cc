@@ -24,13 +24,6 @@
 namespace ray {
 namespace raylet {
 
-void RequestObjectWorkingSet(rpc::Address &address){
-    auto conn = worker_rpc_pool_.GetOrConnect(address);
-    rpc::RequestObjectWorkingSet request;
-    conn->GetObjectWorkingSet(request, [](const Status &status, const rpc::GetObjectWorkingSetReply &reply){
-            std::cout<< reply->object_working_set <<std::endl;})
-}
-
 
 // The max number of pending actors to report in node stats.
 const int kMaxPendingActorsToReport = 20;
@@ -50,7 +43,8 @@ ClusterTaskManager::ClusterTaskManager(
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
     size_t max_pinned_task_arguments_bytes, SetShouldSpillCallback set_should_spill,
-    rpc::CoreWorkerClientPool &worker_rpc_pool
+    instrumented_io_context &io_service,
+	ObjectManager &object_manager
     )
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
@@ -71,7 +65,9 @@ ClusterTaskManager::ClusterTaskManager(
       metric_tasks_dispatched_(0),
       metric_tasks_spilled_(0),
       set_should_spill_(set_should_spill),
-      worker_rpc_pool_(worker_rpc_pool){}
+	  client_call_manager_(io_service),
+      worker_rpc_pool_(client_call_manager_),
+	  object_manager_(object_manager){}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
@@ -1232,8 +1228,42 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
   return false;
 }
 
-bool ClusterTaskManager::AllLeasedWorkersSpinning(size_t num_spinning_workers) {
-	return num_spinning_workers == leased_workers_.size();
+bool ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t first_pending_obj_size, ObjectManager &object_manager_){
+									   //rpc::Address &address, std::vector<ObjectID*> &objects_in_obj_store){
+  //Deadlock #1
+  if(num_spinning_workers == leased_workers_.size())
+	  return true;
+  //Deadlock #2
+  std::vector<const ObjectID*> objects_in_obj_store;
+  object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
+
+  if(objects_in_obj_store.empty())
+	return false;
+  std::vector<ObjectID>& deleted_objects = object_manager_.GetDeletedObjects();
+  rpc::Address address = object_manager_.GetOwnerAddress();
+
+  auto conn = worker_rpc_pool_.GetOrConnect(address);
+  rpc::GetObjectWorkingSetRequest request;
+  for(size_t i=0; i< objects_in_obj_store.size(); i++){
+    request.add_object_ids(objects_in_obj_store[i]->Binary());
+  }
+  for(size_t i=0; i< deleted_objects.size(); i++){
+    request.add_deleted_object_ids(deleted_objects[i].Binary());
+  }
+
+  bool is_deadlock = false;
+  conn->GetObjectWorkingSet(request, [&is_deadlock, &object_manager_, first_pending_obj_size]
+		  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
+		  					  int64_t gcable_size = 0;
+							  for(int i=0; i<reply.gcable_object_ids_size(); i++){
+							    ObjectID obj_id = ObjectID::FromBinary(reply.gcable_object_ids(i));
+								gcable_size += object_manager_.GetObjectSize(obj_id);
+							  }
+							  if(first_pending_obj_size > gcable_size)
+							    is_deadlock = true;
+							});
+  object_manager_.ResetDeletedObjects();
+  return is_deadlock;
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {

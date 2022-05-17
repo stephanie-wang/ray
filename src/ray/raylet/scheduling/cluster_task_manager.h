@@ -18,6 +18,7 @@
 #include "absl/container/flat_hash_set.h"
 #include "absl/container/btree_map.h"
 #include "ray/common/ray_object.h"
+#include "ray/object_manager/object_manager.h"
 #include "ray/common/task/task.h"
 #include "ray/common/task/task_common.h"
 #include "ray/raylet/dependency_manager.h"
@@ -104,13 +105,14 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
           get_task_arguments,
       size_t max_pinned_task_arguments_bytes,
 	  SetShouldSpillCallback set_should_spill,
-      rpc::CoreWorkerClientPool &worker_rpc_pool_);
+      instrumented_io_context &io_service,
+	  ObjectManager &object_manager);
 
   //Preempt currently running tasks with a lower priority
   //Block new tasks from being scheduled with this priority
   void BlockTasks(Priority) override;
   bool EvictTasks(Priority) override;
-  bool AllLeasedWorkersSpinning(size_t) override;
+  bool CheckDeadlock(size_t, int64_t first_pending_obj_size, ObjectManager &object_manger_) override;
 
   /// (Step 1) Queue tasks and schedule.
   /// Queue task and schedule. This hanppens when processing the worker lease request.
@@ -325,6 +327,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   /// TODO(Shanly): Remove `worker_pool_` and `leased_workers_` and make them as
   /// parameters of methods if necessary once we remove the legacy scheduler.
   WorkerPoolInterface &worker_pool_;
+
   std::unordered_map<WorkerID, std::shared_ptr<WorkerInterface>> &leased_workers_;
 
   //Destroy all workers with lower priorities BlockTasks() set this value
@@ -362,6 +365,12 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   const SetShouldSpillCallback set_should_spill_;
 
+  rpc::ClientCallManager client_call_manager_;
+
+  rpc::CoreWorkerClientPool worker_rpc_pool_;
+
+  ObjectManager &object_manager_;
+
   /// Determine whether a task should be immediately dispatched,
   /// or placed on a wait queue.
   ///
@@ -391,7 +400,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
                    std::vector<std::unique_ptr<RayObject>> args);
   void ReleaseTaskArgs(const TaskID &task_id);
 
-  void RequestObjectWorkingSet(){
+  //void RequestObjectWorkingSet(){}
 
   friend class ClusterTaskManagerTest;
   FRIEND_TEST(ClusterTaskManagerTest, FeasibleToNonFeasible);

@@ -157,8 +157,14 @@ message RayObject {
   repeated ObjectReference nested_inlined_refs = 3;
 }
 
+message GetObjectWorkingSetRequest {
+  repeated bytes object_ids = 1;
+  repeated bytes deleted_object_ids = 2;
+}
+
 message GetObjectWorkingSetReply {
-  uint64 object_working_set = 1;
+  //uint64 object_working_set = 1;
+  repeated bytes gcable_object_ids = 1;
 }
 
 message GetObjectStatusReply {
@@ -350,10 +356,6 @@ message AssignObjectOwnerRequest {
 }
 
 message AssignObjectOwnerReply {
-}
-
-message GetObjectWorkingSetRequest {
-  repeated bytes objectID = 1;
 }
 
 service CoreWorkerService {
