@@ -32,7 +32,6 @@ namespace rpc {
   RPC_SERVICE_HANDLER(CoreWorkerService, StealTasks, -1)                     \
   RPC_SERVICE_HANDLER(CoreWorkerService, DirectActorCallArgWaitComplete, -1) \
   RPC_SERVICE_HANDLER(CoreWorkerService, GetObjectStatus, -1)                \
-  RPC_SERVICE_HANDLER(CoreWorkerService, GetObjectWorkingSet, -1)                \
   RPC_SERVICE_HANDLER(CoreWorkerService, WaitForActorOutOfScope, -1)         \
   RPC_SERVICE_HANDLER(CoreWorkerService, PubsubLongPolling, -1)              \
   RPC_SERVICE_HANDLER(CoreWorkerService, PubsubCommandBatch, -1)             \
@@ -56,7 +55,6 @@ namespace rpc {
   DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(StealTasks)                     \
   DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(DirectActorCallArgWaitComplete) \
   DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(GetObjectStatus)                \
-  DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(GetObjectWorkingSet)            \
   DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(WaitForActorOutOfScope)         \
   DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(PubsubLongPolling)              \
   DECLARE_VOID_RPC_SERVICE_HANDLER_METHOD(PubsubCommandBatch)             \
