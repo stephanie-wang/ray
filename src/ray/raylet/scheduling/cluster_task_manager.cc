@@ -24,6 +24,7 @@
 namespace ray {
 namespace raylet {
 
+
 // The max number of pending actors to report in node stats.
 const int kMaxPendingActorsToReport = 20;
 
@@ -41,7 +42,10 @@ ClusterTaskManager::ClusterTaskManager(
     std::function<bool(const std::vector<ObjectID> &object_ids,
                        std::vector<std::unique_ptr<RayObject>> *results)>
         get_task_arguments,
-    size_t max_pinned_task_arguments_bytes, SetShouldSpillCallback set_should_spill)
+    size_t max_pinned_task_arguments_bytes, SetShouldSpillCallback set_should_spill,
+    instrumented_io_context &io_service,
+	ObjectManager &object_manager
+    )
     : self_node_id_(self_node_id),
       cluster_resource_scheduler_(cluster_resource_scheduler),
       task_dependency_manager_(task_dependency_manager),
@@ -60,7 +64,10 @@ ClusterTaskManager::ClusterTaskManager(
       metric_tasks_queued_(0),
       metric_tasks_dispatched_(0),
       metric_tasks_spilled_(0),
-      set_should_spill_(set_should_spill) {}
+      set_should_spill_(set_should_spill),
+	  client_call_manager_(io_service),
+      worker_rpc_pool_(client_call_manager_),
+	  object_manager_(object_manager){}
 
 bool ClusterTaskManager::SchedulePendingTasks() {
   // Always try to schedule infeasible tasks in case they are now feasible.
@@ -139,7 +146,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
     } else {
       shapes_it++;
     }
-  }
+  } 
   return did_schedule;
 }
 
@@ -1218,6 +1225,14 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
       return true;
     }
   }
+  return false;
+}
+
+bool ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t first_pending_obj_size, ObjectManager &object_manager_){
+									   //rpc::Address &address, std::vector<ObjectID*> &objects_in_obj_store){
+  //Deadlock #1
+  if(num_spinning_workers == leased_workers_.size())
+	  return true;
   return false;
 }
 

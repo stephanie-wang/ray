@@ -87,7 +87,6 @@ const LocalObject *ObjectStore::SealObject(const ObjectID &object_id) {
 
 bool ObjectStore::DeleteObject(const ObjectID &object_id) {
   auto entry = GetMutableObject(object_id);
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] object is freed:" << object_id;
   if (entry == nullptr) {
     return false;
   }

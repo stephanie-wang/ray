@@ -16,6 +16,9 @@
 
 #include "absl/base/optimization.h"
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
+#include "absl/container/btree_set.h"
+#include "absl/container/btree_map.h"
 #include "ray/common/asio/periodical_runner.h"
 #include "ray/common/buffer.h"
 #include "ray/common/placement_group.h"
@@ -687,6 +690,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   Status PushError(const JobID &job_id, const std::string &type,
                    const std::string &error_message, double timestamp);
 
+  void BuildObjectWorkingSet(TaskSpecification &spec);
   /// Submit a normal task.
   ///
   /// \param[in] function The remote function to execute.
@@ -921,6 +925,10 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   /// Implements gRPC server handler.
   void HandleGetObjectStatus(const rpc::GetObjectStatusRequest &request,
                              rpc::GetObjectStatusReply *reply,
+                             rpc::SendReplyCallback send_reply_callback) override;
+
+  void HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest &request,
+							 rpc::GetObjectWorkingSetReply *reply,
                              rpc::SendReplyCallback send_reply_callback) override;
 
   /// Implements gRPC server handler.
@@ -1419,6 +1427,13 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   friend class CoreWorkerTest;
 
   std::unique_ptr<rpc::JobConfig> job_config_;
+
+  absl::flat_hash_map<ObjectID, absl::btree_set<ObjectID> > object_working_set_;
+  absl::btree_set<ObjectID> pending_objs;
+  absl::btree_map<Priority,  size_t> object_queue_in_object_store;
+  absl::flat_hash_set<ObjectID> object_table_;
+//size_t free_memory = 0;
+//static size_t gcable_size = 0;
 
   /// Simple container for per function task counters. The counters will be
   /// keyed by the function name in task spec.

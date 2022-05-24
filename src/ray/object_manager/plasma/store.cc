@@ -390,6 +390,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     // Check the log and remove this if it gets a correct value
     RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] priority passed is " << priority;
     ray::TaskKey key(priority, ObjectID::FromRandom().TaskId());
+    RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] TaskId generated:" << key.second;
 
     // absl failed analyze mutex safety for lambda
     auto handle_create =

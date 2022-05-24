@@ -227,14 +227,69 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return GetLocalObjectManager().IsSpillingInProgress();
           },
           /*on_object_creation_blocked_callback=*/
-          [this](const Priority &base_priority, bool block_tasks, bool evict_tasks) {
-		    if(block_tasks){
-              cluster_task_manager_->BlockTasks(base_priority);
-			}
-			if(evict_tasks){
-              bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
-              io_service_.post([this, should_spill](){
-                object_manager_.SetShouldSpill(should_spill);
+          [this](const Priority &base_priority, bool block_tasks,
+            bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
+            if(block_tasks){
+                  cluster_task_manager_->BlockTasks(base_priority);
+            }
+            if(evict_tasks){
+              if(cluster_task_manager_->EvictTasks(base_priority)){
+			    io_service_.post([this](){
+			 	  object_manager_.SetShouldSpill(true);
+				},"");
+			  }
+            }
+            if(block_spill){
+			  //Deadlock Detection #1
+              if(cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_)){
+			    io_service_.post([this](){
+			 	  object_manager_.SetShouldSpill(true);
+				},"");
+			  }else{
+			  //Deadlock Detection #2
+			    std::vector<const ObjectID*> objects_in_obj_store;
+			    object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
+				//No Objects in the object store == No GCable object
+			    if(objects_in_obj_store.empty()){
+			      io_service_.post([this](){
+			 	    object_manager_.SetShouldSpill(true);
+				  },"");
+				  return;
+			    }
+			    std::vector<ObjectID>& deleted_objects = object_manager_.GetDeletedObjects();
+			    rpc::Address address = object_manager_.GetOwnerAddress();
+
+			    auto conn = worker_rpc_pool_.GetOrConnect(address);
+			    rpc::GetObjectWorkingSetRequest request;
+			    for(size_t i=0; i< objects_in_obj_store.size(); i++){
+				  request.add_object_ids(objects_in_obj_store[i]->Binary());
+			    }
+			    for(size_t i=0; i< deleted_objects.size(); i++){
+				  request.add_deleted_object_ids(deleted_objects[i].Binary());
+			    }
+			    conn->GetObjectWorkingSet(request, [this, pending_size]
+										  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
+					  RAY_LOG(DEBUG) << "[" << __func__ << " RPC reply is called " << reply.gcable_object_ids_size();
+										  int64_t gcable_size = 0;
+										  for(int i=0; i<reply.gcable_object_ids_size(); i++){
+											ObjectID obj_id = ObjectID::FromBinary(reply.gcable_object_ids(i));
+											gcable_size += object_manager_.GetObjectSize(obj_id);
+					  RAY_LOG(DEBUG) << "[" << __func__ << " GCable obj and size " << obj_id << " " << object_manager_.GetObjectSize(obj_id);
+										  }
+										  bool is_deadlock = false;
+										  if(pending_size > gcable_size){
+											is_deadlock = true;
+					  RAY_LOG(DEBUG) << "[" << __func__ << " RPC reply is_deadlock set true ";
+										  }
+										  io_service_.post([this, is_deadlock](){
+											object_manager_.SetShouldSpill(is_deadlock);
+										  },"");
+										});
+			    object_manager_.ResetDeletedObjects();
+			  }
+            }else{
+              io_service_.post([this](){
+                object_manager_.SetShouldSpill(false);
               },"");
 			}
 		  },
@@ -352,7 +407,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
       max_task_args_memory,
       [this](bool should_spill) {
         object_manager_.SetShouldSpill(should_spill);
-      }));
+      },
+      io_service,
+	  object_manager_));
   placement_group_resource_manager_ = std::make_shared<NewPlacementGroupResourceManager>(
       std::dynamic_pointer_cast<ClusterResourceScheduler>(cluster_resource_scheduler_),
       // TODO (Alex): Ideally we could do these in a more robust way (retry

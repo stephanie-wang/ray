@@ -307,6 +307,10 @@ class ObjectID : public BaseID<ObjectID> {
 
   MSGPACK_DEFINE(id_);
 
+  bool operator<(const ObjectID &rhs) const{
+    return std::memcmp(id_, rhs.id_, kLength) < 0;
+  }
+
  private:
   /// A helper method to generate an ObjectID.
   static ObjectID GenerateObjectId(const std::string &task_id_binary,
