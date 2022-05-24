@@ -148,6 +148,7 @@ Status CreateRequestQueue::ProcessFirstRequest() {
 }
 
 void CreateRequestQueue::SetShouldSpill(bool should_spill) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] SetShouldSpill Called "<<should_spill;
   should_spill_ = should_spill;
 }
 
@@ -207,7 +208,7 @@ Status CreateRequestQueue::ProcessRequests() {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
 			<< enable_blocktasks <<" " << enable_evicttasks << " " 
 			<< enable_blocktasks_spill << ") on priority "
-			<< lowest_pri;
+			<< lowest_pri << " should_spill " << should_spill_;
 		if(enable_blocktasks_spill){
           RAY_LOG(DEBUG) << "[JAE_DEBUG] task " << task_id << " spins"; 
 		  for(auto it = queue_.begin(); it != queue_.end(); it++){
@@ -228,7 +229,8 @@ Status CreateRequestQueue::ProcessRequests() {
 		}
 		//Alternative Design point. Always set should_spill_ from task_manager.
 		//Current design reduce callback function. But spill called once only
-		should_spill_ = false;
+		  RAY_LOG(DEBUG) << "[JAE_DEBUG] should_spill unset";
+		//should_spill_ = false;
 	  }
 
       auto grace_period_ns = oom_grace_period_ns_;

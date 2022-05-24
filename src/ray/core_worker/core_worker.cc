@@ -1651,8 +1651,9 @@ void CoreWorker::BuildObjectWorkingSet(TaskSpecification &spec){
   std::vector<ObjectID> task_deps;
 
   for(size_t i=0; i < size; i++){
-    if (spec.ArgByRef(i))
+    if (spec.ArgByRef(i)){
       task_deps.push_back(spec.ArgId(i));
+	}
   }
   for(auto &dep : task_deps)
     object_working_set_[dep].insert(task_deps.begin(), task_deps.end());
@@ -2584,13 +2585,16 @@ void CoreWorker::HandleDirectActorCallArgWaitComplete(
 void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest &request,
 										   rpc::GetObjectWorkingSetReply *reply,
                                        rpc::SendReplyCallback send_reply_callback) {
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet called" ;
 	std::vector<ObjectID> obj_ids;
 	std::vector<ObjectID> deleted_obj_ids;
 	for(int i=0; i<request.object_ids_size(); i++){
 	  obj_ids.push_back(ObjectID::FromBinary(request.object_ids(i)));
+	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet obj in obj_store:" << ObjectID::FromBinary(request.object_ids(i));
 	}
 	for(int i=0; i<request.deleted_object_ids_size(); i++){
 	  ObjectID obj = ObjectID::FromBinary(request.deleted_object_ids(i));
+	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet deleted objects:" << obj;
 	  deleted_obj_ids.push_back(obj);
 	  object_working_set_.erase(obj);
 	  for(auto &working_set : object_working_set_){
@@ -2600,10 +2604,15 @@ void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest
 
 	//std::vector<ObjectID> gcable_objs;
 	for(auto &working_set : object_working_set_){
+		  RAY_LOG(DEBUG) << "[JAE_DEBUG] objects_working Set obj " << working_set.first;
+		for(auto &itr: working_set.second){
+		  RAY_LOG(DEBUG) << " :" << itr;
+		}
 		if(std::includes(obj_ids.begin(), obj_ids.end(),
 				working_set.second.begin(), working_set.second.end())){
 		  //gcable_objs.push_back(working_set.first);
 		  //reply->set_gcable_object_ids(working_set.first.Binary());
+		  RAY_LOG(DEBUG) << " Add GCable Object " << working_set.first;
 		  reply->add_gcable_object_ids(working_set.first.Binary());
 		}
 	}

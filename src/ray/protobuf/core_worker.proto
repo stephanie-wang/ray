@@ -157,16 +157,6 @@ message RayObject {
   repeated ObjectReference nested_inlined_refs = 3;
 }
 
-message GetObjectWorkingSetRequest {
-  repeated bytes object_ids = 1;
-  repeated bytes deleted_object_ids = 2;
-}
-
-message GetObjectWorkingSetReply {
-  //uint64 object_working_set = 1;
-  repeated bytes gcable_object_ids = 1;
-}
-
 message GetObjectStatusReply {
   enum ObjectStatus {
     CREATED = 0;
@@ -181,6 +171,15 @@ message GetObjectStatusReply {
   repeated bytes node_ids = 3;
   // The size of the object in bytes.
   uint64 object_size = 4;
+}
+
+message GetObjectWorkingSetRequest {
+  repeated bytes object_ids = 1;
+  repeated bytes deleted_object_ids = 2;
+}
+
+message GetObjectWorkingSetReply {
+  repeated bytes gcable_object_ids = 1;
 }
 
 message WaitForActorOutOfScopeRequest {

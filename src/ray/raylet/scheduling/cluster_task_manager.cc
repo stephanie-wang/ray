@@ -1233,37 +1233,7 @@ bool ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
   //Deadlock #1
   if(num_spinning_workers == leased_workers_.size())
 	  return true;
-  //Deadlock #2
-  std::vector<const ObjectID*> objects_in_obj_store;
-  object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
-
-  if(objects_in_obj_store.empty())
-	return false;
-  std::vector<ObjectID>& deleted_objects = object_manager_.GetDeletedObjects();
-  rpc::Address address = object_manager_.GetOwnerAddress();
-
-  auto conn = worker_rpc_pool_.GetOrConnect(address);
-  rpc::GetObjectWorkingSetRequest request;
-  for(size_t i=0; i< objects_in_obj_store.size(); i++){
-    request.add_object_ids(objects_in_obj_store[i]->Binary());
-  }
-  for(size_t i=0; i< deleted_objects.size(); i++){
-    request.add_deleted_object_ids(deleted_objects[i].Binary());
-  }
-
-  bool is_deadlock = false;
-  conn->GetObjectWorkingSet(request, [&is_deadlock, &object_manager_, first_pending_obj_size]
-		  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
-		  					  int64_t gcable_size = 0;
-							  for(int i=0; i<reply.gcable_object_ids_size(); i++){
-							    ObjectID obj_id = ObjectID::FromBinary(reply.gcable_object_ids(i));
-								gcable_size += object_manager_.GetObjectSize(obj_id);
-							  }
-							  if(first_pending_obj_size > gcable_size)
-							    is_deadlock = true;
-							});
-  object_manager_.ResetDeletedObjects();
-  return is_deadlock;
+  return false;
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {
