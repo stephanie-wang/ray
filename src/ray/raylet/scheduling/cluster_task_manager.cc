@@ -139,7 +139,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
     } else {
       shapes_it++;
     }
-  }
+  } 
   return did_schedule;
 }
 
@@ -1219,6 +1219,10 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
     }
   }
   return false;
+}
+
+bool ClusterTaskManager::AllLeasedWorkersSpinning(size_t num_spinning_workers) {
+	return num_spinning_workers == leased_workers_.size();
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {

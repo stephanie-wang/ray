@@ -95,6 +95,7 @@ class ClusterTaskManagerInterface {
   /// false if the task is already running.
   virtual void BlockTasks(Priority) = 0;
   virtual bool EvictTasks(Priority) = 0;
+  virtual bool AllLeasedWorkersSpinning(size_t) =0;
   virtual bool CancelTask(const TaskID &task_id,
                           bool runtime_env_setup_failed = false) = 0;
 

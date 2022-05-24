@@ -227,14 +227,24 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return GetLocalObjectManager().IsSpillingInProgress();
           },
           /*on_object_creation_blocked_callback=*/
-          [this](const Priority &base_priority, bool block_tasks, bool evict_tasks) {
-		    if(block_tasks){
-              cluster_task_manager_->BlockTasks(base_priority);
-			}
-			if(evict_tasks){
-              bool should_spill = cluster_task_manager_->EvictTasks(base_priority);
+          [this](const Priority &base_priority, bool block_tasks,
+            bool evict_tasks, bool block_spill, size_t num_spinning_workers) {
+            if(block_tasks){
+                  cluster_task_manager_->BlockTasks(base_priority);
+            }
+			bool should_spill = false;
+            if(evict_tasks){
+                    should_spill = cluster_task_manager_->EvictTasks(base_priority);
+            }
+            if(block_spill){
+              should_spill =  (should_spill || 
+					  cluster_task_manager_->AllLeasedWorkersSpinning(num_spinning_workers));
+            }
+            RAY_LOG(DEBUG) << "[JAE_DEBUG] object_creation_blocked_callback num_spinning_workers:" 
+				<< num_spinning_workers <<" should spill:" << should_spill;
+			if(should_spill){
               io_service_.post([this, should_spill](){
-                object_manager_.SetShouldSpill(should_spill);
+                object_manager_.SetShouldSpill(true);
               },"");
 			}
 		  },

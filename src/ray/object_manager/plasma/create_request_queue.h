@@ -155,6 +155,27 @@ class CreateRequestQueue {
     PlasmaObject result = {};
   };
 
+  class SpinningTasks{
+    public:
+      //Return false if it is deadlock (all workers spinning)
+  	  //This is deadlock detection #1. There exists false-positive but the 
+  	  //implementation is simple
+      size_t RegisterSpinningTasks(ray::Priority p){
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] RegisterSpinningTasks priority:" <<p;
+        spinning_tasks.insert(p);
+		return spinning_tasks.size();
+      }
+
+      void UnRegisterSpinningTasks(ray::Priority p){
+        auto it = spinning_tasks.find(p);
+	    if(it != spinning_tasks.end())
+		  spinning_tasks.erase(it);
+      }
+
+    private:
+      absl::flat_hash_set<ray::Priority> spinning_tasks;
+  };
+
   /// Process a single request. Sets the request's error result to the error
   /// returned by the request handler inside. Returns OK if the request can be
   /// finished.
@@ -219,6 +240,8 @@ class CreateRequestQueue {
 
   // Shared between the object store thread and the scheduler thread.
   bool should_spill_ = false;
+
+  SpinningTasks spinning_tasks_;
 
   friend class CreateRequestQueueTest;
 };
