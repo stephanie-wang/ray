@@ -937,8 +937,8 @@ Status CoreWorker::PutInLocalPlasmaStore(const RayObject &object,
             // Only release the object once the raylet has responded to avoid the race
             // condition that the object could be evicted before the raylet pins it.
             if (!plasma_store_provider_->Release(object_id).ok()) {
-              RAY_LOG(ERROR) << "Failed to release ObjectID (" << object_id
-                             << "), might cause a leak in plasma.";
+              RAY_LOG(INFO) << "Failed to release ObjectID (" << object_id
+                            << "), might cause a leak in plasma.";
             }
           });
     } else {
@@ -1091,8 +1091,8 @@ Status CoreWorker::SealExisting(const ObjectID &object_id,
           // Only release the object once the raylet has responded to avoid the race
           // condition that the object could be evicted before the raylet pins it.
           if (!plasma_store_provider_->Release(object_id).ok()) {
-            RAY_LOG(ERROR) << "Failed to release ObjectID (" << object_id
-                           << "), might cause a leak in plasma.";
+            RAY_LOG(INFO) << "Failed to release ObjectID (" << object_id
+                          << "), might cause a leak in plasma.";
           }
         });
   } else {
