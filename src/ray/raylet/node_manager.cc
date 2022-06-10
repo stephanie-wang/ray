@@ -240,57 +240,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			  }
             }
             if(block_spill){
-			  //Deadlock Detection #1
-              if(cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_)){
-			    io_service_.post([this](){
-			 	  object_manager_.SetShouldSpill(true);
-				},"");
-			  }else{
-			  //Deadlock Detection #2
-			    std::vector<const ObjectID*> objects_in_obj_store;
-			    object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
-				//No Objects in the object store == No GCable object
-			    if(objects_in_obj_store.empty()){
-			      io_service_.post([this](){
-			 	    object_manager_.SetShouldSpill(true);
-				  },"");
-				  return;
-			    }
-			    std::vector<ObjectID>& deleted_objects = object_manager_.GetDeletedObjects();
-			    rpc::Address address = object_manager_.GetOwnerAddress();
-
-			    auto conn = worker_rpc_pool_.GetOrConnect(address);
-			    rpc::GetObjectWorkingSetRequest request;
-			    for(size_t i=0; i< objects_in_obj_store.size(); i++){
-				  request.add_object_ids(objects_in_obj_store[i]->Binary());
-			    }
-			    for(size_t i=0; i< deleted_objects.size(); i++){
-				  request.add_deleted_object_ids(deleted_objects[i].Binary());
-			    }
-			    conn->GetObjectWorkingSet(request, [this, pending_size]
-										  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
-					  RAY_LOG(DEBUG) << "[" << __func__ << " RPC reply is called " << reply.gcable_object_ids_size();
-										  int64_t gcable_size = 0;
-										  for(int i=0; i<reply.gcable_object_ids_size(); i++){
-											ObjectID obj_id = ObjectID::FromBinary(reply.gcable_object_ids(i));
-											gcable_size += object_manager_.GetObjectSize(obj_id);
-					  RAY_LOG(DEBUG) << "[" << __func__ << " GCable obj and size " << obj_id << " " << object_manager_.GetObjectSize(obj_id);
-										  }
-										  bool is_deadlock = false;
-										  if(pending_size > gcable_size){
-											is_deadlock = true;
-					  RAY_LOG(DEBUG) << "[" << __func__ << " RPC reply is_deadlock set true ";
-										  }
-										  io_service_.post([this, is_deadlock](){
-											object_manager_.SetShouldSpill(is_deadlock);
-										  },"");
-										});
-			    object_manager_.ResetDeletedObjects();
-			  }
-            }else{
-              io_service_.post([this](){
-                object_manager_.SetShouldSpill(false);
-              },"");
+			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_, io_service_);
 			}
 		  },
           /*object_store_full_callback=*/

@@ -241,6 +241,8 @@ class CreateRequestQueue {
   // Shared between the object store thread and the scheduler thread.
   bool should_spill_ = false;
 
+  bool new_request_added_ = false;
+
   SpinningTasks spinning_tasks_;
 
   friend class CreateRequestQueueTest;

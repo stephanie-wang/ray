@@ -267,17 +267,10 @@ class ObjectManager : public ObjectManagerInterface,
 	  plasma::plasma_store_runner->SetShouldSpill(should_spill);
   }
 
-  rpc::Address GetOwnerAddress();
   rpc::Address GetOwnerAddress(const ObjectID &object_id);
   void GetObjectsInObjectStore(std::vector<const ObjectID*> *objs);
   int64_t GetObjectSize(const ObjectID &object_id);
 
-  std::vector<ObjectID>& GetDeletedObjects(){
-	  return deleted_objects_;
-  }
-  void ResetDeletedObjects(){
-	  deleted_objects_.clear();
-  }
  private:
   friend class TestObjectManager;
 
@@ -469,8 +462,6 @@ class ObjectManager : public ObjectManagerInterface,
   /// Mapping from locally available objects to information about those objects
   /// including when the object was last pushed to other object managers.
   std::unordered_map<ObjectID, LocalObjectInfo> local_objects_;
-
-  std::vector<ObjectID> deleted_objects_;
 
   /// This is used as the callback identifier in Pull for
   /// SubscribeObjectLocations. We only need one identifier because we never need to

@@ -1228,12 +1228,55 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
   return false;
 }
 
-bool ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t first_pending_obj_size, ObjectManager &object_manager_){
+void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t first_pending_obj_size,
+	 			ObjectManager &object_manager_, instrumented_io_context &io_service_){
 									   //rpc::Address &address, std::vector<ObjectID*> &objects_in_obj_store){
+  bool enable_deadlock1 = RayConfig::instance().enable_Deadlock1();
+  bool enable_deadlock2 = RayConfig::instance().enable_Deadlock2();
   //Deadlock #1
-  if(num_spinning_workers == leased_workers_.size())
-	  return true;
-  return false;
+  if(enable_deadlock1 && num_spinning_workers == leased_workers_.size()){
+		  RAY_LOG(DEBUG) << "[" << __func__ << " Deadlock1 " << num_spinning_workers;
+	io_service_.post([&object_manager_](){
+	  object_manager_.SetShouldSpill(true);
+	},"");
+  }else{
+	if(!enable_deadlock2)
+	  return;
+  //Deadlock Detection #2
+	std::vector<const ObjectID*> objects_in_obj_store;
+	object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
+	//No Objects in the object store == No GCable object
+	if(objects_in_obj_store.empty()){
+	  io_service_.post([&object_manager_](){
+		object_manager_.SetShouldSpill(true);
+	  },"");
+	  return;
+	}
+	rpc::Address address = object_manager_.GetOwnerAddress(*objects_in_obj_store[0]);
+
+	auto conn = worker_rpc_pool_.GetOrConnect(address);
+	rpc::GetObjectWorkingSetRequest request;
+	for(size_t i=0; i< objects_in_obj_store.size(); i++){
+	  request.add_object_ids(objects_in_obj_store[i]->Binary());
+	}
+	conn->GetObjectWorkingSet(request, [&object_manager_, &io_service_, first_pending_obj_size]
+							  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
+		  RAY_LOG(DEBUG) << "[" << __func__ << " RPC reply is called " << reply.gcable_object_ids_size();
+							  int64_t gcable_size = 0;
+							  for(int i=0; i<reply.gcable_object_ids_size(); i++){
+								ObjectID obj_id = ObjectID::FromBinary(reply.gcable_object_ids(i));
+								gcable_size += object_manager_.GetObjectSize(obj_id);
+		  RAY_LOG(DEBUG) << "[" << __func__ << " GCable obj and size " << obj_id << " " << object_manager_.GetObjectSize(obj_id);
+							  }
+							  bool is_deadlock = false;
+							  if(first_pending_obj_size > gcable_size){
+								is_deadlock = true;
+							  }
+							  io_service_.post([&object_manager_, is_deadlock](){
+								object_manager_.SetShouldSpill(is_deadlock);
+							  },"");
+							});
+  }
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {

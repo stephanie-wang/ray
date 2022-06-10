@@ -175,7 +175,6 @@ message GetObjectStatusReply {
 
 message GetObjectWorkingSetRequest {
   repeated bytes object_ids = 1;
-  repeated bytes deleted_object_ids = 2;
 }
 
 message GetObjectWorkingSetReply {

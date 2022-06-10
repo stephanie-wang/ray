@@ -83,6 +83,7 @@ PlasmaStore::PlasmaStore(
       allocator_(allocator),
       add_object_callback_(add_object_callback),
       delete_object_callback_(delete_object_callback),
+      on_object_creation_blocked_callback_(on_object_creation_blocked_callback),
       object_lifecycle_mgr_(allocator_, delete_object_callback_),
       delay_on_oom_ms_(delay_on_oom_ms),
       object_spilling_threshold_(object_spilling_threshold),
@@ -459,6 +460,18 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     error_codes.reserve(object_ids.size());
     for (auto &object_id : object_ids) {
       error_codes.push_back(object_lifecycle_mgr_.DeleteObject(object_id));
+	  //Unset block_task if the object store has less object than threshold
+	  if(block_task_flag){
+  		const int64_t footprint_limit = allocator_.GetFootprintLimit();
+    	float allocated_percentage = 0;
+	    if (footprint_limit != 0) {
+		  allocated_percentage = static_cast<float>(allocator_.Allocated()) / footprint_limit;
+	    }
+		if(allocated_percentage < block_tasks_threshold_){
+	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
+		  block_task_flag = false;
+	    }
+      }
     }
     RAY_RETURN_NOT_OK(SendDeleteReply(client, object_ids, error_codes));
   } break;

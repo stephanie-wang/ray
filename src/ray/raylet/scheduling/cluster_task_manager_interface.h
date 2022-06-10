@@ -95,7 +95,7 @@ class ClusterTaskManagerInterface {
   /// false if the task is already running.
   virtual void BlockTasks(Priority) = 0;
   virtual bool EvictTasks(Priority) = 0;
-  virtual bool CheckDeadlock(size_t, int64_t,  ObjectManager&) = 0;
+  virtual void CheckDeadlock(size_t, int64_t,  ObjectManager&, instrumented_io_context&) = 0;
   virtual bool CancelTask(const TaskID &task_id,
                           bool runtime_env_setup_failed = false) = 0;
 

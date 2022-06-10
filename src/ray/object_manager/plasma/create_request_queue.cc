@@ -35,6 +35,7 @@ uint64_t CreateRequestQueue::AddRequest(const ray::TaskKey &task_id,
   queue_.emplace(task_id, new CreateRequest(object_id, req_id, client, create_callback,
                                             object_size));
   num_bytes_pending_ += object_size;
+  new_request_added_ = true;
   return req_id;
 }
 
@@ -186,10 +187,9 @@ Status CreateRequestQueue::ProcessRequests() {
       block_tasks_required = (block_tasks_required&enable_blocktasks); 
 	  evict_tasks_required = (evict_tasks_required&enable_evicttasks);
 
-	  //TODO(Jae) check if this callback needs to do deadlock detection
 	  if(block_tasks_required || evict_tasks_required){
 	    on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
-	  		  evict_tasks_required, enable_blocktasks_spill, num_spinning_workers, 0);
+	  		  evict_tasks_required, false, num_spinning_workers, 0);
 	  }
 
       FinishRequest(queue_it);
@@ -216,8 +216,15 @@ Status CreateRequestQueue::ProcessRequests() {
 		  }
 		}
 		
-	    on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
-		  enable_evicttasks, enable_blocktasks_spill, num_spinning_workers, (request)->object_size);
+		if(new_request_added_ && enable_blocktasks_spill){
+	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
+		      enable_evicttasks, true, num_spinning_workers, (request)->object_size);
+		  //Check Deadlock only when a new object creation is requested
+		  new_request_added_ = false;
+		}else{
+	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
+		      enable_evicttasks, false, num_spinning_workers, (request)->object_size);
+		}
 
 	    if ((enable_blocktasks_spill || enable_evicttasks) && (!should_spill_)) { 
 		  //should_spill is set in 2 cases
@@ -247,6 +254,7 @@ Status CreateRequestQueue::ProcessRequests() {
         return Status::ObjectStoreFull("Waiting for grace period.");
       } else {
         // Trigger the fallback allocator.
+        RAY_LOG(DEBUG) << "fallback allocator called";
         auto status = ProcessRequest(/*fallback_allocator=*/true, request,
                                 /*spilling_required=*/nullptr, nullptr, nullptr, nullptr);
         if (!status.ok()) {
@@ -263,13 +271,6 @@ Status CreateRequestQueue::ProcessRequests() {
         FinishRequest(queue_it);
       }
     }
-  }
-
-  // If we make it here, then there is nothing left in the queue. It's safe to
-  // run new tasks again.
-  if (RayConfig::instance().enable_BlockTasks()) {
-    RAY_LOG(DEBUG) << "[JAE_DEBUG] resetting object_creation_blocked_callback priority";
-    RAY_UNUSED(on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0));
   }
 
   return Status::OK();

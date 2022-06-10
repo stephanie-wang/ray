@@ -475,6 +475,14 @@ class ReferenceCounter : public ReferenceCounterInterface,
   void AddBorrowerAddress(const ObjectID &object_id, const rpc::Address &borrower_address)
       LOCKS_EXCLUDED(mutex_);
 
+  std::vector<ObjectID> &GetDeletedObjects(){
+    return deleted_objects_;
+  }
+  void ResetDeletedObjects(){
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] ResetDeletedObjects called ";
+    deleted_objects_.clear();
+  }
+
  private:
   struct Reference {
     /// Constructor for a reference whose origin is unknown.
@@ -781,6 +789,12 @@ class ReferenceCounter : public ReferenceCounterInterface,
                                     const ObjectID &object_id,
                                     const rpc::WorkerAddress &borrower_addr);
 
+  void AddDeletedObjects(const ObjectID &id){
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] AddDeleteObjects called "<<id;
+    deleted_objects_.push_back(id);
+  }
+
+  std::vector<ObjectID> deleted_objects_;
   /// Address of our RPC server. This is used to determine whether we own a
   /// given object or not, by comparing our WorkerID with the WorkerID of the
   /// object's owner.

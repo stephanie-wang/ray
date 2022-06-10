@@ -200,7 +200,6 @@ void ObjectManager::HandleObjectDeleted(const ObjectID &object_id) {
   RAY_CHECK(it != local_objects_.end());
   auto object_info = it->second.object_info;
   local_objects_.erase(it);
-  deleted_objects_.push_back(object_id);
   used_memory_ -= object_info.data_size + object_info.metadata_size;
   RAY_CHECK(!local_objects_.empty() || used_memory_ == 0);
   object_directory_->ReportObjectRemoved(object_id, self_node_id_, object_info);
@@ -911,21 +910,6 @@ void ObjectManager::Tick(const boost::system::error_code &e) {
   auto interval = boost::posix_time::milliseconds(config_.timer_freq_ms);
   pull_retry_timer_.expires_from_now(interval);
   pull_retry_timer_.async_wait([this](const boost::system::error_code &e) { Tick(e); });
-}
-
-rpc::Address ObjectManager::GetOwnerAddress(){
-  auto it = local_objects_.begin();
-  if(it == local_objects_.end()){
-	  //Do Something
-  }
-  const ObjectInfo &object_info = it->second.object_info;
-  rpc::Address owner_address;
-  owner_address.set_raylet_id(object_info.owner_raylet_id.Binary());
-  owner_address.set_ip_address(object_info.owner_ip_address);
-  owner_address.set_port(object_info.owner_port);
-  owner_address.set_worker_id(object_info.owner_worker_id.Binary());
-
-  return owner_address;
 }
 
 rpc::Address ObjectManager::GetOwnerAddress(const ObjectID &object_id){

@@ -263,6 +263,8 @@ class PlasmaStore {
   /// shared with the main raylet thread.
   const ray::DeleteObjectCallback delete_object_callback_;
 
+  const ray::ObjectCreationBlockedCallback on_object_creation_blocked_callback_;
+
   ObjectLifecycleManager object_lifecycle_mgr_ GUARDED_BY(mutex_);
 
   /// The amount of time to wait before retrying a creation request after an
@@ -276,6 +278,7 @@ class PlasmaStore {
   //blocking new tasks is triggerted 
   const float block_tasks_threshold_;
   const float evict_tasks_threshold_;
+  bool block_task_flag = false;
 
   /// A timer that is set when the first request in the queue is not
   /// serviceable because there is not enough memory. The request will be

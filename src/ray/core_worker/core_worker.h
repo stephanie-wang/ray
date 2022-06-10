@@ -1429,11 +1429,6 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
   std::unique_ptr<rpc::JobConfig> job_config_;
 
   absl::flat_hash_map<ObjectID, absl::btree_set<ObjectID> > object_working_set_;
-  absl::btree_set<ObjectID> pending_objs;
-  absl::btree_map<Priority,  size_t> object_queue_in_object_store;
-  absl::flat_hash_set<ObjectID> object_table_;
-//size_t free_memory = 0;
-//static size_t gcable_size = 0;
 
   /// Simple container for per function task counters. The counters will be
   /// keyed by the function name in task spec.

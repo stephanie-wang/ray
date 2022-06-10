@@ -511,6 +511,7 @@ void ReferenceCounter::DeleteReferenceInternal(ReferenceTable::iterator it,
   // Perform the deletion.
   if (should_delete_value) {
     ReleasePlasmaObject(it);
+	AddDeletedObjects(id);
     if (deleted) {
       deleted->push_back(id);
     }

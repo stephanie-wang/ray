@@ -2587,33 +2587,27 @@ void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest
                                        rpc::SendReplyCallback send_reply_callback) {
 	RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet called" ;
 	std::vector<ObjectID> obj_ids;
-	std::vector<ObjectID> deleted_obj_ids;
 	for(int i=0; i<request.object_ids_size(); i++){
 	  obj_ids.push_back(ObjectID::FromBinary(request.object_ids(i)));
 	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet obj in obj_store:" << ObjectID::FromBinary(request.object_ids(i));
 	}
-	for(int i=0; i<request.deleted_object_ids_size(); i++){
-	  ObjectID obj = ObjectID::FromBinary(request.deleted_object_ids(i));
-	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet deleted objects:" << obj;
-	  deleted_obj_ids.push_back(obj);
-	  object_working_set_.erase(obj);
+
+	auto deleted_obj_ids = reference_counter_->GetDeletedObjects();
+	for(auto &obj : deleted_obj_ids){
+	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet deleted objects:" << obj << " size "<<deleted_obj_ids.size();
 	  for(auto &working_set : object_working_set_){
 		working_set.second.erase(obj);
 	  }
 	}
+	reference_counter_->ResetDeletedObjects();
 
-	//std::vector<ObjectID> gcable_objs;
-	for(auto &working_set : object_working_set_){
-		  RAY_LOG(DEBUG) << "[JAE_DEBUG] objects_working Set obj " << working_set.first;
-		for(auto &itr: working_set.second){
+	for(auto &obj : obj_ids){
+		for(auto &itr: object_working_set_[obj]){
 		  RAY_LOG(DEBUG) << " :" << itr;
 		}
 		if(std::includes(obj_ids.begin(), obj_ids.end(),
-				working_set.second.begin(), working_set.second.end())){
-		  //gcable_objs.push_back(working_set.first);
-		  //reply->set_gcable_object_ids(working_set.first.Binary());
-		  RAY_LOG(DEBUG) << " Add GCable Object " << working_set.first;
-		  reply->add_gcable_object_ids(working_set.first.Binary());
+				object_working_set_[obj].begin(), object_working_set_[obj].end())){
+		  reply->add_gcable_object_ids(obj.Binary());
 		}
 	}
     send_reply_callback(Status::OK(), nullptr,nullptr);

@@ -382,6 +382,9 @@ RAY_CONFIG(float, evict_tasks_threshold, 1.0)
 
 // Whether to use BlockTasks 
 
+RAY_CONFIG(bool, enable_Deadlock1, true)
+RAY_CONFIG(bool, enable_Deadlock2, true)
+
 RAY_CONFIG(bool, enable_BlockTasks, false)
 
 // Whether to block Spill at BlockTasks
