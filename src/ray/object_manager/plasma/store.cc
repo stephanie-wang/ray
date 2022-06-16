@@ -174,6 +174,7 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(
   if (block_tasks_required != nullptr) {
     if (allocated_percentage >= block_tasks_threshold_) {
       *block_tasks_required = true;
+	  block_task_flag = true;
     }
   }
   if (evict_tasks_required != nullptr) {
@@ -295,6 +296,19 @@ void PlasmaStore::ReleaseObject(const ObjectID &object_id,
   // Remove the client from the object's array of clients.
   RAY_LOG(DEBUG) << "[JAE_DEBUG] [ReleaseObject] Object " << object_id;
   RAY_CHECK(RemoveFromClientObjectIds(object_id, client) == 1);
+	  //Unset block_task if the object store has less object than threshold
+	  if(block_task_flag){
+  		const int64_t footprint_limit = allocator_.GetFootprintLimit();
+    	float allocated_percentage = 0;
+	    if (footprint_limit != 0) {
+		  allocated_percentage = static_cast<float>(allocator_.Allocated()) / footprint_limit;
+	    }
+		if(allocated_percentage < block_tasks_threshold_){
+		  RAY_LOG(DEBUG) << "JAE_DEBUG on_object_creation_blocked_callback unsetting block task allocated allocated_percentage is " << allocated_percentage;
+	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
+		  block_task_flag = false;
+	    }
+      }
 }
 
 void PlasmaStore::SealObjects(const std::vector<ObjectID> &object_ids) {
@@ -468,6 +482,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
 		  allocated_percentage = static_cast<float>(allocator_.Allocated()) / footprint_limit;
 	    }
 		if(allocated_percentage < block_tasks_threshold_){
+		  RAY_LOG(DEBUG) << "JAE_DEBUG on_object_creation_blocked_callback unsetting block task allocated allocated_percentage is " << allocated_percentage;
 	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
 		  block_task_flag = false;
 	    }

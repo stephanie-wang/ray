@@ -186,6 +186,11 @@ class CreateRequestQueue {
   /// Finish a queued request and remove it from the queue.
   void FinishRequest(absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it);
 
+  /// Decides when to trigger spill, blocked by blockTasksSpill
+  double GetSpillTime();
+  bool SkiRental();
+  bool ski_rental_started_ = false;
+
   /// The next request ID to assign, so that the caller can get the results of
   /// a request by retrying. Start at 1 because 0 means "do not retry".
   uint64_t next_req_id_ = 1;

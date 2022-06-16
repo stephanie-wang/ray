@@ -2599,12 +2599,9 @@ void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest
 		working_set.second.erase(obj);
 	  }
 	}
-	reference_counter_->ResetDeletedObjects();
+	//reference_counter_->ResetDeletedObjects();
 
 	for(auto &obj : obj_ids){
-		for(auto &itr: object_working_set_[obj]){
-		  RAY_LOG(DEBUG) << " :" << itr;
-		}
 		if(std::includes(obj_ids.begin(), obj_ids.end(),
 				object_working_set_[obj].begin(), object_working_set_[obj].end())){
 		  reply->add_gcable_object_ids(obj.Binary());

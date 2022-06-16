@@ -475,8 +475,11 @@ class ReferenceCounter : public ReferenceCounterInterface,
   void AddBorrowerAddress(const ObjectID &object_id, const rpc::Address &borrower_address)
       LOCKS_EXCLUDED(mutex_);
 
-  std::vector<ObjectID> &GetDeletedObjects(){
-    return deleted_objects_;
+  std::vector<ObjectID> GetDeletedObjects(){
+    absl::MutexLock lock(&mutex_);
+	std::vector<ObjectID>  ret = deleted_objects_;
+	deleted_objects_.clear();
+    return ret;
   }
   void ResetDeletedObjects(){
 	RAY_LOG(DEBUG) << "[JAE_DEBUG] ResetDeletedObjects called ";
