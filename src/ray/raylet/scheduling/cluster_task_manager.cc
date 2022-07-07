@@ -85,7 +85,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
       // tasks from being scheduled.
       Priority task_priority = work_it->first.first;
       RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks task " << 
-		  work_it->second->task.GetTaskSpecification().TaskId() << "priority:" << task_priority
+		  work_it->second->task.GetTaskSpecification().TaskId() << " priority:" << task_priority
                      << " block requested is " << block_requested_priority_;
       if (task_priority >= block_requested_priority_) {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task "
@@ -1234,9 +1234,9 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
   bool enable_deadlock1 = RayConfig::instance().enable_Deadlock1();
   bool enable_deadlock2 = RayConfig::instance().enable_Deadlock2();
   //Deadlock #1
-  RAY_LOG(DEBUG) << "[" << __func__ << " called";
+  RAY_LOG(DEBUG) << "[" << __func__ << "] called";
   if(enable_deadlock1 && num_spinning_workers == leased_workers_.size()){
-		  RAY_LOG(DEBUG) << "[" << __func__ << " Deadlock1 " << num_spinning_workers;
+    RAY_LOG(DEBUG) << "[" << __func__ << "] num_spinning_workers and leased_workers="<<num_spinning_workers;
 	io_service_.post([&object_manager_](){
 	  object_manager_.SetShouldSpill(true);
 	},"");
@@ -1258,21 +1258,22 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	auto conn = worker_rpc_pool_.GetOrConnect(address);
 	rpc::GetObjectWorkingSetRequest request;
 	for(size_t i=0; i< objects_in_obj_store.size(); i++){
-	  request.add_object_ids(objects_in_obj_store[i]->Binary());
+	  request.add_object_ids(objects_in_obj_store[i]->TaskId().Binary());
+	  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC task " << objects_in_obj_store[i]->TaskId();
 	}
 	conn->GetObjectWorkingSet(request, [&object_manager_, &io_service_, first_pending_obj_size]
 							  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
-		  RAY_LOG(DEBUG) << "[" << __func__ << " RPC reply is called " << reply.gcable_object_ids_size();
+		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is called " << reply.gcable_object_ids_size();
 							  int64_t gcable_size = 0;
 							  for(int i=0; i<reply.gcable_object_ids_size(); i++){
-								ObjectID obj_id = ObjectID::FromBinary(reply.gcable_object_ids(i));
-								gcable_size += object_manager_.GetObjectSize(obj_id);
-		  RAY_LOG(DEBUG) << "[" << __func__ << " GCable obj and size " << obj_id << " " << object_manager_.GetObjectSize(obj_id);
+								TaskID task_id = TaskID::FromBinary(reply.gcable_object_ids(i));
+								gcable_size += object_manager_.GetTaskObjectSize(task_id);
 							  }
 							  bool is_deadlock = false;
 							  if(first_pending_obj_size > gcable_size){
 								is_deadlock = true;
 							  }
+		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is Deadlock " << is_deadlock << " gcable size:"<<gcable_size;
 							  io_service_.post([&object_manager_, is_deadlock](){
 								object_manager_.SetShouldSpill(is_deadlock);
 							  },"");

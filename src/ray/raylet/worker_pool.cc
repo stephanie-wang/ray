@@ -1162,6 +1162,16 @@ std::vector<std::shared_ptr<WorkerInterface>> WorkerPool::GetWorkersRunningTasks
   return workers;
 }
 
+uint32_t WorkerPool::GetAllRegisteredWorkersNum() const {
+  uint32_t num_workers = 0;
+
+  for (const auto &entry : states_by_lang_) {
+	num_workers += entry.second.registered_workers.size();
+  }
+
+  return num_workers;
+}
+
 const std::vector<std::shared_ptr<WorkerInterface>> WorkerPool::GetAllRegisteredWorkers(
     bool filter_dead_workers) const {
   std::vector<std::shared_ptr<WorkerInterface>> workers;

@@ -237,8 +237,16 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			    io_service_.post([this](){
 			 	  object_manager_.SetShouldSpill(true);
 				},"");
+				return;
 			  }
             }
+			if(num_spinning_workers == worker_pool_.GetAllRegisteredWorkersNum()){
+              RAY_LOG(DEBUG) << "[" << __func__ << "] all workers are spinning: " << num_spinning_workers;
+			  io_service_.post([this](){
+			    object_manager_.SetShouldSpill(true);
+			  },"");
+			  return;
+			}
             if(block_spill){
 			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_, io_service_);
 			}
@@ -642,6 +650,15 @@ void NodeManager::DoLocalGC() {
         });
   }
   local_gc_run_time_ns_ = absl::GetCurrentTimeNanos();
+}
+
+void NodeManager::HandleSetNewDependencyAdded(const rpc::SetNewDependencyAddedRequest &request,
+                                           rpc::SetNewDependencyAddedReply *reply,
+                                           rpc::SendReplyCallback send_reply_callback){
+  io_service_.post([this](){
+    object_manager_.SetNewDependencyAdded();
+  },"");
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleSetNewDependencyAdded called";
 }
 
 void NodeManager::HandleRequestObjectSpillage(

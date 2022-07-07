@@ -194,6 +194,12 @@ message FormatGlobalMemoryInfoReply {
   ObjectStoreStats store_stats = 2;
 }
 
+message SetNewDependencyAddedRequest {
+}
+
+message SetNewDependencyAddedReply {
+}
+
 message RequestObjectSpillageRequest {
   // ObjectID to spill.
   bytes object_id = 1;
@@ -287,6 +293,8 @@ service NodeManagerService {
   // Get global object reference stats in formatted form.
   rpc FormatGlobalMemoryInfo(FormatGlobalMemoryInfoRequest)
       returns (FormatGlobalMemoryInfoReply);
+  rpc SetNewDependencyAdded(SetNewDependencyAddedRequest)
+      returns (SetNewDependencyAddedReply);
   // Ask the raylet to spill an object to external storage.
   rpc RequestObjectSpillage(RequestObjectSpillageRequest)
       returns (RequestObjectSpillageReply);

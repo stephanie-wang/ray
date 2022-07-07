@@ -521,6 +521,12 @@ class NodeManager : public rpc::NodeManagerServiceHandler {
                                     rpc::FormatGlobalMemoryInfoReply *reply,
                                     rpc::SendReplyCallback send_reply_callback) override;
 
+  /// Handle a `SetNewDependencyAdded` request.
+  void HandleSetNewDependencyAdded(const rpc::SetNewDependencyAddedRequest &request,
+                                           rpc::SetNewDependencyAddedReply *reply,
+                                           rpc::SendReplyCallback send_reply_callback) override;
+
+	  
   /// Handle a `RequestObjectSpillage` request.
   void HandleRequestObjectSpillage(const rpc::RequestObjectSpillageRequest &request,
                                    rpc::RequestObjectSpillageReply *reply,

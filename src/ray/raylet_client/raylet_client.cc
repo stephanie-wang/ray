@@ -428,6 +428,12 @@ void raylet::RayletClient::PinObjectIDs(
   grpc_client_->PinObjectIDs(request, rpc_callback);
 }
 
+void raylet::RayletClient::SetNewDependencyAdded(
+    const rpc::ClientCallback<rpc::SetNewDependencyAddedReply> &callback) {
+  rpc::SetNewDependencyAddedRequest request;
+  grpc_client_->SetNewDependencyAdded(request, callback);
+}
+
 void raylet::RayletClient::GlobalGC(
     const rpc::ClientCallback<rpc::GlobalGCReply> &callback) {
   rpc::GlobalGCRequest request;

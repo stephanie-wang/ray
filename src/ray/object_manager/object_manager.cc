@@ -172,6 +172,7 @@ void ObjectManager::HandleObjectAdded(const ObjectInfo &object_info) {
   RAY_LOG(DEBUG) << "Object added " << object_id;
   RAY_CHECK(local_objects_.count(object_id) == 0);
   local_objects_[object_id].object_info = object_info;
+  task_objects_size_[object_id.TaskId()] += object_info.data_size;
   used_memory_ += object_info.data_size + object_info.metadata_size;
   object_directory_->ReportObjectAdded(object_id, self_node_id_, object_info);
 
@@ -923,8 +924,8 @@ rpc::Address ObjectManager::GetOwnerAddress(const ObjectID &object_id){
   return owner_address;
 }
 
-int64_t ObjectManager::GetObjectSize(const ObjectID &object_id){
-  return local_objects_[object_id].object_info.GetObjectSize();
+int64_t ObjectManager::GetTaskObjectSize(const TaskID &task_id){
+  return task_objects_size_[task_id];
 }
 
 void ObjectManager::GetObjectsInObjectStore(std::vector<const ObjectID*> *objs){

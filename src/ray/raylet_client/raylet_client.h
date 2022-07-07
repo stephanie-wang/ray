@@ -427,6 +427,8 @@ class RayletClient : public RayletClientInterface {
   void GetGcsServerAddress(
       const rpc::ClientCallback<rpc::GetGcsServerAddressReply> &callback) override;
 
+  void SetNewDependencyAdded(const rpc::ClientCallback<rpc::SetNewDependencyAddedReply> &callback);
+
   void GlobalGC(const rpc::ClientCallback<rpc::GlobalGCReply> &callback);
 
   void UpdateResourceUsage(

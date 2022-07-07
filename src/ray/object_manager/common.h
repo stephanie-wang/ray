@@ -34,6 +34,8 @@ using ObjectCreationBlockedCallback = std::function<void(const ray::Priority &pr
 
 using SetShouldSpillCallback = std::function<void(bool should_spill)>;
 
+using SetNewDependencyAddedCallback = std::function<void()>;
+
 /// A callback to call when space has been released.
 using SpaceReleasedCallback = std::function<void()>;
 

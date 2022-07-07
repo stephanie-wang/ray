@@ -38,6 +38,7 @@ namespace rpc {
   RPC_SERVICE_HANDLER(NodeManagerService, PrepareBundleResources, -1) \
   RPC_SERVICE_HANDLER(NodeManagerService, CommitBundleResources, -1)  \
   RPC_SERVICE_HANDLER(NodeManagerService, CancelResourceReserve, -1)  \
+  RPC_SERVICE_HANDLER(NodeManagerService, SetNewDependencyAdded, -1)  \
   RPC_SERVICE_HANDLER(NodeManagerService, RequestObjectSpillage, -1)  \
   RPC_SERVICE_HANDLER(NodeManagerService, ReleaseUnusedBundles, -1)   \
   RPC_SERVICE_HANDLER(NodeManagerService, GetSystemConfig, -1)        \
@@ -111,6 +112,11 @@ class NodeManagerServiceHandler {
   virtual void HandleFormatGlobalMemoryInfo(const FormatGlobalMemoryInfoRequest &request,
                                             FormatGlobalMemoryInfoReply *reply,
                                             SendReplyCallback send_reply_callback) = 0;
+
+  virtual void HandleSetNewDependencyAdded(const SetNewDependencyAddedRequest &request,
+                                           SetNewDependencyAddedReply *reply,
+                                           SendReplyCallback send_reply_callback) = 0;
+
 
   virtual void HandleRequestObjectSpillage(const RequestObjectSpillageRequest &request,
                                            RequestObjectSpillageReply *reply,

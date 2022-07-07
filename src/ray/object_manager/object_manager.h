@@ -264,12 +264,16 @@ class ObjectManager : public ObjectManagerInterface,
   bool PullManagerHasPullsQueued() const { return pull_manager_->HasPullsQueued(); }
 
   void SetShouldSpill(bool should_spill){
-	  plasma::plasma_store_runner->SetShouldSpill(should_spill);
+    plasma::plasma_store_runner->SetShouldSpill(should_spill);
+  }
+
+  void SetNewDependencyAdded(){
+    plasma::plasma_store_runner->SetNewDependencyAdded();
   }
 
   rpc::Address GetOwnerAddress(const ObjectID &object_id);
   void GetObjectsInObjectStore(std::vector<const ObjectID*> *objs);
-  int64_t GetObjectSize(const ObjectID &object_id);
+  int64_t GetTaskObjectSize(const TaskID &task_id);
 
  private:
   friend class TestObjectManager;
@@ -462,6 +466,9 @@ class ObjectManager : public ObjectManagerInterface,
   /// Mapping from locally available objects to information about those objects
   /// including when the object was last pushed to other object managers.
   std::unordered_map<ObjectID, LocalObjectInfo> local_objects_;
+
+  //TODO(Jae) Implement remove of this data structure
+  std::unordered_map<TaskID, int64_t> task_objects_size_;
 
   /// This is used as the callback identifier in Pull for
   /// SubscribeObjectLocations. We only need one identifier because we never need to

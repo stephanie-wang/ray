@@ -38,6 +38,8 @@ uint64_t CreateRequestQueue::AddRequest(const ray::TaskKey &task_id,
   queue_.emplace(task_id, new CreateRequest(object_id, req_id, client, create_callback,
                                             object_size));
   num_bytes_pending_ += object_size;
+
+  RAY_LOG(DEBUG) << "AddRequest new_request_added_ set true";
   new_request_added_ = true;
   return req_id;
 }
@@ -151,13 +153,20 @@ Status CreateRequestQueue::ProcessFirstRequest() {
   return Status::OK();
 }
 
+void CreateRequestQueue::SetNewDependencyAdded() {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] SetNewDependencyAdded Called ";
+  new_dependency_added_ = true;
+}
+
 void CreateRequestQueue::SetShouldSpill(bool should_spill) {
   RAY_LOG(DEBUG) << "[JAE_DEBUG] SetShouldSpill Called "<<should_spill;
   should_spill_ = should_spill;
 }
 
 double CreateRequestQueue::GetSpillTime(){
-  return 3;
+  //Default 3 seconds
+  //TODO(Jae) Set according to objects in the object store
+  return RayConfig::instance().spill_wait_time();
 }
 
 static inline double distribution(double i, double b){
@@ -166,14 +175,22 @@ static inline double distribution(double i, double b){
 
 bool CreateRequestQueue::SkiRental(){
   static uint64_t ski_rental_timestamp;
-  static uint64_t last_called;
+  static bool ski_rental_started = false;
   uint64_t current_timestamp = std::chrono::duration_cast<std::chrono::milliseconds>
 							 (std::chrono::system_clock::now().time_since_epoch()).count();
-  if(!ski_rental_started_){
-    ski_rental_started_ = true;
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] SkiRental Called ";
+  if(!ski_rental_started){
+    ski_rental_started = true;
     ski_rental_timestamp = current_timestamp;
-	last_called = current_timestamp;
+	return false;
   }
+  if((current_timestamp - ski_rental_timestamp) >= GetSpillTime()){
+	ski_rental_started = false;
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] SkiRental Return true ";
+	return true;
+  }
+  return false;
+  /*
 
   double diff = (double)(current_timestamp - ski_rental_timestamp);
   double avg = (double)((diff + last_called - ski_rental_timestamp)/2);
@@ -194,7 +211,10 @@ bool CreateRequestQueue::SkiRental(){
   }
 
   last_called = current_timestamp;
+  if(spill)
+    ski_rental_started = false;
   return spill;
+  */
 }
 
 Status CreateRequestQueue::ProcessRequests() {
@@ -258,18 +278,19 @@ Status CreateRequestQueue::ProcessRequests() {
 			<< enable_blocktasks_spill << ") on priority "
 			<< lowest_pri << " should_spill " << should_spill_;
 		if(enable_blocktasks_spill){
-		  should_spill_ = SkiRental();
-          RAY_LOG(DEBUG) << "[JAE_DEBUG] task " << task_id << " spins"; 
+		  should_spill_ |= SkiRental();
+          RAY_LOG(DEBUG) << "[JAE_DEBUG] task " << task_id << " spins should_spill_:" << should_spill_; 
 		  for(auto it = queue_.begin(); it != queue_.end(); it++){
             num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(it->first.first);
 		  }
 		}
 		
-		if(new_request_added_ && enable_blocktasks_spill){
+		if(new_dependency_added_ && new_request_added_ && enable_blocktasks_spill && !should_spill_){
 	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
 		      enable_evicttasks, true, num_spinning_workers, (request)->object_size);
 		  //Check Deadlock only when a new object creation is requested
 		  new_request_added_ = false;
+  		  new_dependency_added_ = false;
 		}else{
 	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
 		      enable_evicttasks, false, num_spinning_workers, (request)->object_size);
@@ -336,7 +357,7 @@ void CreateRequestQueue::FinishRequest(
   num_bytes_pending_ -= it->second->object_size;
   queue_it = queue_.erase(queue_it);
   //Reset this flag to test deadlock when an object is created (State Changed)
-  new_request_added_ = true;
+  //new_request_added_ = true;
 }
 
 void CreateRequestQueue::RemoveDisconnectedClientRequests(

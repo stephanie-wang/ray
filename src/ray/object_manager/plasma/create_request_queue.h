@@ -122,6 +122,8 @@ class CreateRequestQueue {
 
   void SetShouldSpill(bool should_spill);
 
+  void SetNewDependencyAdded();
+
  private:
   struct CreateRequest {
     CreateRequest(const ObjectID &object_id, uint64_t request_id,
@@ -189,7 +191,6 @@ class CreateRequestQueue {
   /// Decides when to trigger spill, blocked by blockTasksSpill
   double GetSpillTime();
   bool SkiRental();
-  bool ski_rental_started_ = false;
 
   /// The next request ID to assign, so that the caller can get the results of
   /// a request by retrying. Start at 1 because 0 means "do not retry".
@@ -245,6 +246,8 @@ class CreateRequestQueue {
 
   // Shared between the object store thread and the scheduler thread.
   bool should_spill_ = false;
+
+  bool new_dependency_added_ = false;
 
   bool new_request_added_ = false;
 

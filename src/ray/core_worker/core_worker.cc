@@ -1648,15 +1648,26 @@ std::unordered_map<std::string, double> AddPlacementGroupConstraint(
 
 void CoreWorker::BuildObjectWorkingSet(TaskSpecification &spec){
   size_t size = spec.NumArgs();
-  std::vector<ObjectID> task_deps;
+  absl::btree_set<TaskID> task_deps;
+
+  if(size){
+    local_raylet_client_->SetNewDependencyAdded(
+      [](const Status &status, const rpc::SetNewDependencyAddedReply &reply) {
+        if (!status.ok()) {
+          RAY_LOG(ERROR) << "HandleSetNewDependencyAdded Replied";
+        }
+    });
+  }
 
   for(size_t i=0; i < size; i++){
     if (spec.ArgByRef(i)){
-      task_deps.push_back(spec.ArgId(i));
+      task_deps.insert(spec.ArgId(i).TaskId());
 	}
   }
-  for(auto &dep : task_deps)
+
+  for(auto &dep : task_deps){
     object_working_set_[dep].insert(task_deps.begin(), task_deps.end());
+  }
 }
 
 std::vector<rpc::ObjectReference> CoreWorker::SubmitTask(
@@ -1693,7 +1704,8 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitTask(
   } else {
     returned_refs = task_manager_->AddPendingTask(task_spec.CallerAddress(), task_spec,
                                                   CurrentCallSite(), max_retries);
-	BuildObjectWorkingSet(task_spec);
+    if(RayConfig::instance().enable_BlockTasksSpill())
+	  BuildObjectWorkingSet(task_spec);
     io_service_.post(
         [this, task_spec]() {
           RAY_UNUSED(direct_task_submitter_->SubmitTask(task_spec));
@@ -2585,21 +2597,21 @@ void CoreWorker::HandleDirectActorCallArgWaitComplete(
 void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest &request,
 										   rpc::GetObjectWorkingSetReply *reply,
                                        rpc::SendReplyCallback send_reply_callback) {
-	RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet called" ;
-	std::vector<ObjectID> obj_ids;
+	absl::btree_set<TaskID> obj_ids;
 	for(int i=0; i<request.object_ids_size(); i++){
-	  obj_ids.push_back(ObjectID::FromBinary(request.object_ids(i)));
-	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet obj in obj_store:" << ObjectID::FromBinary(request.object_ids(i));
+	  obj_ids.insert(TaskID::FromBinary(request.object_ids(i)));
+	  RAY_LOG(DEBUG) << "[JAE_DEBUG] task passed: "<<TaskID::FromBinary(request.object_ids(i));
 	}
 
+	//TODO(Jae) This is wrong with TaskID implementation. If one obj is deleted, taskID is deleted
 	auto deleted_obj_ids = reference_counter_->GetDeletedObjects();
 	for(auto &obj : deleted_obj_ids){
 	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet deleted objects:" << obj << " size "<<deleted_obj_ids.size();
+	  object_working_set_.erase(obj.TaskId());
 	  for(auto &working_set : object_working_set_){
-		working_set.second.erase(obj);
+		working_set.second.erase(obj.TaskId());
 	  }
 	}
-	//reference_counter_->ResetDeletedObjects();
 
 	for(auto &obj : obj_ids){
 		if(std::includes(obj_ids.begin(), obj_ids.end(),

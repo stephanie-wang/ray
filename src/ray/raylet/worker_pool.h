@@ -337,6 +337,8 @@ class WorkerPool : public WorkerPoolInterface, public IOWorkerPoolInterface {
 
   /// Get all the registered workers.
   ///
+
+  uint32_t GetAllRegisteredWorkersNum() const;
   /// \param filter_dead_workers whether or not if this method will filter dead workers
   /// that are still registered. \return A list containing all the workers.
   const std::vector<std::shared_ptr<WorkerInterface>> GetAllRegisteredWorkers(

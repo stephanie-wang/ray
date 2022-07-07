@@ -152,6 +152,7 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(
   int device_num;
   ReadCreateRequest(input, input_size, &object_info, &source, &device_num);
 
+
   if (device_num != 0) {
     RAY_LOG(ERROR) << "device_num != 0 but CUDA not enabled";
     return PlasmaError::OutOfMemory;
@@ -171,6 +172,7 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(
   } else {
     allocated_percentage = 0;
   }
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] [HandleCreateObjectRequest] allocated_percentage:" << allocated_percentage << " object_id:" << object_info.object_id;
   if (block_tasks_required != nullptr) {
     if (allocated_percentage >= block_tasks_threshold_) {
       *block_tasks_required = true;
