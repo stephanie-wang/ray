@@ -242,6 +242,8 @@ class CreateRequestQueue {
   /// The time OOM timer first starts. It becomes -1 upon every creation success.
   int64_t oom_start_time_ns_ = -1;
 
+  int64_t oom_ = -1;
+
   size_t num_bytes_pending_ = 0;
 
   // Shared between the object store thread and the scheduler thread.

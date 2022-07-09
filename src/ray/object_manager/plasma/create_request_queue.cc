@@ -267,6 +267,10 @@ Status CreateRequestQueue::ProcessRequests() {
       if (trigger_global_gc_) {
         trigger_global_gc_();
       }
+	  
+	  if (oom_ == -1){
+	    oom_ = now;
+	  }
 
       if (oom_start_time_ns_ == -1) {
         oom_start_time_ns_ = now;
@@ -358,6 +362,12 @@ void CreateRequestQueue::FinishRequest(
   queue_it = queue_.erase(queue_it);
   //Reset this flag to test deadlock when an object is created (State Changed)
   //new_request_added_ = true;
+    auto now = get_time_();
+	  if(oom_!= -1){
+	    RAY_LOG(DEBUG) << "[JAE_DEBUG] Spill Taken " << (now - oom_);
+	  }
+	  RAY_LOG(DEBUG) << "[JAE_DEBUG] created object success " << (now - oom_);
+	  oom_ = -1;
 }
 
 void CreateRequestQueue::RemoveDisconnectedClientRequests(

@@ -1305,9 +1305,25 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
 
 void ClusterTaskManager::BlockTasks(Priority base_priority) {
   block_requested_priority_ = base_priority;
+  if(base_priority == Priority())
+    ScheduleAndDispatchTasks();
 }
 
 void ClusterTaskManager::ScheduleAndDispatchTasks() {
+  static std::atomic<bool> running = false;
+  /*
+  for (;;) {
+      if (!running.exchange(true, std::memory_order_acquire)) {
+        break;
+      }
+      while (running.load(std::memory_order_relaxed)) {
+        __builtin_ia32_pause();
+      }
+    }
+	*/
+      if (running.exchange(true, std::memory_order_acquire)) {
+        return;
+      }
   SchedulePendingTasks();
   DispatchScheduledTasksToWorkers(worker_pool_, leased_workers_);
   // TODO(swang): Spill from waiting queue first? Otherwise, we may end up
@@ -1316,6 +1332,7 @@ void ClusterTaskManager::ScheduleAndDispatchTasks() {
   // in the PullManager or periodically, to make sure that we spill waiting
   // tasks that are blocked.
   SpillWaitingTasks();
+  running.store(false, std::memory_order_release);
 }
 
 void ClusterTaskManager::SpillWaitingTasks() {
