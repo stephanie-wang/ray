@@ -1235,8 +1235,8 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
   bool enable_deadlock2 = RayConfig::instance().enable_Deadlock2();
   //Deadlock #1
   RAY_LOG(DEBUG) << "[" << __func__ << "] called";
+    RAY_LOG(DEBUG) << "[" << __func__ << "] num_spinning_workers:"<<num_spinning_workers<< " leased_workers="<<leased_workers_.size() <<" deadlock#1:" << enable_deadlock1;
   if(enable_deadlock1 && num_spinning_workers == leased_workers_.size()){
-    RAY_LOG(DEBUG) << "[" << __func__ << "] num_spinning_workers and leased_workers="<<num_spinning_workers;
 	io_service_.post([&object_manager_](){
 	  object_manager_.SetShouldSpill(true);
 	},"");

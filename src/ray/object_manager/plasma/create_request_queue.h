@@ -19,6 +19,7 @@
 #include <vector>
 
 #include "absl/container/flat_hash_map.h"
+#include "absl/container/flat_hash_set.h"
 #include "absl/container/btree_map.h"
 
 #include "ray/common/task/task_priority.h"
@@ -162,20 +163,24 @@ class CreateRequestQueue {
       //Return false if it is deadlock (all workers spinning)
   	  //This is deadlock detection #1. There exists false-positive but the 
   	  //implementation is simple
-      size_t RegisterSpinningTasks(ray::Priority p){
-        RAY_LOG(DEBUG) << "[JAE_DEBUG] RegisterSpinningTasks priority:" <<p;
-        spinning_tasks.insert(p);
+	  size_t GetNumSpinningTasks(){
 		return spinning_tasks.size();
+	  }
+
+      void RegisterTasks(const ObjectID &object_id){
+		spinning_tasks[object_id.TaskId()].insert(object_id);
+		return;
       }
 
-      void UnRegisterSpinningTasks(ray::Priority p){
-        auto it = spinning_tasks.find(p);
-	    if(it != spinning_tasks.end())
-		  spinning_tasks.erase(it);
+      void UnRegisterSpinningTasks(const ObjectID &object_id){
+		spinning_tasks[object_id.TaskId()].erase(object_id);
+		if(spinning_tasks[object_id.TaskId()].size() == 0){
+		  spinning_tasks.erase(object_id.TaskId());
+		}
       }
 
     private:
-      absl::flat_hash_set<ray::Priority> spinning_tasks;
+  	  absl::flat_hash_map<ray::TaskID, absl::flat_hash_set<ObjectID>> spinning_tasks;
   };
 
   /// Process a single request. Sets the request's error result to the error

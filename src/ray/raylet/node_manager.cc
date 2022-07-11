@@ -247,7 +247,8 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			  },"");
 			  return;
 			}
-            if(block_spill){
+			//TODO(Jae) remove deadlock#1 later. 
+            if(block_spill || RayConfig::instance().enable_Deadlock1()){
 			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_, io_service_);
 			}
 		  },

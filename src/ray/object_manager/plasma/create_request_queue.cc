@@ -39,8 +39,8 @@ uint64_t CreateRequestQueue::AddRequest(const ray::TaskKey &task_id,
                                             object_size));
   num_bytes_pending_ += object_size;
 
-  RAY_LOG(DEBUG) << "AddRequest new_request_added_ set true";
   new_request_added_ = true;
+  spinning_tasks_.RegisterTasks(object_id);
   return req_id;
 }
 
@@ -236,7 +236,6 @@ Status CreateRequestQueue::ProcessRequests() {
     bool evict_tasks_required = false;
     std::unique_ptr<CreateRequest> &request = queue_it->second;
     ray::Priority lowest_pri;
-    ray::TaskID task_id = queue_it->first.second;
     auto status =
         ProcessRequest(/*fallback_allocator=*/false, request, &spilling_required,
                        &block_tasks_required, &evict_tasks_required, &lowest_pri);
@@ -281,15 +280,11 @@ Status CreateRequestQueue::ProcessRequests() {
 			<< enable_blocktasks <<" " << enable_evicttasks << " " 
 			<< enable_blocktasks_spill << ") on priority "
 			<< lowest_pri << " should_spill " << should_spill_;
-		if(enable_blocktasks_spill){
-		  should_spill_ |= SkiRental();
-          RAY_LOG(DEBUG) << "[JAE_DEBUG] task " << task_id << " spins should_spill_:" << should_spill_; 
-		  for(auto it = queue_.begin(); it != queue_.end(); it++){
-            num_spinning_workers = spinning_tasks_.RegisterSpinningTasks(it->first.first);
-		  }
-		}
 		
+          RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of requests: "  << queue_.size();
+		  should_spill_ |= SkiRental();
 		if(new_dependency_added_ && new_request_added_ && enable_blocktasks_spill && !should_spill_){
+          num_spinning_workers = spinning_tasks_.GetNumSpinningTasks();
 	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
 		      enable_evicttasks, true, num_spinning_workers, (request)->object_size);
 		  //Check Deadlock only when a new object creation is requested
@@ -352,7 +347,7 @@ Status CreateRequestQueue::ProcessRequests() {
 
 void CreateRequestQueue::FinishRequest(
     absl::btree_map<ray::TaskKey, std::unique_ptr<CreateRequest>>::iterator queue_it) {
-  spinning_tasks_.UnRegisterSpinningTasks(queue_it->first.first);
+  spinning_tasks_.UnRegisterSpinningTasks(queue_it->second->object_id);
   auto it = fulfilled_requests_.find(queue_it->second->request_id);
   RAY_CHECK(it != fulfilled_requests_.end());
   RAY_CHECK(it->second == nullptr);
@@ -366,7 +361,6 @@ void CreateRequestQueue::FinishRequest(
 	  if(oom_!= -1){
 	    RAY_LOG(DEBUG) << "[JAE_DEBUG] Spill Taken " << (now - oom_);
 	  }
-	  RAY_LOG(DEBUG) << "[JAE_DEBUG] created object success " << (now - oom_);
 	  oom_ = -1;
 }
 
