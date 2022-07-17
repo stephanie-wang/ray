@@ -283,7 +283,7 @@ class PlasmaStore {
   //blocking new tasks is triggerted 
   const float block_tasks_threshold_;
   const float evict_tasks_threshold_;
-  bool block_task_flag = false;
+  std::atomic<bool> block_task_flag_ = {false};
 
   /// A timer that is set when the first request in the queue is not
   /// serviceable because there is not enough memory. The request will be

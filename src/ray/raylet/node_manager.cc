@@ -230,7 +230,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           [this](const Priority &base_priority, bool block_tasks,
             bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
             if(block_tasks){
-                  cluster_task_manager_->BlockTasks(base_priority);
+              cluster_task_manager_->BlockTasks(base_priority);
             }
             if(evict_tasks){
               if(cluster_task_manager_->EvictTasks(base_priority)){

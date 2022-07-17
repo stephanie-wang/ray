@@ -364,6 +364,8 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   uint64_t metric_tasks_dispatched_;
   uint64_t metric_tasks_spilled_;
 
+  bool task_blocked_ = false;
+
   const SetShouldSpillCallback set_should_spill_;
 
   rpc::ClientCallManager client_call_manager_;

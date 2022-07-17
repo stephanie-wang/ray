@@ -1648,25 +1648,28 @@ std::unordered_map<std::string, double> AddPlacementGroupConstraint(
 
 void CoreWorker::BuildObjectWorkingSet(TaskSpecification &spec){
   size_t size = spec.NumArgs();
-  absl::btree_set<TaskID> task_deps;
+  absl::btree_set<ObjectID> deps;
+  bool new_dependency_added = false;
 
-  if(size){
+  //TODO(Jae) make a task set for performance
+  for(size_t i=0; i < size; i++){
+    if (spec.ArgByRef(i)){
+      deps.insert(spec.ArgId(i));
+	  new_dependency_added = true;
+    }
+  }
+
+  if(new_dependency_added){
     local_raylet_client_->SetNewDependencyAdded(
       [](const Status &status, const rpc::SetNewDependencyAddedReply &reply) {
         if (!status.ok()) {
           RAY_LOG(ERROR) << "HandleSetNewDependencyAdded Replied";
         }
     });
-  }
 
-  for(size_t i=0; i < size; i++){
-    if (spec.ArgByRef(i)){
-      task_deps.insert(spec.ArgId(i).TaskId());
-	}
-  }
-
-  for(auto &dep : task_deps){
-    object_working_set_[dep].insert(task_deps.begin(), task_deps.end());
+    for(auto &dep : deps){
+      object_working_set_[dep.TaskId()].insert(deps.begin(), deps.end());
+    }
   }
 }
 
@@ -2597,10 +2600,9 @@ void CoreWorker::HandleDirectActorCallArgWaitComplete(
 void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest &request,
 										   rpc::GetObjectWorkingSetReply *reply,
                                        rpc::SendReplyCallback send_reply_callback) {
-	absl::btree_set<TaskID> obj_ids;
+	absl::btree_set<ObjectID> obj_ids;
 	for(int i=0; i<request.object_ids_size(); i++){
-	  obj_ids.insert(TaskID::FromBinary(request.object_ids(i)));
-	  RAY_LOG(DEBUG) << "[JAE_DEBUG] task passed: "<<TaskID::FromBinary(request.object_ids(i));
+	  obj_ids.insert(ObjectID::FromBinary(request.object_ids(i)));
 	}
 
 	//TODO(Jae) This is wrong with TaskID implementation. If one obj is deleted, taskID is deleted
@@ -2609,14 +2611,14 @@ void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest
 	  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet deleted objects:" << obj << " size "<<deleted_obj_ids.size();
 	  object_working_set_.erase(obj.TaskId());
 	  for(auto &working_set : object_working_set_){
-		working_set.second.erase(obj.TaskId());
+		working_set.second.erase(obj);
 	  }
 	}
 
 	for(auto &obj : obj_ids){
 		if(std::includes(obj_ids.begin(), obj_ids.end(),
-				object_working_set_[obj].begin(), object_working_set_[obj].end())){
-		  reply->add_gcable_object_ids(obj.Binary());
+				object_working_set_[obj.TaskId()].begin(), object_working_set_[obj.TaskId()].end())){
+		  reply->add_gcable_object_ids(obj.TaskId().Binary());
 		}
 	}
     send_reply_callback(Status::OK(), nullptr,nullptr);

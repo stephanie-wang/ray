@@ -88,11 +88,12 @@ bool ClusterTaskManager::SchedulePendingTasks() {
 		  work_it->second->task.GetTaskSpecification().TaskId() << " priority:" << task_priority
                      << " block requested is " << block_requested_priority_;
       if (task_priority >= block_requested_priority_) {
-        RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task "
-                       << task_priority;
-		    work_it++;
+		task_blocked_ = true;
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task " << task_priority;
+		work_it++;
         continue;
       }
+	  task_blocked_ = false;
 
       const std::shared_ptr<Work> &work = work_it->second;
       RayTask task = work->task;
@@ -1230,16 +1231,16 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
 
 void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t first_pending_obj_size,
 	 			ObjectManager &object_manager_, instrumented_io_context &io_service_){
-									   //rpc::Address &address, std::vector<ObjectID*> &objects_in_obj_store){
   bool enable_deadlock1 = RayConfig::instance().enable_Deadlock1();
   bool enable_deadlock2 = RayConfig::instance().enable_Deadlock2();
+  static Priority init_priority;
   //Deadlock #1
-  RAY_LOG(DEBUG) << "[" << __func__ << "] called";
-    RAY_LOG(DEBUG) << "[" << __func__ << "] num_spinning_workers:"<<num_spinning_workers<< " leased_workers="<<leased_workers_.size() <<" deadlock#1:" << enable_deadlock1;
-  if(enable_deadlock1 && num_spinning_workers == leased_workers_.size()){
+  RAY_LOG(DEBUG) << "[" << __func__ << "] called (" << num_spinning_workers <<"/" << leased_workers_.size() <<") spinning";
+  if(enable_deadlock1 && num_spinning_workers && num_spinning_workers == leased_workers_.size()){
 	io_service_.post([&object_manager_](){
 	  object_manager_.SetShouldSpill(true);
 	},"");
+	BlockTasks(init_priority);
   }else{
 	if(!enable_deadlock2)
 	  return;
@@ -1251,6 +1252,7 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	  io_service_.post([&object_manager_](){
 		object_manager_.SetShouldSpill(true);
 	  },"");
+	  BlockTasks(init_priority);
 	  return;
 	}
 	rpc::Address address = object_manager_.GetOwnerAddress(*objects_in_obj_store[0]);
@@ -1258,10 +1260,10 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	auto conn = worker_rpc_pool_.GetOrConnect(address);
 	rpc::GetObjectWorkingSetRequest request;
 	for(size_t i=0; i< objects_in_obj_store.size(); i++){
-	  request.add_object_ids(objects_in_obj_store[i]->TaskId().Binary());
-	  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC task " << objects_in_obj_store[i]->TaskId();
+	  request.add_object_ids(objects_in_obj_store[i]->Binary());
+	  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC ObjectIDs " << objects_in_obj_store[i];
 	}
-	conn->GetObjectWorkingSet(request, [&object_manager_, &io_service_, first_pending_obj_size]
+	conn->GetObjectWorkingSet(request, [&object_manager_, &io_service_, this, first_pending_obj_size]
 							  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
 		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is called " << reply.gcable_object_ids_size();
 							  int64_t gcable_size = 0;
@@ -1272,6 +1274,8 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 							  bool is_deadlock = false;
 							  if(first_pending_obj_size > gcable_size){
 								is_deadlock = true;
+								//TODO(Jae) Change this to turn off backpressure 
+	  							BlockTasks(init_priority);
 							  }
 		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is Deadlock " << is_deadlock << " gcable size:"<<gcable_size;
 							  io_service_.post([&object_manager_, is_deadlock](){
@@ -1304,13 +1308,16 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
 }
 
 void ClusterTaskManager::BlockTasks(Priority base_priority) {
+  static Priority init_priority;
   block_requested_priority_ = base_priority;
-  if(base_priority == Priority())
+  if(base_priority == init_priority && task_blocked_){
+	RAY_LOG(DEBUG) << "BlockTasks calls ScheduleAndDispatchTasks";
     ScheduleAndDispatchTasks();
+  }
 }
 
 void ClusterTaskManager::ScheduleAndDispatchTasks() {
-  static std::atomic<bool> running = false;
+  static std::atomic<bool> running = {false};
   /*
   for (;;) {
       if (!running.exchange(true, std::memory_order_acquire)) {

@@ -80,11 +80,8 @@ int64_t LRUCache::ChooseObjectsToEvict(int64_t num_bytes_required,
                                        std::vector<ObjectID> &objects_to_evict) {
   int64_t bytes_evicted = 0;
   auto it = item_list_.end();
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] num_bytes_required: "
-	  <<num_bytes_required;
   while (bytes_evicted < num_bytes_required && it != item_list_.begin()) {
     it--;
-  RAY_LOG(DEBUG) << "[JAE_DEBUG]  objects to evict is " << it->first;
     objects_to_evict.push_back(it->first);
     bytes_evicted += it->second;
     bytes_evicted_total_ += it->second;

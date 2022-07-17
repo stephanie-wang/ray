@@ -220,9 +220,9 @@ bool CreateRequestQueue::SkiRental(){
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
-  bool enable_blocktasks = RayConfig::instance().enable_BlockTasks();
-  bool enable_blocktasks_spill = RayConfig::instance().enable_BlockTasksSpill();
-  bool enable_evicttasks = RayConfig::instance().enable_EvictTasks();
+  static bool enable_blocktasks = RayConfig::instance().enable_BlockTasks();
+  static bool enable_blocktasks_spill = RayConfig::instance().enable_BlockTasksSpill();
+  static bool enable_evicttasks = RayConfig::instance().enable_EvictTasks();
   size_t num_spinning_workers = 0;
 
   //TODO(Jae) Check if taskId differs within a same task with multiple objects
@@ -283,8 +283,19 @@ Status CreateRequestQueue::ProcessRequests() {
 		
           RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of requests: "  << queue_.size();
 		  should_spill_ |= SkiRental();
-		if(new_dependency_added_ && new_request_added_ && enable_blocktasks_spill && !should_spill_){
           num_spinning_workers = spinning_tasks_.GetNumSpinningTasks();
+		  //*********************************************
+		  num_spinning_workers = 0;
+		  absl::flat_hash_set<ray::TaskID> task_set;
+
+		  for(auto &q: queue_){
+		    task_set.insert(q.second->object_id.TaskId());
+		  }
+
+		  num_spinning_workers = task_set.size();
+          RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of spinning tasks: "  << num_spinning_workers;
+		  //*********************************************
+		if(new_dependency_added_ && new_request_added_ && enable_blocktasks_spill && !should_spill_){
 	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
 		      enable_evicttasks, true, num_spinning_workers, (request)->object_size);
 		  //Check Deadlock only when a new object creation is requested
@@ -340,6 +351,7 @@ Status CreateRequestQueue::ProcessRequests() {
         FinishRequest(queue_it);
       }
     }
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] Remaining requests: " << queue_.size();
   }
 
   return Status::OK();
