@@ -28,6 +28,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
+#include <thread>
 
 #include <boost/asio.hpp>
 
@@ -511,8 +512,9 @@ Status PlasmaClient::Impl::Get(const std::vector<ObjectID> &object_ids,
   };
   const size_t num_objects = object_ids.size();
   *out = std::vector<ObjectBuffer>(num_objects);
-  return GetBuffers(&object_ids[0], num_objects, timeout_ms, wrap_buffer, &(*out)[0],
+	auto res = GetBuffers(&object_ids[0], num_objects, timeout_ms, wrap_buffer, &(*out)[0],
                     is_from_worker);
+  return res;
 }
 
 Status PlasmaClient::Impl::MarkObjectUnused(const ObjectID &object_id) {

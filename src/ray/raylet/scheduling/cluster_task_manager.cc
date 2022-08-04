@@ -92,6 +92,7 @@ bool ClusterTaskManager::SchedulePendingTasks() {
         RAY_LOG(DEBUG) << "[JAE_DEBUG] schedulePendingTasks blocked task " << task_priority;
 		work_it++;
         continue;
+		//break;
       }
 	  task_blocked_ = false;
 
@@ -1237,22 +1238,25 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
   //Deadlock #1
   RAY_LOG(DEBUG) << "[" << __func__ << "] called (" << num_spinning_workers <<"/" << leased_workers_.size() <<") spinning";
   if(enable_deadlock1 && num_spinning_workers && num_spinning_workers == leased_workers_.size()){
+	RAY_LOG(DEBUG) << "[" << __func__ << "] All leased workers are spinning ";
 	io_service_.post([&object_manager_](){
 	  object_manager_.SetShouldSpill(true);
 	},"");
-	BlockTasks(init_priority);
+	BlockTasks(init_priority, io_service_);
   }else{
 	if(!enable_deadlock2)
 	  return;
   //Deadlock Detection #2
 	std::vector<const ObjectID*> objects_in_obj_store;
-	object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
+	int64_t free_memory = object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
 	//No Objects in the object store == No GCable object
 	if(objects_in_obj_store.empty()){
+	  RAY_LOG(DEBUG) << "[" << __func__ << "] Object Store is empty ";
+	  return;
 	  io_service_.post([&object_manager_](){
 		object_manager_.SetShouldSpill(true);
 	  },"");
-	  BlockTasks(init_priority);
+	  BlockTasks(init_priority, io_service_);
 	  return;
 	}
 	rpc::Address address = object_manager_.GetOwnerAddress(*objects_in_obj_store[0]);
@@ -1263,10 +1267,10 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	  request.add_object_ids(objects_in_obj_store[i]->Binary());
 	  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC ObjectIDs " << objects_in_obj_store[i];
 	}
-	conn->GetObjectWorkingSet(request, [&object_manager_, &io_service_, this, first_pending_obj_size]
+	conn->GetObjectWorkingSet(request,  [&object_manager_, &io_service_, this, first_pending_obj_size, free_memory]
 							  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
 		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is called " << reply.gcable_object_ids_size();
-							  int64_t gcable_size = 0;
+							  int64_t gcable_size = free_memory;
 							  for(int i=0; i<reply.gcable_object_ids_size(); i++){
 								TaskID task_id = TaskID::FromBinary(reply.gcable_object_ids(i));
 								gcable_size += object_manager_.GetTaskObjectSize(task_id);
@@ -1275,9 +1279,9 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 							  if(first_pending_obj_size > gcable_size){
 								is_deadlock = true;
 								//TODO(Jae) Change this to turn off backpressure 
-	  							BlockTasks(init_priority);
+	  							BlockTasks(init_priority, io_service_);
 							  }
-		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is Deadlock " << is_deadlock << " gcable size:"<<gcable_size;
+		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is Deadlock " << is_deadlock << " gcable size:"<<gcable_size << " first pending object size:" << first_pending_obj_size;
 							  io_service_.post([&object_manager_, is_deadlock](){
 								object_manager_.SetShouldSpill(is_deadlock);
 							  },"");
@@ -1286,15 +1290,20 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 }
 
 bool ClusterTaskManager::EvictTasks(Priority base_priority) {
+  RAY_LOG(DEBUG) << "[" << __func__ << "] Called " ;
   bool should_spill = true;
   std::vector<std::shared_ptr<WorkerInterface>> workers_to_kill;
   for (auto &entry : leased_workers_) {
     std::shared_ptr<WorkerInterface> worker = entry.second;
     Priority priority = worker->GetAssignedTask().GetTaskSpecification().GetPriority();
+    workers_to_kill.push_back(worker);
+    should_spill = false;
+	/*
     if (priority > base_priority) {
       workers_to_kill.push_back(worker);
       should_spill = false;
     }
+	*/
   }
 
   for (auto &worker : workers_to_kill) {
@@ -1307,30 +1316,19 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
   return should_spill;
 }
 
-void ClusterTaskManager::BlockTasks(Priority base_priority) {
+void ClusterTaskManager::BlockTasks(Priority base_priority, instrumented_io_context &io_service_) {
   static Priority init_priority;
-  block_requested_priority_ = base_priority;
-  if(base_priority == init_priority && task_blocked_){
-	RAY_LOG(DEBUG) << "BlockTasks calls ScheduleAndDispatchTasks";
-    ScheduleAndDispatchTasks();
+  if(RayConfig::instance().enable_BlockTasks()){
+    block_requested_priority_ = base_priority;
+    if(base_priority == init_priority && task_blocked_){
+	  io_service_.post([this](){
+        ScheduleAndDispatchTasks();
+	  },"");
+    }
   }
 }
 
 void ClusterTaskManager::ScheduleAndDispatchTasks() {
-  static std::atomic<bool> running = {false};
-  /*
-  for (;;) {
-      if (!running.exchange(true, std::memory_order_acquire)) {
-        break;
-      }
-      while (running.load(std::memory_order_relaxed)) {
-        __builtin_ia32_pause();
-      }
-    }
-	*/
-      if (running.exchange(true, std::memory_order_acquire)) {
-        return;
-      }
   SchedulePendingTasks();
   DispatchScheduledTasksToWorkers(worker_pool_, leased_workers_);
   // TODO(swang): Spill from waiting queue first? Otherwise, we may end up
@@ -1339,7 +1337,6 @@ void ClusterTaskManager::ScheduleAndDispatchTasks() {
   // in the PullManager or periodically, to make sure that we spill waiting
   // tasks that are blocked.
   SpillWaitingTasks();
-  running.store(false, std::memory_order_release);
 }
 
 void ClusterTaskManager::SpillWaitingTasks() {

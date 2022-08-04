@@ -163,7 +163,8 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(
   if (error == PlasmaError::OutOfMemory) {
     RAY_LOG(DEBUG) << "Not enough memory to create the object " << object_info.object_id
                    << ", data_size=" << object_info.data_size
-                   << ", metadata_size=" << object_info.metadata_size;
+                   << ", metadata_size=" << object_info.metadata_size
+                   << ", remaining_size=" << allocator_.GetFootprintLimit() - allocator_.Allocated();
   }
   const int64_t footprint_limit = allocator_.GetFootprintLimit();
   float allocated_percentage;
@@ -194,6 +195,10 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(
 	for(i=0; i<size; i++){
 		lowest_priority->SetScore(i, p.GetScore(i));
 	}
+	/*
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] lowest_priority:" << lowest_priority
+		<< " P:" << p;
+		*/
   }
 
   // Trigger object spilling if current usage is above the specified threshold.
@@ -298,18 +303,18 @@ void PlasmaStore::ReleaseObject(const ObjectID &object_id,
   RAY_CHECK(entry != nullptr);
   // Remove the client from the object's array of clients.
   RAY_CHECK(RemoveFromClientObjectIds(object_id, client) == 1);
-	  if(block_task_flag_.load(std::memory_order_relaxed)){
+	  //if(block_task_flag_.load(std::memory_order_relaxed)){
   		const int64_t footprint_limit = allocator_.GetFootprintLimit();
     	float allocated_percentage = 0;
 	    if (footprint_limit != 0) {
 		  allocated_percentage = static_cast<float>(allocator_.Allocated()) / footprint_limit;
 	    }
 		if(allocated_percentage < block_tasks_threshold_){
-		  RAY_LOG(DEBUG) << "[JAE_DEBUG] ReleaseObject unsetting block task allocated allocated_percentage is " << allocated_percentage;
+		  RAY_LOG(DEBUG) << "[JAE_DEBUG] ReleaseObject unsetting block task allocated allocated_percentage is " << allocated_percentage << " tid:"<< std::this_thread::get_id();
 	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
 		  block_task_flag_.store(false, std::memory_order_release);
 	    }
-      }
+      //}
 }
 
 void PlasmaStore::SealObjects(const std::vector<ObjectID> &object_ids) {
@@ -474,7 +479,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
     for (auto &object_id : object_ids) {
       error_codes.push_back(object_lifecycle_mgr_.DeleteObject(object_id));
 	  //Unset block_task if the object store has less object than threshold
-	  if(block_task_flag_.load(std::memory_order_relaxed)){
+	  //if(block_task_flag_.load(std::memory_order_relaxed)){
   		const int64_t footprint_limit = allocator_.GetFootprintLimit();
     	float allocated_percentage = 0;
 	    if (footprint_limit != 0) {
@@ -485,7 +490,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
 	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
 		  block_task_flag_.store(false, std::memory_order_release);
 	    }
-      }
+      //}
     }
     RAY_RETURN_NOT_OK(SendDeleteReply(client, object_ids, error_codes));
   } break;

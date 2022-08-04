@@ -272,7 +272,7 @@ class ObjectManager : public ObjectManagerInterface,
   }
 
   rpc::Address GetOwnerAddress(const ObjectID &object_id);
-  void GetObjectsInObjectStore(std::vector<const ObjectID*> *objs);
+  int64_t  GetObjectsInObjectStore(std::vector<const ObjectID*> *objs);
   int64_t GetTaskObjectSize(const TaskID &task_id);
 
  private:

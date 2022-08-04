@@ -2605,6 +2605,7 @@ void CoreWorker::HandleGetObjectWorkingSet(const rpc::GetObjectWorkingSetRequest
 	  obj_ids.insert(ObjectID::FromBinary(request.object_ids(i)));
 	}
 
+	//RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleGetObjectWorkingSet objects count from coreworker:" << reference_counter_->GetNumObjects();
 	//TODO(Jae) This is wrong with TaskID implementation. If one obj is deleted, taskID is deleted
 	auto deleted_obj_ids = reference_counter_->GetDeletedObjects();
 	for(auto &obj : deleted_obj_ids){

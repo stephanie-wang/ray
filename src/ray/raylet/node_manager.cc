@@ -230,25 +230,30 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           [this](const Priority &base_priority, bool block_tasks,
             bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
             if(block_tasks){
-              cluster_task_manager_->BlockTasks(base_priority);
+              cluster_task_manager_->BlockTasks(base_priority, io_service_);
             }
-            if(evict_tasks){
-              if(cluster_task_manager_->EvictTasks(base_priority)){
-			    io_service_.post([this](){
-			 	  object_manager_.SetShouldSpill(true);
-				},"");
-				return;
+			if(RayConfig::instance().enable_BlockTasksSpill()){
+			  if(num_spinning_workers && num_spinning_workers == worker_pool_.GetAllRegisteredWorkersNum()){
+                RAY_LOG(DEBUG) << "[" << __func__ << "] all workers are spinning: " << num_spinning_workers;
+                if(evict_tasks){
+                  if(cluster_task_manager_->EvictTasks(base_priority)){
+                RAY_LOG(DEBUG) << "[" << __func__ << "] EvictTasks Return true: ";
+			        io_service_.post([this](){
+			 	      object_manager_.SetShouldSpill(true);
+				    },"");
+				    return;
+			      }else{
+                RAY_LOG(DEBUG) << "[" << __func__ << "] EvictTasks destroyed workers num_workers now: "<< worker_pool_.GetAllRegisteredWorkersNum();
+				  }
+                }else{
+			      io_service_.post([this](){
+			        object_manager_.SetShouldSpill(true);
+			      },"");
+ 			      return;
+				}
 			  }
-            }
-			if(num_spinning_workers == worker_pool_.GetAllRegisteredWorkersNum()){
-              RAY_LOG(DEBUG) << "[" << __func__ << "] all workers are spinning: " << num_spinning_workers;
-			  io_service_.post([this](){
-			    object_manager_.SetShouldSpill(true);
-			  },"");
-			  return;
 			}
-			//TODO(Jae) remove deadlock#1 later. 
-            if(block_spill || RayConfig::instance().enable_Deadlock1()){
+            if(block_spill){
 			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_, io_service_);
 			}
 		  },
@@ -556,9 +561,13 @@ void NodeManager::DestroyWorker(std::shared_ptr<WorkerInterface> worker,
   // We should disconnect the client first. Otherwise, we'll remove bundle resources
   // before actual resources are returned. Subsequent disconnect request that comes
   // due to worker dead will be ignored.
+  RAY_LOG(DEBUG) << "[" << __func__ << "] worker with priority " << worker->GetAssignedTask().GetTaskSpecification().GetPriority();
   DisconnectClient(worker->Connection(), disconnect_type);
+  RAY_LOG(DEBUG) << "[" << __func__ << "] worker mark dead ";
   worker->MarkDead();
+  RAY_LOG(DEBUG) << "[" << __func__ << "] KillWorker ";
   KillWorker(worker);
+  RAY_LOG(DEBUG) << "[" << __func__ << "] Finished ";
 }
 
 void NodeManager::HandleJobStarted(const JobID &job_id, const JobTableData &job_data) {
@@ -659,7 +668,6 @@ void NodeManager::HandleSetNewDependencyAdded(const rpc::SetNewDependencyAddedRe
   io_service_.post([this](){
     object_manager_.SetNewDependencyAdded();
   },"");
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleSetNewDependencyAdded called";
 }
 
 void NodeManager::HandleRequestObjectSpillage(
@@ -1023,7 +1031,7 @@ void NodeManager::ProcessClientMessage(const std::shared_ptr<ClientConnection> &
     HandleWorkerAvailable(client);
   } break;
   case protocol::MessageType::DisconnectClient: {
-    ProcessDisconnectClientMessage(client, message_data);
+	ProcessDisconnectClientMessage(client, message_data);
     // We don't need to receive future messages from this client,
     // because it's already disconnected.
     return;
@@ -2087,6 +2095,7 @@ std::string compact_tag_string(const opencensus::stats::ViewDescriptor &view,
 
 bool NodeManager::GetObjectsFromPlasma(const std::vector<ObjectID> &object_ids,
                                        std::vector<std::unique_ptr<RayObject>> *results) {
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] 1";
   // Pin the objects in plasma by getting them and holding a reference to
   // the returned buffer.
   // NOTE: the caller must ensure that the objects already exist in plasma before
@@ -2102,6 +2111,7 @@ bool NodeManager::GetObjectsFromPlasma(const std::vector<ObjectID> &object_ids,
            .ok()) {
     return false;
   }
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] 2";
 
   for (const auto &plasma_result : plasma_results) {
     if (plasma_result.data == nullptr) {

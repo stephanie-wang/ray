@@ -110,7 +110,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
 
   //Preempt currently running tasks with a lower priority
   //Block new tasks from being scheduled with this priority
-  void BlockTasks(Priority) override;
+  void BlockTasks(Priority, instrumented_io_context &io_service_) override;
   bool EvictTasks(Priority) override;
   void CheckDeadlock(size_t, int64_t first_pending_obj_size, ObjectManager &object_manger_,
 		  instrumented_io_context &io_service_) override;

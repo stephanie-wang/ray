@@ -154,7 +154,6 @@ Status CreateRequestQueue::ProcessFirstRequest() {
 }
 
 void CreateRequestQueue::SetNewDependencyAdded() {
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] SetNewDependencyAdded Called ";
   new_dependency_added_ = true;
 }
 
