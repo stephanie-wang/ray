@@ -138,6 +138,7 @@ _task_only_options = {
         "retry_exceptions must be either a boolean or a list of exceptions",
         default_value=False,
     ),
+    "high_availability": Option(bool, default_value=False),
 }
 
 _actor_only_options = {
