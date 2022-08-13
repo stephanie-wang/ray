@@ -309,6 +309,12 @@ class LocalObjectManager {
 
   /// The last time a restore log finished.
   int64_t last_restore_log_ns_ = 0;
+
+  void EagerSpill();
+  bool eager_spill_running_ = false;
+  // Replicas of pinned_objects_ sorted by Priority
+  absl::btree_map<ray::Priority, ObjectID>
+      pinned_objects_prioity_;
 };
 
 };  // namespace raylet

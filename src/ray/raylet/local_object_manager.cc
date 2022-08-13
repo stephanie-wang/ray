@@ -76,7 +76,30 @@ void LocalObjectManager::PinObjectsAndWaitForFree(const std::vector<ObjectID> &o
         std::move(sub_message), rpc::ChannelType::WORKER_OBJECT_EVICTION, owner_address,
         object_id.Binary(), subscription_callback, owner_dead_callback);
   }
+  EagerSpill();
 }
+
+void LocalObjectManager::EagerSpill() {
+  if (eager_spill_running_ || RayConfig::instance().object_spilling_config().empty()) {
+    return;
+  }
+  eager_spill_running_ = true;
+
+  // Spill as fast as we can using all our spill workers.
+  bool can_spill_more = true;
+  while (can_spill_more) {
+    if (!EagerSpillObjectsOfSize(min_spilling_size_)) {
+      break;
+    }
+    {
+      absl::MutexLock lock(&mutex_);
+      num_active_workers_ += 1;
+      can_spill_more = num_active_workers_ < max_active_workers_;
+    }
+  }
+  eager_spill_running_ = false;
+}
+
 
 void LocalObjectManager::ReleaseFreedObject(const ObjectID &object_id) {
   RAY_LOG(DEBUG) << "Unpinning object " << object_id;
@@ -134,6 +157,59 @@ void LocalObjectManager::SpillObjectUptoMaxThroughput() {
 bool LocalObjectManager::IsSpillingInProgress() {
   absl::MutexLock lock(&mutex_);
   return num_active_workers_ > 0;
+}
+
+bool LocalObjectManager::EagerSpillObjectsOfSize(int64_t num_bytes_to_spill) {
+  if (RayConfig::instance().object_spilling_config().empty()) {
+    return false;
+  }
+
+  int64_t bytes_to_spill = 0;
+  auto it = pinned_objects_.begin();
+  std::vector<ObjectID> objects_to_spill;
+  int64_t counts = 0;
+  RAY_LOG(DEBUG) << "Choosing objects to spill of total size " << num_bytes_to_spill;
+  while (bytes_to_spill <= num_bytes_to_spill && it != pinned_objects_.end() &&
+         counts < max_fused_object_count_) {
+    if (is_plasma_object_spillable_(it->first)) {
+      bytes_to_spill += it->second.first->GetSize();
+      objects_to_spill.push_back(it->first);
+    }
+    it++;
+    counts += 1;
+  }
+  if (!objects_to_spill.empty()) {
+    RAY_LOG(DEBUG) << "Spilling objects of total size " << bytes_to_spill
+                   << " num objects " << objects_to_spill.size();
+    auto start_time = absl::GetCurrentTimeNanos();
+    SpillObjectsInternal(objects_to_spill, [this, bytes_to_spill, objects_to_spill,
+                                            start_time](const Status &status) {
+      if (!status.ok()) {
+        RAY_LOG(DEBUG) << "Failed to spill objects: " << status.ToString();
+      } else {
+        auto now = absl::GetCurrentTimeNanos();
+        RAY_LOG(DEBUG) << "Spilled " << bytes_to_spill << " bytes in "
+                       << (now - start_time) / 1e6 << "ms";
+        spilled_bytes_total_ += bytes_to_spill;
+        spilled_objects_total_ += objects_to_spill.size();
+        // Adjust throughput timing to account for concurrent spill operations.
+        spill_time_total_s_ += (now - std::max(start_time, last_spill_finish_ns_)) / 1e9;
+        if (now - last_spill_log_ns_ > 1e9) {
+          last_spill_log_ns_ = now;
+          RAY_LOG(INFO) << "Spilled "
+                        << static_cast<int>(spilled_bytes_total_ / (1024 * 1024))
+                        << " MiB, " << spilled_objects_total_
+                        << " objects, write throughput "
+                        << static_cast<int>(spilled_bytes_total_ / (1024 * 1024) /
+                                            spill_time_total_s_)
+                        << " MiB/s";
+        }
+        last_spill_finish_ns_ = now;
+      }
+    });
+    return true;
+  }
+  return false;
 }
 
 bool LocalObjectManager::SpillObjectsOfSize(int64_t num_bytes_to_spill) {
