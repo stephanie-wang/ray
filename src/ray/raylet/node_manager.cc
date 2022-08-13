@@ -1068,8 +1068,8 @@ void NodeManager::HandleUnexpectedWorkerFailure(const rpc::WorkerDeltaData &data
         // If the failed worker was a leased worker's owner, then kill the leased worker.
         if (owner_worker_id == worker_id) {
           RAY_LOG(INFO) << "Owner process " << owner_worker_id
-                        << " died, killing leased worker " << worker->WorkerId();
-          KillWorker(worker);
+                        << " died, skipping kill leased worker " << worker->WorkerId();
+          //KillWorker(worker);
         }
       } else if (owner_node_id == node_id) {
         // If the leased worker's owner was on the failed node, then kill the leased
