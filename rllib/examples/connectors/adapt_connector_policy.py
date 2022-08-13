@@ -5,11 +5,12 @@ and adapt/use it with a different version of the environment.
 import argparse
 import gym
 import numpy as np
+from pathlib import Path
 from typing import Dict
 
 from ray.rllib.utils.policy import (
     load_policies_from_checkpoint,
-    policy_inference,
+    local_policy_inference,
 )
 from ray.rllib.connectors.connector import ConnectorContext
 from ray.rllib.connectors.action.lambdas import register_lambda_action_connector
@@ -23,9 +24,11 @@ from ray.rllib.utils.typing import (
 
 
 parser = argparse.ArgumentParser()
+# A policy checkpoint that works with this example script can be found at:
+# rllib/tests/data/checkpoints/APPO_CartPole-v0_checkpoint-6-07092022
 parser.add_argument(
     "--checkpoint_file",
-    help="Path to an RLlib checkpoint file.",
+    help="Path to an RLlib checkpoint file, relative to //ray/rllib/ folder.",
 )
 parser.add_argument(
     "--policy_id",
@@ -87,13 +90,21 @@ V1ToV2ActionConnector = register_lambda_action_connector(
 )
 
 
-def run():
+def run(checkpoint_path):
     # Restore policy.
-    policies = load_policies_from_checkpoint(args.checkpoint_file, [args.policy_id])
+    policies = load_policies_from_checkpoint(checkpoint_path, [args.policy_id])
     policy = policies[args.policy_id]
 
     # Adapt policy trained for standard CartPole to the new env.
     ctx: ConnectorContext = ConnectorContext.from_policy(policy)
+
+    # When this policy was trained, it relied on FlattenDataAgentConnector
+    # to add a batch dimension to single observations.
+    # This is not necessary anymore, so we first remove the previously used
+    # FlattenDataAgentConnector.
+    policy.agent_connectors.remove("FlattenDataAgentConnector")
+
+    # We then add the two adapter connectors.
     policy.agent_connectors.prepend(V2ToV1ObsAgentConnector(ctx))
     policy.action_connectors.append(V1ToV2ActionConnector(ctx))
 
@@ -105,8 +116,8 @@ def run():
     while not done:
         step += 1
 
-        # Use policy_inference() to easily run poicy with observations.
-        policy_outputs = policy_inference(policy, "env_1", "agent_1", obs)
+        # Use local_policy_inference() to easily run poicy with observations.
+        policy_outputs = local_policy_inference(policy, "env_1", "agent_1", obs)
         assert len(policy_outputs) == 1
         actions, _, _ = policy_outputs[0]
         print(f"step {step}", obs, actions)
@@ -115,4 +126,7 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    checkpoint_path = str(
+        Path(__file__).parent.parent.parent.absolute().joinpath(args.checkpoint_file)
+    )
+    run(checkpoint_path)
