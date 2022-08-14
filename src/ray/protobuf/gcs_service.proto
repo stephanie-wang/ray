@@ -70,6 +70,31 @@ service JobInfoGcsService {
   rpc GetNextJobID(GetNextJobIDRequest) returns (GetNextJobIDReply);
 }
 
+message GetHighAvailabilityObjectRequest {
+  bytes object_id = 1;
+}
+
+message GetHighAvailabilityObjectReply {
+  GcsStatus status = 1;
+  HighAvailabilityObjectTableData data = 2;
+}
+
+message PutHighAvailabilityObjectRequest {
+  bytes object_id = 1;
+  HighAvailabilityObjectTableData data = 2;
+}
+
+message PutHighAvailabilityObjectReply {
+  GcsStatus status = 1;
+  bool success = 2;
+}
+
+// Service for job info access.
+service HighAvailabilityObjectGcsService{
+  rpc GetHighAvailabilityObject(GetHighAvailabilityObjectRequest) returns (GetHighAvailabilityObjectReply);
+  rpc PutHighAvailabilityObject(PutHighAvailabilityObjectRequest) returns (PutHighAvailabilityObjectReply);
+}
+
 message GetActorInfoRequest {
   // ID of this actor. If actor_id is set, name will not be set.
   bytes actor_id = 1;

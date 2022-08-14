@@ -28,6 +28,11 @@ namespace rpc {
                       HANDLER,                \
                       RayConfig::instance().gcs_max_active_rpcs_per_handler())
 
+#define HIGH_AVAILBILITY_OBJECT_SERVICE_RPC_HANDLER(HANDLER) \
+  RPC_SERVICE_HANDLER(HighAvailabilityObjectGcsService,      \
+                      HANDLER,                \
+                      RayConfig::instance().gcs_max_active_rpcs_per_handler())
+
 #define ACTOR_INFO_SERVICE_RPC_HANDLER(HANDLER, MAX_ACTIVE_RPCS) \
   RPC_SERVICE_HANDLER(ActorInfoGcsService, HANDLER, MAX_ACTIVE_RPCS)
 
@@ -611,6 +616,46 @@ class InternalPubSubGrpcService : public GrpcService {
   InternalPubSubGcsServiceHandler &service_handler_;
 };
 
+class HighAvailabilityObjectGcsServiceHandler {
+ public:
+  virtual ~HighAvailabilityObjectGcsServiceHandler() = default;
+
+  virtual void HandleGetHighAvailabilityObject(const GetHighAvailabilityObjectRequest &request,
+                            GetHighAvailabilityObjectReply *reply,
+                            SendReplyCallback send_reply_callback) = 0;
+
+  virtual void HandlePutHighAvailabilityObject(const PutHighAvailabilityObjectRequest &request,
+                            PutHighAvailabilityObjectReply *reply,
+                            SendReplyCallback send_reply_callback) = 0;
+};
+
+/// The `GrpcService` for `HighAvailabilityObjectGcsService`.
+class HighAvailabilityObjectGrpcService : public GrpcService {
+ public:
+  /// Constructor.
+  ///
+  /// \param[in] handler The service handler that actually handle the requests.
+  explicit HighAvailabilityObjectGrpcService(instrumented_io_context &io_service,
+                              HighAvailabilityObjectGcsServiceHandler &handler)
+      : GrpcService(io_service), service_handler_(handler){};
+
+ protected:
+  grpc::Service &GetGrpcService() override { return service_; }
+
+  void InitServerCallFactories(
+      const std::unique_ptr<grpc::ServerCompletionQueue> &cq,
+      std::vector<std::unique_ptr<ServerCallFactory>> *server_call_factories) override {
+    HIGH_AVAILBILITY_OBJECT_SERVICE_RPC_HANDLER(GetHighAvailabilityObject);
+    HIGH_AVAILBILITY_OBJECT_SERVICE_RPC_HANDLER(PutHighAvailabilityObject);
+  }
+
+ private:
+  /// The grpc async service object.
+  HighAvailabilityObjectGcsService::AsyncService service_;
+  /// The service handler that actually handle the requests.
+  HighAvailabilityObjectGcsServiceHandler &service_handler_;
+};
+
 using JobInfoHandler = JobInfoGcsServiceHandler;
 using ActorInfoHandler = ActorInfoGcsServiceHandler;
 using NodeInfoHandler = NodeInfoGcsServiceHandler;
@@ -622,6 +667,7 @@ using PlacementGroupInfoHandler = PlacementGroupInfoGcsServiceHandler;
 using InternalKVHandler = InternalKVGcsServiceHandler;
 using InternalPubSubHandler = InternalPubSubGcsServiceHandler;
 using RuntimeEnvHandler = RuntimeEnvGcsServiceHandler;
+using HighAvailabilityObjectHandler = HighAvailabilityObjectGcsServiceHandler;
 
 }  // namespace rpc
 }  // namespace ray

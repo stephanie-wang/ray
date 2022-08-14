@@ -167,6 +167,14 @@ class GcsJobTable : public GcsTable<JobID, JobTableData> {
   }
 };
 
+class GcsHighAvailabilityObjectTable : public GcsTable<ObjectID, rpc::HighAvailabilityObjectTableData> {
+ public:
+  explicit GcsHighAvailabilityObjectTable(std::shared_ptr<StoreClient> store_client)
+      : GcsTable(std::move(store_client)) {
+    table_name_ = TablePrefix_Name(TablePrefix::HIGH_AVAILABILITY_OBJECT);
+  }
+};
+
 class GcsActorTable : public GcsTableWithJobId<ActorID, ActorTableData> {
  public:
   explicit GcsActorTable(std::shared_ptr<StoreClient> store_client)
@@ -263,6 +271,7 @@ class GcsTableStorage {
   explicit GcsTableStorage(std::shared_ptr<StoreClient> store_client)
       : store_client_(std::move(store_client)) {
     job_table_ = std::make_unique<GcsJobTable>(store_client_);
+    high_availability_object_table_ = std::make_unique<GcsHighAvailabilityObjectTable>(store_client_);
     actor_table_ = std::make_unique<GcsActorTable>(store_client_);
     actor_task_spec_table_ = std::make_unique<GcsActorTaskSpecTable>(store_client_);
     placement_group_table_ = std::make_unique<GcsPlacementGroupTable>(store_client_);
@@ -280,6 +289,11 @@ class GcsTableStorage {
   GcsJobTable &JobTable() {
     RAY_CHECK(job_table_ != nullptr);
     return *job_table_;
+  }
+
+  GcsHighAvailabilityObjectTable &HighAvailabilityObjectTable() {
+    RAY_CHECK(high_availability_object_table_ != nullptr);
+    return *high_availability_object_table_;
   }
 
   GcsActorTable &ActorTable() {
@@ -340,6 +354,7 @@ class GcsTableStorage {
  protected:
   std::shared_ptr<StoreClient> store_client_;
   std::unique_ptr<GcsJobTable> job_table_;
+  std::unique_ptr<GcsHighAvailabilityObjectTable> high_availability_object_table_;
   std::unique_ptr<GcsActorTable> actor_table_;
   std::unique_ptr<GcsActorTaskSpecTable> actor_task_spec_table_;
   std::unique_ptr<GcsPlacementGroupTable> placement_group_table_;

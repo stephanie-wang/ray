@@ -408,6 +408,9 @@ void GcsServer::InitGcsActorManager(const GcsInitData &gcs_init_data) {
   // Register service.
   actor_info_service_.reset(
       new rpc::ActorInfoGrpcService(main_service_, *gcs_actor_manager_));
+
+  gcs_high_availability_object_manager_ = std::make_shared<GcsHighAvailabilityObjectManager>(gcs_table_storage_);
+
   rpc_server_.RegisterService(*actor_info_service_);
 }
 

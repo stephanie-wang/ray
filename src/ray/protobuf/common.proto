@@ -87,6 +87,7 @@ message Address {
   int32 port = 3;
   // Optional unique id for the worker.
   bytes worker_id = 4;
+  bytes actor_name = 5;
 }
 
 /// Function descriptor for Java.

@@ -202,6 +202,7 @@ Status GcsTableWithJobId<Key, Data>::AsyncRebuildIndexAndGetAll(
 }
 
 template class GcsTable<JobID, JobTableData>;
+template class GcsTable<ObjectID, rpc::HighAvailabilityObjectTableData>;
 template class GcsTable<NodeID, GcsNodeInfo>;
 template class GcsTable<NodeID, ResourceMap>;
 template class GcsTable<NodeID, ResourceUsageBatchData>;

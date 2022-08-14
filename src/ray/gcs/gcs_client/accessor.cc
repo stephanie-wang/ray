@@ -133,6 +133,32 @@ Status JobInfoAccessor::AsyncGetNextJobID(const ItemCallback<JobID> &callback) {
   return Status::OK();
 }
 
+void HighAvailabilityObjectAccessor::GetHighAvailabilityObject(const ObjectID &object_id,
+      const OptionalItemCallback<rpc::HighAvailabilityObjectTableData> &callback) {
+  rpc::GetHighAvailabilityObjectRequest request;
+  request.set_object_id(object_id.Binary());
+  client_impl_->GetGcsRpcClient().GetHighAvailabilityObject(
+      request,
+      [object_id, callback](const Status &status, const rpc::GetHighAvailabilityObjectReply &reply) {
+        if (reply.data().object_id() != "") {
+          callback(status, reply.data());
+        } else {
+          callback(status, boost::none);
+        }
+      });
+}
+
+void HighAvailabilityObjectAccessor::PutHighAvailabilityObject(const rpc::HighAvailabilityObjectTableData &data,
+    const StatusCallback &done) {
+  rpc::PutHighAvailabilityObjectRequest request;
+  request.mutable_data()->CopyFrom(data);
+  client_impl_->GetGcsRpcClient().PutHighAvailabilityObject(
+      request,
+      [done](const Status &status, const rpc::PutHighAvailabilityObjectReply &reply) {
+        done(status);
+      });
+}
+
 ActorInfoAccessor::ActorInfoAccessor(GcsClient *client_impl)
     : client_impl_(client_impl) {}
 

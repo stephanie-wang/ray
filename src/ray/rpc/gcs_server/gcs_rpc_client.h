@@ -210,6 +210,8 @@ class GcsRpcClient {
 
     job_info_grpc_client_ =
         std::make_unique<GrpcClient<JobInfoGcsService>>(channel_, client_call_manager);
+    high_availability_object_grpc_client_ =
+        std::make_unique<GrpcClient<HighAvailabilityObjectGcsService>>(channel_, client_call_manager);
     actor_info_grpc_client_ =
         std::make_unique<GrpcClient<ActorInfoGcsService>>(channel_, client_call_manager);
     node_info_grpc_client_ =
@@ -262,6 +264,16 @@ class GcsRpcClient {
   VOID_GCS_RPC_CLIENT_METHOD(JobInfoGcsService,
                              GetNextJobID,
                              job_info_grpc_client_,
+                             /*method_timeout_ms*/ -1, )
+
+  VOID_GCS_RPC_CLIENT_METHOD(HighAvailabilityObjectGcsService,
+                             GetHighAvailabilityObject,
+                             high_availability_object_grpc_client_,
+                             /*method_timeout_ms*/ -1, )
+
+  VOID_GCS_RPC_CLIENT_METHOD(HighAvailabilityObjectGcsService,
+                             PutHighAvailabilityObject,
+                             high_availability_object_grpc_client_,
                              /*method_timeout_ms*/ -1, )
 
   /// Register actor via GCS Service.
@@ -572,6 +584,7 @@ class GcsRpcClient {
 
   /// The gRPC-generated stub.
   std::unique_ptr<GrpcClient<JobInfoGcsService>> job_info_grpc_client_;
+  std::unique_ptr<GrpcClient<HighAvailabilityObjectGcsService>> high_availability_object_grpc_client_;
   std::unique_ptr<GrpcClient<ActorInfoGcsService>> actor_info_grpc_client_;
   std::unique_ptr<GrpcClient<NodeInfoGcsService>> node_info_grpc_client_;
   std::unique_ptr<GrpcClient<NodeResourceInfoGcsService>> node_resource_info_grpc_client_;

@@ -46,6 +46,7 @@ enum TablePrefix {
   PLACEMENT_GROUP = 18;
   KV = 19;
   ACTOR_TASK_SPEC = 20;
+  HIGH_AVAILABILITY_OBJECT = 21;
 }
 
 // The channel that Add operations to the Table should be published on, if any.
@@ -80,6 +81,12 @@ message GcsEntry {
 message ObjectTableData {
   // The node manager ID that this object appeared on or was evicted by.
   bytes manager = 1;
+}
+
+message HighAvailabilityObjectTableData {
+  bytes object_id = 1;
+  Address owner_address = 2;
+  bytes checkpoint_location = 3;
 }
 
 message ActorTableData {

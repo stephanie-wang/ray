@@ -262,6 +262,23 @@ class JobInfoAccessor {
   GcsClient *client_impl_;
 };
 
+class HighAvailabilityObjectAccessor {
+ public:
+  HighAvailabilityObjectAccessor() = default;
+  explicit HighAvailabilityObjectAccessor(GcsClient *client_impl)
+    : client_impl_(client_impl) {}
+  virtual ~HighAvailabilityObjectAccessor() = default;
+
+  virtual void GetHighAvailabilityObject(const ObjectID &object_id,
+      const OptionalItemCallback<rpc::HighAvailabilityObjectTableData> &callback);
+
+  virtual void PutHighAvailabilityObject(const rpc::HighAvailabilityObjectTableData &data,
+      const StatusCallback &done);
+
+  private:
+   GcsClient *client_impl_;
+};
+
 /// \class NodeInfoAccessor
 /// `NodeInfoAccessor` is a sub-interface of `GcsClient`.
 /// This class includes all the methods that are related to accessing

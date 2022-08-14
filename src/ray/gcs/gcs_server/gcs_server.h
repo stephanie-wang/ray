@@ -17,6 +17,7 @@
 #include "ray/common/asio/instrumented_io_context.h"
 #include "ray/common/ray_syncer/ray_syncer.h"
 #include "ray/common/runtime_env_manager.h"
+#include "ray/gcs/gcs_server/gcs_high_availability_object_manager.h"
 #include "ray/gcs/gcs_server/gcs_function_manager.h"
 #include "ray/gcs/gcs_server/gcs_heartbeat_manager.h"
 #include "ray/gcs/gcs_server/gcs_init_data.h"
@@ -60,6 +61,7 @@ class GcsActorManager;
 class GcsJobManager;
 class GcsWorkerManager;
 class GcsPlacementGroupManager;
+class GcsHighAvailabilityObjectManager;
 
 /// The GcsServer will take over all requests from GcsClient and transparent
 /// transmit the command to the backend reliable storage for the time being.
@@ -202,6 +204,7 @@ class GcsServer {
   std::shared_ptr<GcsRedisFailureDetector> gcs_redis_failure_detector_;
   /// The gcs actor manager.
   std::shared_ptr<GcsActorManager> gcs_actor_manager_;
+  std::shared_ptr<GcsHighAvailabilityObjectManager> gcs_high_availability_object_manager_;
   /// The gcs placement group manager.
   std::shared_ptr<GcsPlacementGroupManager> gcs_placement_group_manager_;
   /// Job info handler and service.

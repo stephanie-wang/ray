@@ -109,6 +109,10 @@ class RAY_EXPORT GcsClient : public std::enable_shared_from_this<GcsClient> {
     return *job_accessor_;
   }
 
+  HighAvailabilityObjectAccessor &HighAvailabilityObjects() {
+    return *high_availability_object_accessor_;
+  }
+
   /// Get the sub-interface for accessing node information in GCS.
   /// This function is thread safe.
   NodeInfoAccessor &Nodes() {
@@ -164,6 +168,7 @@ class RAY_EXPORT GcsClient : public std::enable_shared_from_this<GcsClient> {
 
   std::unique_ptr<ActorInfoAccessor> actor_accessor_;
   std::unique_ptr<JobInfoAccessor> job_accessor_;
+  std::unique_ptr<HighAvailabilityObjectAccessor> high_availability_object_accessor_;
   std::unique_ptr<NodeInfoAccessor> node_accessor_;
   std::unique_ptr<NodeResourceInfoAccessor> node_resource_accessor_;
   std::unique_ptr<ErrorInfoAccessor> error_accessor_;
