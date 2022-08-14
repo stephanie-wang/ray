@@ -1627,6 +1627,27 @@ std::vector<rpc::ObjectReference> CoreWorker::SubmitTask(
   return returned_refs;
 }
 
+Status CoreWorker::SaveDetachedActorCheckpoint(
+      const std::string &checkpoint_data,
+      const std::vector<ObjectID> &object_ids) {
+  rpc::CheckpointActorRequest request;
+  const auto &actor_id = GetActorId();
+  RAY_CHECK(!actor_id.IsNil());
+  request.set_actor_id(actor_id.Binary());
+  request.set_checkpoint_data(checkpoint_data);
+  for (const auto &object_id : object_ids) {
+    request.add_object_ids_to_add(object_id.Binary());
+  }
+  std::promise<Status> promise;
+  auto future = promise.get_future();
+  gcs_client_->Actors().SaveDetachedActorCheckpoint(
+      request, [&promise](const Status &status) mutable {
+      promise.set_value(status);
+      });
+  return future.get();
+}
+
+
 Status CoreWorker::CreateActor(const RayFunction &function,
                                const std::vector<std::unique_ptr<TaskArg>> &args,
                                const ActorCreationOptions &actor_creation_options,

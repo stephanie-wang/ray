@@ -1644,6 +1644,16 @@ cdef class CoreWorker:
             # adding the pending task.
             return VectorToObjectRefs(return_refs, skip_adding_local_ref=True)
 
+    def save_detached_actor_checkpoint(self,
+            c_string checkpoint_data,
+            object_refs):
+        cdef:
+            c_vector[CObjectID] object_ids = ObjectRefsToVector(object_refs)
+
+        with nogil:
+            check_status(CCoreWorkerProcess.GetCoreWorker().SaveDetachedActorCheckpoint(
+                checkpoint_data, object_ids))
+
     def create_actor(self,
                      Language language,
                      FunctionDescriptor function_descriptor,

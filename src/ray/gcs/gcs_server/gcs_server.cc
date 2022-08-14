@@ -158,6 +158,7 @@ void GcsServer::DoStart(const GcsInitData &gcs_init_data) {
   InitGcsPlacementGroupManager(gcs_init_data);
 
   // Init gcs actor manager.
+  gcs_high_availability_object_manager_ = std::make_shared<GcsHighAvailabilityObjectManager>();
   InitGcsActorManager(gcs_init_data);
 
   // Init gcs worker manager.
@@ -341,7 +342,8 @@ void GcsServer::InitGcsJobManager(const GcsInitData &gcs_init_data) {
 }
 
 void GcsServer::InitGcsActorManager(const GcsInitData &gcs_init_data) {
-  RAY_CHECK(gcs_table_storage_ && gcs_publisher_ && gcs_node_manager_);
+  RAY_CHECK(gcs_table_storage_ && gcs_publisher_ && gcs_node_manager_
+      && gcs_high_availability_object_manager_);
   std::unique_ptr<GcsActorSchedulerInterface> scheduler;
   auto schedule_failure_handler =
       [this](std::shared_ptr<GcsActor> actor,
@@ -377,6 +379,7 @@ void GcsServer::InitGcsActorManager(const GcsInitData &gcs_init_data) {
         gcs_resource_manager_->UpdateNodeNormalTaskResources(node_id, resources);
       });
   gcs_actor_manager_ = std::make_shared<GcsActorManager>(
+      gcs_high_availability_object_manager_,
       std::move(scheduler),
       gcs_table_storage_,
       gcs_publisher_,
@@ -408,8 +411,6 @@ void GcsServer::InitGcsActorManager(const GcsInitData &gcs_init_data) {
   // Register service.
   actor_info_service_.reset(
       new rpc::ActorInfoGrpcService(main_service_, *gcs_actor_manager_));
-
-  gcs_high_availability_object_manager_ = std::make_shared<GcsHighAvailabilityObjectManager>(gcs_table_storage_);
 
   rpc_server_.RegisterService(*actor_info_service_);
 }

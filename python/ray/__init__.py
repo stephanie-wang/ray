@@ -156,6 +156,7 @@ from ray._private.worker import (  # noqa: E402,F401
     remote,
     shutdown,
     wait,
+    save_detached_actor_checkpoint,
 )
 
 # We import ray.actor because some code is run in actor.py which initializes
@@ -235,6 +236,7 @@ __all__ = [
     "timeline",
     "util",
     "wait",
+    "save_detached_actor_checkpoint",
     "widgets",
     "LOCAL_MODE",
     "SCRIPT_MODE",

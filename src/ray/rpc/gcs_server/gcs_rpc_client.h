@@ -306,6 +306,12 @@ class GcsRpcClient {
                              actor_info_grpc_client_,
                              /*method_timeout_ms*/ -1, )
 
+  /// Get all named actor names from GCS Service.
+  VOID_GCS_RPC_CLIENT_METHOD(ActorInfoGcsService,
+                             CheckpointActor,
+                             actor_info_grpc_client_,
+                             /*method_timeout_ms*/ -1, )
+
   /// Get all actor data from GCS Service.
   VOID_GCS_RPC_CLIENT_METHOD(ActorInfoGcsService,
                              GetAllActorInfo,

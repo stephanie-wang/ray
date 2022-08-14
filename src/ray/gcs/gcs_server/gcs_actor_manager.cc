@@ -203,6 +203,7 @@ void GcsActor::SetGrantOrReject(bool grant_or_reject) {
 
 /////////////////////////////////////////////////////////////////////////////////////////
 GcsActorManager::GcsActorManager(
+    std::shared_ptr<GcsHighAvailabilityObjectManager> high_availability_object_manager,
     std::shared_ptr<GcsActorSchedulerInterface> scheduler,
     std::shared_ptr<GcsTableStorage> gcs_table_storage,
     std::shared_ptr<GcsPublisher> gcs_publisher,
@@ -212,7 +213,8 @@ GcsActorManager::GcsActorManager(
     std::function<void(std::function<void(void)>, boost::posix_time::milliseconds)>
         run_delayed,
     const rpc::ClientFactoryFn &worker_client_factory)
-    : gcs_actor_scheduler_(std::move(scheduler)),
+    : high_availability_object_manager_(high_availability_object_manager),
+      gcs_actor_scheduler_(std::move(scheduler)),
       gcs_table_storage_(std::move(gcs_table_storage)),
       gcs_publisher_(std::move(gcs_publisher)),
       worker_client_factory_(worker_client_factory),
@@ -424,6 +426,29 @@ void GcsActorManager::HandleListNamedActors(const rpc::ListNamedActorsRequest &r
   }
   GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
   ++counts_[CountType::LIST_NAMED_ACTORS_REQUEST];
+}
+
+void GcsActorManager::HandleCheckpointActor(const rpc::CheckpointActorRequest &request,
+                           rpc::CheckpointActorReply *reply,
+                           rpc::SendReplyCallback send_reply_callback) {
+  const auto &actor_id = ActorID::FromBinary(request.actor_id());
+  auto it = registered_actors_.find(actor_id);
+  RAY_CHECK(it != registered_actors_.end()) << actor_id;
+  RAY_CHECK(!it->second->GetName().empty()) << actor_id;
+  RAY_CHECK(it->second->IsDetached()) << actor_id;
+  RAY_LOG(DEBUG) << "Checkpointing actor " << actor_id;
+
+  detached_actor_checkpoints_[actor_id] = request.checkpoint_data();
+
+  rpc::Address actor_address = it->second->GetAddress();
+  actor_address.set_actor_name(it->second->GetName());
+  for (const auto &object_id_binary : request.object_ids_to_add()) {
+    const auto &object_id = ObjectID::FromBinary(object_id_binary);
+    high_availability_object_manager_->PutHighAvailabilityObject(
+        object_id,
+        actor_address);
+  }
+  GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
 }
 
 void GcsActorManager::HandleKillActorViaGcs(const rpc::KillActorViaGcsRequest &request,

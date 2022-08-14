@@ -6,12 +6,12 @@ from ray._private.test_utils import SignalActor
 
 
 # Works.
-@ray.remote(high_availability=True)
+@ray.remote
 def f_small():
     return np.random.rand()
 
 # Does not work.
-@ray.remote(high_availability=True)
+@ray.remote
 def f_large():
     return np.zeros(int(1e5))
 
@@ -45,8 +45,12 @@ class Driver:
         if self.fut is not None:
             return self.fut
 
-        self.fut = f_small.remote()
+        self.fut = f_large.remote()
         self.checkpoint_storage.save.remote({"fut": self.fut})
+
+        # TODO: Actually save a checkpoint.
+        ray.save_detached_actor_checkpoint(b"", [self.fut])
+
         return self.fut
 
 

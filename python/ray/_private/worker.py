@@ -2866,3 +2866,10 @@ def remote(*args, **kwargs):
         return _make_remote(args[0], {})
     assert len(args) == 0 and len(kwargs) > 0, ray_option_utils.remote_args_error_string
     return functools.partial(_make_remote, options=kwargs)
+
+
+@PublicAPI
+def save_detached_actor_checkpoint(checkpoint_data: bytes, object_refs: List[ray.ObjectRef]):
+    worker = ray._private.worker.global_worker
+    worker.check_connected()
+    worker.core_worker.save_detached_actor_checkpoint(checkpoint_data, object_refs)

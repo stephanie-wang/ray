@@ -21,6 +21,7 @@
 #include "ray/common/runtime_env_manager.h"
 #include "ray/common/task/task_spec.h"
 #include "ray/gcs/gcs_server/gcs_actor_scheduler.h"
+#include "ray/gcs/gcs_server/gcs_high_availability_object_manager.h"
 #include "ray/gcs/gcs_server/gcs_function_manager.h"
 #include "ray/gcs/gcs_server/gcs_init_data.h"
 #include "ray/gcs/gcs_server/gcs_table_storage.h"
@@ -218,6 +219,7 @@ class GcsActorManager : public rpc::ActorInfoHandler {
   /// \param gcs_table_storage Used to flush actor data to storage.
   /// \param gcs_publisher Used to publish gcs message.
   GcsActorManager(
+      std::shared_ptr<GcsHighAvailabilityObjectManager> high_availability_object_manager,
       std::shared_ptr<GcsActorSchedulerInterface> scheduler,
       std::shared_ptr<GcsTableStorage> gcs_table_storage,
       std::shared_ptr<GcsPublisher> gcs_publisher,
@@ -248,6 +250,10 @@ class GcsActorManager : public rpc::ActorInfoHandler {
 
   void HandleListNamedActors(const rpc::ListNamedActorsRequest &request,
                              rpc::ListNamedActorsReply *reply,
+                             rpc::SendReplyCallback send_reply_callback) override;
+
+  void HandleCheckpointActor(const rpc::CheckpointActorRequest &request,
+                             rpc::CheckpointActorReply *reply,
                              rpc::SendReplyCallback send_reply_callback) override;
 
   void HandleGetAllActorInfo(const rpc::GetAllActorInfoRequest &request,
@@ -552,6 +558,7 @@ class GcsActorManager : public rpc::ActorInfoHandler {
   /// according to its owner, or the owner dies.
   absl::flat_hash_map<NodeID, absl::flat_hash_map<WorkerID, Owner>> owners_;
 
+  std::shared_ptr<GcsHighAvailabilityObjectManager> high_availability_object_manager_;
   /// The scheduler to schedule all registered actors.
   std::shared_ptr<GcsActorSchedulerInterface> gcs_actor_scheduler_;
   /// Used to update actor information upon creation, deletion, etc.
@@ -574,6 +581,8 @@ class GcsActorManager : public rpc::ActorInfoHandler {
   std::function<void(std::function<void(void)>, boost::posix_time::milliseconds)>
       run_delayed_;
   const boost::posix_time::milliseconds actor_gc_delay_;
+
+  absl::flat_hash_map<ActorID, std::string> detached_actor_checkpoints_;
 
   // Debug info.
   enum CountType {

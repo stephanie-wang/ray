@@ -113,6 +113,9 @@ cdef extern from "ray/core_worker/core_worker.h" nogil:
             const CSchedulingStrategy &scheduling_strategy,
             c_string debugger_breakpoint,
             c_string serialized_retry_exception_allowlist)
+        CRayStatus SaveDetachedActorCheckpoint(
+                const c_string &checkpoint_data,
+                const c_vector[CObjectID] &object_ids)
         CRayStatus CreateActor(
             const CRayFunction &function,
             const c_vector[unique_ptr[CTaskArg]] &args,

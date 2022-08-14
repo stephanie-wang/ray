@@ -236,6 +236,17 @@ Status ActorInfoAccessor::SyncGetByName(const std::string &name,
   return status;
 }
 
+void ActorInfoAccessor::SaveDetachedActorCheckpoint(
+    const rpc::CheckpointActorRequest &request,
+    const StatusCallback &callback) {
+  client_impl_->GetGcsRpcClient().CheckpointActor(
+      request,
+      [callback](const Status &status, const rpc::CheckpointActorReply &reply) {
+        callback(status);
+      });
+}
+
+
 Status ActorInfoAccessor::AsyncListNamedActors(
     bool all_namespaces,
     const std::string &ray_namespace,

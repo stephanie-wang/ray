@@ -94,6 +94,11 @@ class ActorInfoAccessor {
       const OptionalItemCallback<std::vector<rpc::NamedActorInfo>> &callback,
       int64_t timeout_ms = -1);
 
+  virtual void SaveDetachedActorCheckpoint(
+      const rpc::CheckpointActorRequest &request,
+      const StatusCallback &callback
+      );
+
   /// List all named actors from the GCS synchronously.
   ///
   /// The RPC will timeout after the default GCS RPC timeout is exceeded.

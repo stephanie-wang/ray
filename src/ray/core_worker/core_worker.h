@@ -473,6 +473,10 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
       const std::string &debugger_breakpoint,
       const std::string &serialized_retry_exception_allowlist = "");
 
+  Status SaveDetachedActorCheckpoint(
+      const std::string &checkpoint_data,
+      const std::vector<ObjectID> &object_ids);
+
   /// Create an actor.
   ///
   /// \param[in] caller_id ID of the task submitter.

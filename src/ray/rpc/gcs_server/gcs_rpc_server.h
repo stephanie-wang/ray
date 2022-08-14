@@ -165,6 +165,10 @@ class ActorInfoGcsServiceHandler {
                                      rpc::ListNamedActorsReply *reply,
                                      rpc::SendReplyCallback send_reply_callback) = 0;
 
+  virtual void HandleCheckpointActor(const rpc::CheckpointActorRequest &request,
+      rpc::CheckpointActorReply *reply,
+      rpc::SendReplyCallback send_reply_callback) = 0;
+
   virtual void HandleGetAllActorInfo(const GetAllActorInfoRequest &request,
                                      GetAllActorInfoReply *reply,
                                      SendReplyCallback send_reply_callback) = 0;
@@ -202,6 +206,8 @@ class ActorInfoGrpcService : public GrpcService {
         GetNamedActorInfo, RayConfig::instance().gcs_max_active_rpcs_per_handler());
     ACTOR_INFO_SERVICE_RPC_HANDLER(
         ListNamedActors, RayConfig::instance().gcs_max_active_rpcs_per_handler());
+    ACTOR_INFO_SERVICE_RPC_HANDLER(
+        CheckpointActor, RayConfig::instance().gcs_max_active_rpcs_per_handler());
     ACTOR_INFO_SERVICE_RPC_HANDLER(
         GetAllActorInfo, RayConfig::instance().gcs_max_active_rpcs_per_handler());
     ACTOR_INFO_SERVICE_RPC_HANDLER(
