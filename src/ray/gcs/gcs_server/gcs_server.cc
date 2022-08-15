@@ -159,6 +159,9 @@ void GcsServer::DoStart(const GcsInitData &gcs_init_data) {
 
   // Init gcs actor manager.
   gcs_high_availability_object_manager_ = std::make_shared<GcsHighAvailabilityObjectManager>();
+  high_availability_object_service_ =
+      std::make_unique<rpc::HighAvailabilityObjectGrpcService>(main_service_, *gcs_high_availability_object_manager_);
+  rpc_server_.RegisterService(*high_availability_object_service_);
   InitGcsActorManager(gcs_init_data);
 
   // Init gcs worker manager.

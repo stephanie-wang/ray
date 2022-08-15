@@ -109,7 +109,7 @@ class OwnershipBasedObjectDirectory : public IObjectDirectory {
     /// should never go back to false once set to true. If this is true, and
     /// the current_object_locations is empty, then this means that the object
     /// does not exist on any nodes due to eviction or the object never getting created.
-    bool subscribed;
+    bool subscribed = false;
     /// The address of the owner.
     rpc::Address owner_address;
   };
@@ -161,6 +161,11 @@ class OwnershipBasedObjectDirectory : public IObjectDirectory {
   void SendObjectLocationUpdateBatchIfNeeded(const WorkerID &worker_id,
                                              const NodeID &node_id,
                                              const rpc::Address &owner_address);
+
+  void ResetObjectListenerState(const ObjectID &object_id,
+      const rpc::Address &owner_address);
+
+  void HandleOwnerDied(const ObjectID &object_id, const rpc::Address &owner_address);
 
   /// Metrics
 

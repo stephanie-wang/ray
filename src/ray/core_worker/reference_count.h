@@ -94,6 +94,9 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// Return true if the object is owned by us.
   bool OwnedByUs(const ObjectID &object_id) const;
 
+  void SetObjectOwnerActorName(const ObjectID &object_id,
+      const std::string &actor_name);
+
   /// Increase the reference count for the ObjectID by one. If there is no
   /// entry for the ObjectID, one will be created. The object ID will not have
   /// any owner information, since we don't know how it was created.

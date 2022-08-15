@@ -85,7 +85,8 @@ message ObjectTableData {
 
 message HighAvailabilityObjectTableData {
   bytes object_id = 1;
-  Address owner_address = 2;
+  bytes actor_id = 2;
+  Address owner_address = 3;
 }
 
 message ActorTableData {

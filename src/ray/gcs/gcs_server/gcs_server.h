@@ -205,6 +205,7 @@ class GcsServer {
   /// The gcs actor manager.
   std::shared_ptr<GcsActorManager> gcs_actor_manager_;
   std::shared_ptr<GcsHighAvailabilityObjectManager> gcs_high_availability_object_manager_;
+  std::unique_ptr<rpc::HighAvailabilityObjectGrpcService> high_availability_object_service_;
   /// The gcs placement group manager.
   std::shared_ptr<GcsPlacementGroupManager> gcs_placement_group_manager_;
   /// Job info handler and service.

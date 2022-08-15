@@ -161,6 +161,7 @@ table Address {
   port: int;
   // Optional unique id for the worker.
   worker_id: string;
+  actor_name: string;
 }
 
 table FetchOrReconstruct {

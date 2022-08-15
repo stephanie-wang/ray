@@ -446,6 +446,7 @@ void GcsActorManager::HandleCheckpointActor(const rpc::CheckpointActorRequest &r
     const auto &object_id = ObjectID::FromBinary(object_id_binary);
     high_availability_object_manager_->PutHighAvailabilityObject(
         object_id,
+        actor_id,
         actor_address);
   }
   GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());

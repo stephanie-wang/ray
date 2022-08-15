@@ -31,7 +31,8 @@ inline flatbuffers::Offset<ray::protocol::Address> to_flatbuf(
                                       fbb.CreateString(address.raylet_id()),
                                       fbb.CreateString(address.ip_address()),
                                       address.port(),
-                                      fbb.CreateString(address.worker_id()));
+                                      fbb.CreateString(address.worker_id()),
+                                      fbb.CreateString(address.actor_name()));
 }
 
 flatbuffers::Offset<flatbuffers::Vector<flatbuffers::Offset<ray::protocol::Address>>>

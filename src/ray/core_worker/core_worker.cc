@@ -1644,6 +1644,9 @@ Status CoreWorker::SaveDetachedActorCheckpoint(
       request, [&promise](const Status &status) mutable {
       promise.set_value(status);
       });
+  for (const auto &object_id : object_ids) {
+    reference_counter_->SetObjectOwnerActorName(object_id, actor_name_);
+  }
   return future.get();
 }
 
@@ -2250,7 +2253,7 @@ Status CoreWorker::ExecuteTask(const TaskSpecification &task_spec,
     RAY_CHECK(return_ids.size() > 0);
     return_ids.pop_back();
     task_type = TaskType::ACTOR_CREATION_TASK;
-    SetActorId(task_spec.ActorCreationId());
+    SetActorId(task_spec.ActorCreationId(), task_spec.GetMessage().actor_creation_task_spec().name());
     {
       std::unique_ptr<ActorHandle> self_actor_handle(
           new ActorHandle(task_spec.GetSerializedActorHandle()));
@@ -3333,12 +3336,13 @@ void CoreWorker::HandlePlasmaObjectReady(const rpc::PlasmaObjectReadyRequest &re
   send_reply_callback(Status::OK(), nullptr, nullptr);
 }
 
-void CoreWorker::SetActorId(const ActorID &actor_id) {
+void CoreWorker::SetActorId(const ActorID &actor_id, const std::string &actor_name) {
   absl::MutexLock lock(&mutex_);
   if (!options_.is_local_mode) {
     RAY_CHECK(actor_id_.IsNil());
   }
   actor_id_ = actor_id;
+  actor_name_ = actor_name;
 }
 
 void CoreWorker::SetWebuiDisplay(const std::string &key, const std::string &message) {

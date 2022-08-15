@@ -322,67 +322,129 @@ void OwnershipBasedObjectDirectory::ObjectLocationSubscriptionCallback(
   }
 }
 
-ray::Status OwnershipBasedObjectDirectory::SubscribeObjectLocations(
-    const UniqueID &callback_id,
+void OwnershipBasedObjectDirectory::HandleOwnerDied(
     const ObjectID &object_id,
-    const rpc::Address &owner_address,
-    const OnLocationsFound &callback) {
-  auto it = listeners_.find(object_id);
-  if (it == listeners_.end()) {
-    // Create an object eviction subscription message.
-    auto request = std::make_unique<rpc::WorkerObjectLocationsSubMessage>();
-    request->set_intended_worker_id(owner_address.worker_id());
-    request->set_object_id(object_id.Binary());
+    const rpc::Address &owner_address) {
+  const WorkerID prev_owner_id = WorkerID::FromBinary(owner_address.worker_id());
+  RAY_LOG(DEBUG) << "Object " << object_id << " is owned by worker " << prev_owner_id << " with actor name: " << owner_address.actor_name();
+  if (owner_address.actor_name().empty()) {
+    rpc::WorkerObjectLocationsPubMessage location_info;
+    mark_as_failed_(object_id, rpc::ErrorType::OWNER_DIED);
+    ObjectLocationSubscriptionCallback(location_info,
+                                       object_id,
+                                       /*location_lookup_failed*/ true);
+    return;
+  }
 
-    auto msg_published_callback = [this, object_id](const rpc::PubMessage &pub_message) {
-      RAY_CHECK(pub_message.has_worker_object_locations_message());
-      const auto &location_info = pub_message.worker_object_locations_message();
-      ObjectLocationSubscriptionCallback(
-          location_info,
-          object_id,
-          /*location_lookup_failed*/ !location_info.ref_removed());
-    };
+  gcs_client_->HighAvailabilityObjects().GetHighAvailabilityObject(object_id,
+      [this, object_id, owner_address, prev_owner_id](const Status &status, const boost::optional<rpc::HighAvailabilityObjectTableData> &result) {
+      if (result) {
+        ActorID owner_actor_id = ActorID::FromBinary(result->actor_id());
+        // Remove the old subscription and move it to the new one.
+        RAY_LOG(DEBUG) << "Unsubscribing from previous owner worker " << prev_owner_id
+                       << " for object " << object_id;
+        object_location_subscriber_->Unsubscribe(
+            rpc::ChannelType::WORKER_OBJECT_LOCATIONS_CHANNEL,
+            owner_address,
+            object_id.Binary());
+        gcs_client_->Actors().AsyncSubscribe(
+            owner_actor_id,
+            [this, object_id, owner_actor_id, prev_owner_id](const ActorID &actor_id, const rpc::ActorTableData &actor_data) {
+              RAY_CHECK(actor_data.state() != rpc::ActorTableData::DEAD);
+              if (actor_data.state() != rpc::ActorTableData::ALIVE) {
+                return;
+              }
 
-    auto failure_callback = [this, owner_address](const std::string &object_id_binary,
-                                                  const Status &status) {
-      const auto object_id = ObjectID::FromBinary(object_id_binary);
-      rpc::WorkerObjectLocationsPubMessage location_info;
-      if (!status.ok()) {
-        RAY_LOG(INFO) << "Failed to get the location for " << object_id
-                      << status.ToString();
-        mark_as_failed_(object_id, rpc::ErrorType::OWNER_DIED);
+              RAY_LOG(DEBUG) << "Object " << object_id << " was owned by worker "
+                             << prev_owner_id << ", now owned by worker "
+                             << WorkerID::FromBinary(actor_data.address().worker_id());
+              ResetObjectListenerState(object_id, actor_data.address());
+              gcs_client_->Actors().AsyncUnsubscribe(owner_actor_id);
+            },
+            [](Status status) {}
+          );
       } else {
-        // Owner is still alive but published a failure because the ref was
-        // deleted.
-        RAY_LOG(INFO)
-            << "Failed to get the location for " << object_id
-            << ", object already released by distributed reference counting protocol";
-        mark_as_failed_(object_id, rpc::ErrorType::OBJECT_DELETED);
+        rpc::WorkerObjectLocationsPubMessage location_info;
+        mark_as_failed_(object_id, rpc::ErrorType::OWNER_DIED);
+        ObjectLocationSubscriptionCallback(location_info,
+                                           object_id,
+                                           /*location_lookup_failed*/ true);
       }
+      });
+}
+
+void OwnershipBasedObjectDirectory::ResetObjectListenerState(const ObjectID &object_id,
+    const rpc::Address &owner_address) {
+  auto it = listeners_.find(object_id);
+  if (it != listeners_.end()) {
+    RAY_CHECK(it->second.owner_address.worker_id() != owner_address.worker_id());
+  }
+  RAY_LOG(INFO) << "Resetting listener state for object " << object_id << " to worker ID " << WorkerID::FromBinary(owner_address.worker_id());
+  // Create an object eviction subscription message.
+  auto request = std::make_unique<rpc::WorkerObjectLocationsSubMessage>();
+  request->set_intended_worker_id(owner_address.worker_id());
+  request->set_object_id(object_id.Binary());
+
+  auto msg_published_callback = [this, object_id](const rpc::PubMessage &pub_message) {
+    RAY_CHECK(pub_message.has_worker_object_locations_message());
+    const auto &location_info = pub_message.worker_object_locations_message();
+    ObjectLocationSubscriptionCallback(
+        location_info,
+        object_id,
+        /*location_lookup_failed*/ !location_info.ref_removed());
+  };
+
+  auto failure_callback = [this, owner_address](const std::string &object_id_binary,
+                                                const Status &status) {
+    const auto object_id = ObjectID::FromBinary(object_id_binary);
+    rpc::WorkerObjectLocationsPubMessage location_info;
+    if (!status.ok()) {
+      RAY_LOG(INFO) << "Failed to get the location for " << object_id << " "
+                    << status.ToString();
+      HandleOwnerDied(object_id, owner_address);
+    } else {
+      // Owner is still alive but published a failure because the ref was
+      // deleted.
+      RAY_LOG(INFO)
+          << "Failed to get the location for " << object_id
+          << ", object already released by distributed reference counting protocol";
+      mark_as_failed_(object_id, rpc::ErrorType::OBJECT_DELETED);
       // Location lookup can fail if the owner is reachable but no longer has a
       // record of this ObjectRef, most likely due to an issue with the
       // distributed reference counting protocol.
       ObjectLocationSubscriptionCallback(location_info,
                                          object_id,
                                          /*location_lookup_failed*/ true);
-    };
+    }
+  };
 
-    auto sub_message = std::make_unique<rpc::SubMessage>();
-    sub_message->mutable_worker_object_locations_message()->Swap(request.get());
+  auto sub_message = std::make_unique<rpc::SubMessage>();
+  sub_message->mutable_worker_object_locations_message()->Swap(request.get());
 
-    RAY_CHECK(object_location_subscriber_->Subscribe(
-        std::move(sub_message),
-        rpc::ChannelType::WORKER_OBJECT_LOCATIONS_CHANNEL,
-        owner_address,
-        object_id.Binary(),
-        /*subscribe_done_callback=*/nullptr,
-        /*Success callback=*/msg_published_callback,
-        /*Failure callback=*/failure_callback));
+  RAY_CHECK(object_location_subscriber_->Subscribe(
+      std::move(sub_message),
+      rpc::ChannelType::WORKER_OBJECT_LOCATIONS_CHANNEL,
+      owner_address,
+      object_id.Binary(),
+      /*subscribe_done_callback=*/nullptr,
+      /*Success callback=*/msg_published_callback,
+      /*Failure callback=*/failure_callback));
 
-    auto location_state = LocationListenerState();
-    location_state.owner_address = owner_address;
-    it = listeners_.emplace(object_id, std::move(location_state)).first;
+  auto location_state = LocationListenerState();
+  location_state.owner_address = owner_address;
+  listeners_[object_id] = std::move(location_state);
+}
+
+ray::Status OwnershipBasedObjectDirectory::SubscribeObjectLocations(
+    const UniqueID &callback_id,
+    const ObjectID &object_id,
+    const rpc::Address &owner_address,
+    const OnLocationsFound &callback) {
+  if (!listeners_.contains(object_id)) {
+    ResetObjectListenerState(object_id, owner_address);
   }
+  auto it = listeners_.find(object_id);
+  RAY_CHECK(it != listeners_.end());
   auto &listener_state = it->second;
 
   if (listener_state.callbacks.count(callback_id) > 0) {

@@ -66,6 +66,15 @@ void ReferenceCounter::ShutdownIfNeeded() {
   }
 }
 
+void ReferenceCounter::SetObjectOwnerActorName(const ObjectID &object_id, const std::string &actor_name) {
+  absl::MutexLock lock(&mutex_);
+  auto it = object_id_refs_.find(object_id);
+  RAY_CHECK(it != object_id_refs_.end()) << object_id;
+  RAY_CHECK(it->second.owned_by_us) << object_id;
+  it->second.owner_address->set_actor_name(actor_name);
+  RAY_LOG(DEBUG) << "Set object " << object_id << " owner actor name to " << actor_name;
+}
+
 ReferenceCounter::ReferenceTable ReferenceCounter::ReferenceTableFromProto(
     const ReferenceTableProto &proto) {
   ReferenceTable refs;

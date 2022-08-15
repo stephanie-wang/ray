@@ -864,7 +864,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
                         uint64_t attempt_number,
                         const std::string &task_name);
 
-  void SetActorId(const ActorID &actor_id);
+  void SetActorId(const ActorID &actor_id, const std::string &actor_name = "");
 
   /// Run the io_service_ event loop. This should be called in a background thread.
   void RunIOService();
@@ -1186,6 +1186,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
 
   /// Our actor ID. If this is nil, then we execute only stateless tasks.
   ActorID actor_id_ GUARDED_BY(mutex_);
+  std::string actor_name_ GUARDED_BY(mutex_);
 
   /// The currently executing task spec. We have to track this separately since
   /// we cannot access the thread-local worker contexts from GetCoreWorkerStats()

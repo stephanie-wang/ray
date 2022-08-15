@@ -57,6 +57,7 @@ inline ray::rpc::ObjectReference FlatbufferToSingleObjectReference(
   ref.mutable_owner_address()->set_ip_address(address.ip_address()->str());
   ref.mutable_owner_address()->set_port(address.port());
   ref.mutable_owner_address()->set_worker_id(address.worker_id()->str());
+  ref.mutable_owner_address()->set_actor_name(address.actor_name()->str());
   return ref;
 }
 
@@ -74,6 +75,7 @@ std::vector<ray::rpc::ObjectReference> FlatbufferToObjectReference(
     ref.mutable_owner_address()->set_ip_address(addr->ip_address()->str());
     ref.mutable_owner_address()->set_port(addr->port());
     ref.mutable_owner_address()->set_worker_id(addr->worker_id()->str());
+    ref.mutable_owner_address()->set_actor_name(addr->actor_name()->str());
     refs.emplace_back(std::move(ref));
   }
   return refs;
