@@ -573,4 +573,10 @@ std::string PlasmaStore::GetDebugDump() const {
   return buffer.str();
 }
 
+void PlasmaStore::ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+    const ray::rpc::Address &owner_address,
+    const std::function<void(const std::vector<ObjectID> &)> &callback) {
+  object_lifecycle_mgr_.ResetObjectOwner(object_ids, owner_address, callback);
+}
+
 }  // namespace plasma

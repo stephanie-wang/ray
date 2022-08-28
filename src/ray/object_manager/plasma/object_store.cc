@@ -87,4 +87,24 @@ LocalObject *ObjectStore::GetMutableObject(const ObjectID &object_id) {
   return it->second.get();
 }
 
+void ObjectStore::ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+    const ray::rpc::Address &owner_address,
+    const std::function<void(const std::vector<ObjectID> &)> &callback) {
+  std::vector<ObjectID> local_object_ids;
+  for (const auto &object_id : object_ids) {
+    auto it = object_table_.find(object_id);
+    if (it == object_table_.end()) {
+      continue;
+    }
+    local_object_ids.push_back(object_id);
+    auto &object_info = it->second->GetMutableObjectInfo();
+    object_info.owner_raylet_id = NodeID::FromBinary(owner_address.raylet_id());
+    object_info.owner_ip_address = owner_address.ip_address();
+    object_info.owner_port = owner_address.port();
+    object_info.owner_worker_id = WorkerID::FromBinary(owner_address.worker_id());
+  }
+  RAY_LOG(DEBUG) << "Calling ResetObjectOwner callback";
+  callback(local_object_ids);
+}
+
 }  // namespace plasma

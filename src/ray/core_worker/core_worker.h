@@ -477,6 +477,9 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
       const std::string &checkpoint_data,
       const std::vector<ObjectID> &object_ids);
 
+  void RecoverHighAvailabilityObjects(const std::vector<ObjectID> &object_ids,
+    const std::string &actor_name);
+
   /// Create an actor.
   ///
   /// \param[in] caller_id ID of the task submitter.

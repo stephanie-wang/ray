@@ -108,6 +108,10 @@ class PlasmaStore {
     callback(available);
   }
 
+  void ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+      const ray::rpc::Address &owner_address,
+      const std::function<void(const std::vector<ObjectID> &)> &callback);
+
  private:
   /// Create a new object. The client must do a call to release_object to tell
   /// the store when it is done with the object.

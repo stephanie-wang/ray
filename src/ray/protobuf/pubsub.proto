@@ -82,6 +82,7 @@ message PubMessage {
 
 message WorkerObjectEvictionMessage {
   bytes object_id = 1;
+  optional Address new_owner_address = 2;
 }
 
 message WorkerRefRemovedMessage {
@@ -164,7 +165,7 @@ message SubMessage {
 
 message WorkerObjectEvictionSubMessage {
   // The ID of the worker this message is intended for.
-  bytes intended_worker_id = 1;
+  Address intended_owner_address = 1;
   // ObjectID of the pinned object.
   bytes object_id = 2;
   // Address of the subscriber.

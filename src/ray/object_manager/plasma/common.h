@@ -109,6 +109,8 @@ class LocalObject {
 
   const ray::ObjectInfo &GetObjectInfo() const { return object_info; }
 
+  ray::ObjectInfo &GetMutableObjectInfo() { return object_info; }
+
   const Allocation &GetAllocation() const { return allocation; }
 
   const plasma::flatbuf::ObjectSource &GetSource() const { return source; }

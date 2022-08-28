@@ -153,6 +153,8 @@ class GcsActor {
   bool GetGrantOrReject() const;
   void SetGrantOrReject(bool grant_or_reject);
 
+  std::unordered_set<ObjectID> high_availability_object_ids_ = {};
+
  private:
   /// The actor meta data which contains the task specification as well as the state of
   /// the gcs actor and so on (see gcs.proto).

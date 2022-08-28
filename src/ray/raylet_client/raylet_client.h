@@ -476,6 +476,10 @@ class RayletClient : public RayletClientInterface {
   // Subscribe to receive notification on plasma object
   void SubscribeToPlasma(const ObjectID &object_id, const rpc::Address &owner_address);
 
+  void ResetObjectOwner(
+      const rpc::ResetObjectOwnerRequest &request,
+      const rpc::ClientCallback<rpc::ResetObjectOwnerReply> &callback);
+
   WorkerID GetWorkerID() const { return worker_id_; }
 
   JobID GetJobID() const { return job_id_; }

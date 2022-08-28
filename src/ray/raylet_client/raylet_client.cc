@@ -543,4 +543,10 @@ void raylet::RayletClient::GetSystemConfig(
   grpc_client_->GetSystemConfig(request, callback);
 }
 
+void raylet::RayletClient::ResetObjectOwner(
+    const rpc::ResetObjectOwnerRequest &request,
+    const rpc::ClientCallback<rpc::ResetObjectOwnerReply> &callback) {
+  grpc_client_->ResetObjectOwner(request, callback);
+}
+
 }  // namespace ray

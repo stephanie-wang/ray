@@ -61,6 +61,15 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
     SetupActor(task_spec.IsAsyncioActor(),
                task_spec.MaxActorConcurrency(),
                task_spec.ExecuteOutOfOrder());
+    std::vector<ObjectID> high_availability_object_ids;
+    for (int64_t i = 0; i < request.high_availability_object_ids_size(); i++) {
+      high_availability_object_ids.push_back(ObjectID::FromBinary(request.high_availability_object_ids(i)));
+    }
+    if (!high_availability_object_ids.empty()) {
+      const auto &actor_name = task_spec.GetMessage().actor_creation_task_spec().name();
+      RAY_CHECK(!actor_name.empty());
+      recover_objects_(high_availability_object_ids, actor_name);
+    }
   }
 
   // Only assign resources for non-actor tasks. Actor tasks inherit the resources

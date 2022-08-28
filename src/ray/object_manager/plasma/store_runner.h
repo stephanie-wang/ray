@@ -34,6 +34,14 @@ class PlasmaStoreRunner {
                        "PlasmaStoreRunner.GetAvailableMemory");
   }
 
+  void ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+      const ray::rpc::Address &owner_address,
+      const std::function<void(const std::vector<ObjectID> &)> &callback) {
+    main_service_.post([this, object_ids, owner_address, callback]() {
+        store_->ResetObjectOwner(object_ids, owner_address, callback);
+        }, "");
+  }
+
  private:
   void Shutdown();
   mutable absl::Mutex store_runner_mutex_;

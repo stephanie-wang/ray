@@ -46,8 +46,7 @@ class Driver:
             return self.fut
 
         self.fut = f_large.remote()
-        self.checkpoint_storage.save.remote({"fut": self.fut})
-
+        ray.get(self.checkpoint_storage.save.remote({"fut": self.fut}))
         # TODO: Actually save a checkpoint.
         ray.save_detached_actor_checkpoint(b"", [self.fut])
 

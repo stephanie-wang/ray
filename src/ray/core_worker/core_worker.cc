@@ -102,6 +102,12 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
     direct_task_receiver_ = std::make_unique<CoreWorkerDirectTaskReceiver>(
         worker_context_, task_execution_service_, execute_task, [this] {
           return local_raylet_client_->TaskDone();
+        },
+        [this](
+          const std::vector<ObjectID> &object_ids,
+          const std::string &actor_name
+          ) {
+          return RecoverHighAvailabilityObjects(object_ids, actor_name);
         });
   }
 
@@ -1650,6 +1656,59 @@ Status CoreWorker::SaveDetachedActorCheckpoint(
   return future.get();
 }
 
+void CoreWorker::RecoverHighAvailabilityObjects(
+    const std::vector<ObjectID> &object_ids,
+    const std::string &actor_name) {
+  rpc::Address address(rpc_address_);
+  address.set_actor_name(actor_name);
+  for (const auto &object_id : object_ids) {
+    reference_counter_->AddOwnedObject(object_id, {}, address, "",
+        // TODO(swang)
+        /*object_size=*/0,
+        // TODO(swang)
+        /*is_reconstructable=*/false,
+        // Pin the object forever.
+        /*add_local_ref=*/true);
+    // TODO(swang): Recovery should also store the lineage.
+  }
+
+  rpc::ResetObjectOwnerRequest request;
+  for (const auto &object_id : object_ids) {
+    request.add_object_ids(object_id.Binary());
+  }
+  request.mutable_owner_address()->CopyFrom(address);
+
+  const auto nodes = gcs_client_->Nodes().GetAll();
+  auto node_count = std::make_shared<int>(nodes.size());
+  for (const auto &node : nodes) {
+    const auto raylet_id = node.first;
+    const auto &node_info = node.second;
+    auto grpc_client =
+        rpc::NodeManagerWorkerClient::make(
+            node_info.node_manager_address(),
+            node_info.node_manager_port(),
+            *client_call_manager_);
+    RAY_LOG(DEBUG) << "Polling node " << raylet_id << " for HA objects";
+    auto raylet_client = std::shared_ptr<raylet::RayletClient>(
+        new raylet::RayletClient(std::move(grpc_client)));
+    raylet_client->ResetObjectOwner(request, [this, object_ids, raylet_id, node_count](const Status &status,
+                                          const rpc::ResetObjectOwnerReply &reply) {
+        RAY_LOG(DEBUG) << "Received ResetObjectOwner reply from node " << raylet_id;
+        for (int64_t i = 0; i < reply.object_ids_present_size(); i++) {
+          const auto object_id = ObjectID::FromBinary(reply.object_ids_present(i));
+          reference_counter_->AddObjectLocation(object_id, raylet_id);
+          RAY_LOG(DEBUG) << "Node " << raylet_id << " has HA object " << object_id;
+        }
+        (*node_count)--;
+        if (*node_count == 0) {
+          for (const auto &object_id : object_ids) {
+            object_recovery_manager_->RecoverObject(object_id);
+          }
+        }
+        });
+  }
+}
+
 
 Status CoreWorker::CreateActor(const RayFunction &function,
                                const std::vector<std::unique_ptr<TaskArg>> &args,
@@ -2765,13 +2824,25 @@ void CoreWorker::ProcessSubscribeForObjectEviction(
   };
 
   const auto object_id = ObjectID::FromBinary(message.object_id());
-  const auto intended_worker_id = WorkerID::FromBinary(message.intended_worker_id());
+  const auto intended_worker_id = WorkerID::FromBinary(message.intended_owner_address().worker_id());
   if (intended_worker_id != worker_context_.GetWorkerID()) {
     RAY_LOG(INFO) << "The SubscribeForObjectEviction message for object id " << object_id
                   << " is for " << intended_worker_id << ", but the current worker id is "
                   << worker_context_.GetWorkerID() << ". The RPC will be no-op.";
     unpin_object(object_id);
     return;
+  }
+
+  rpc::Address owner_address;
+  auto has_owner = reference_counter_->GetOwner(object_id, &owner_address);
+  if (has_owner && owner_address.actor_name() != message.intended_owner_address().actor_name()) {
+    rpc::PubMessage pub_message;
+    pub_message.set_key_id(object_id.Binary());
+    pub_message.set_channel_type(rpc::ChannelType::WORKER_OBJECT_EVICTION);
+    pub_message.mutable_worker_object_eviction_message()->set_object_id(
+        object_id.Binary());
+    pub_message.mutable_worker_object_eviction_message()->mutable_new_owner_address()->CopyFrom(owner_address);
+    object_info_publisher_->Publish(pub_message);
   }
 
   // Returns true if the object was present and the callback was added. It might have

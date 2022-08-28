@@ -246,6 +246,12 @@ class ObjectManager : public ObjectManagerInterface,
 
   bool PullManagerHasPullsQueued() const { return pull_manager_->HasPullsQueued(); }
 
+  void ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+      const rpc::Address &owner_address,
+      const std::function<void(const std::vector<ObjectID> &)> &callback) {
+    plasma::plasma_store_runner->ResetObjectOwner(object_ids, owner_address, callback);
+  }
+
  private:
   friend class TestObjectManager;
 

@@ -614,6 +614,10 @@ class NodeManager : public rpc::NodeManagerServiceHandler,
                               rpc::NotifyGCSRestartReply *reply,
                               rpc::SendReplyCallback send_reply_callback) override;
 
+  void HandleResetObjectOwner(const rpc::ResetObjectOwnerRequest &request,
+                              rpc::ResetObjectOwnerReply *reply,
+                              rpc::SendReplyCallback send_reply_callback) override;
+
   /// Trigger local GC on each worker of this raylet.
   void DoLocalGC(bool triggered_by_global_gc = false);
 

@@ -277,6 +277,13 @@ void ObjectLifecycleManager::GetDebugDump(std::stringstream &buffer) const {
   return stats_collector_.GetDebugDump(buffer);
 }
 
+void ObjectLifecycleManager::ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+    const ray::rpc::Address &owner_address,
+    const std::function<void(const std::vector<ObjectID> &)> &callback) {
+  object_store_->ResetObjectOwner(object_ids, owner_address, callback);
+}
+
+
 // For test only.
 ObjectLifecycleManager::ObjectLifecycleManager(
     std::unique_ptr<IObjectStore> store,

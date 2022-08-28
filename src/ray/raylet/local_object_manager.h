@@ -184,7 +184,7 @@ class LocalObjectManager {
                             std::function<void(const ray::Status &)> callback);
 
   /// Release an object that has been freed by its owner.
-  void ReleaseFreedObject(const ObjectID &object_id);
+  void ReleaseFreedObject(const ObjectID &object_id, bool global_free = true);
 
   /// Do operations that are needed after spilling objects such as
   /// 1. Unpin the pending spilling object.

@@ -335,6 +335,15 @@ message NotifyGCSRestartRequest {}
 
 message NotifyGCSRestartReply {}
 
+message ResetObjectOwnerRequest {
+  repeated bytes object_ids = 1;
+  Address owner_address = 2;
+}
+
+message ResetObjectOwnerReply {
+  repeated bytes object_ids_present = 1;
+}
+
 // Service for inter-node-manager communication.
 service NodeManagerService {
   // Update the node's view of the cluster resource usage.
@@ -398,4 +407,6 @@ service NodeManagerService {
   rpc GetTasksInfo(GetTasksInfoRequest) returns (GetTasksInfoReply);
   // [State API] Get the all object information of the node.
   rpc GetObjectsInfo(GetObjectsInfoRequest) returns (GetObjectsInfoReply);
+
+  rpc ResetObjectOwner(ResetObjectOwnerRequest) returns (ResetObjectOwnerReply);
 }

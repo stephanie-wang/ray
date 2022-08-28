@@ -24,6 +24,7 @@
 #include "ray/object_manager/plasma/object_store.h"
 #include "ray/object_manager/plasma/plasma_allocator.h"
 #include "ray/object_manager/plasma/stats_collector.h"
+#include "src/ray/protobuf/common.pb.h"
 
 namespace plasma {
 
@@ -142,6 +143,10 @@ class ObjectLifecycleManager : public IObjectLifecycleManager {
   void RecordMetrics() const;
 
   void GetDebugDump(std::stringstream &buffer) const;
+
+  void ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+      const ray::rpc::Address &owner_address,
+      const std::function<void(const std::vector<ObjectID> &)> &callback);
 
  private:
   // Test only

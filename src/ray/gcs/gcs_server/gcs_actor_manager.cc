@@ -448,6 +448,12 @@ void GcsActorManager::HandleCheckpointActor(const rpc::CheckpointActorRequest &r
         object_id,
         actor_id,
         actor_address);
+    it->second->high_availability_object_ids_.insert(object_id);
+  }
+  for (const auto &object_id_binary : request.object_ids_to_remove()) {
+    const auto &object_id = ObjectID::FromBinary(object_id_binary);
+    // TODO(swang): Remove from HAObjectManager.
+    it->second->high_availability_object_ids_.erase(object_id);
   }
   GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
 }

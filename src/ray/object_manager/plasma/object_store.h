@@ -21,6 +21,7 @@
 #include "ray/object_manager/plasma/allocator.h"
 #include "ray/object_manager/plasma/common.h"
 #include "ray/object_manager/plasma/plasma.h"
+#include "src/ray/protobuf/common.pb.h"
 
 namespace plasma {
 
@@ -67,6 +68,11 @@ class IObjectStore {
   ///   - false if such object doesn't exist.
   ///   - true if deleted.
   virtual bool DeleteObject(const ObjectID &object_id) = 0;
+
+  virtual void ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+      const ray::rpc::Address &owner_address,
+      const std::function<void(const std::vector<ObjectID> &)> &callback) = 0;
+
 };
 
 // ObjectStore implements IObjectStore. It uses IAllocator
@@ -84,6 +90,10 @@ class ObjectStore : public IObjectStore {
   const LocalObject *SealObject(const ObjectID &object_id) override;
 
   bool DeleteObject(const ObjectID &object_id) override;
+
+  void ResetObjectOwner(const std::vector<ObjectID> &object_ids,
+      const ray::rpc::Address &owner_address,
+      const std::function<void(const std::vector<ObjectID> &)> &callback);
 
  private:
   friend struct ObjectStatsCollectorTest;

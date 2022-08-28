@@ -437,6 +437,9 @@ void GcsActorScheduler::CreateActorOnWorker(std::shared_ptr<GcsActor> actor,
     resources.Add(std::move(resource));
   }
   request->mutable_resource_mapping()->CopyFrom(resources);
+  for (const auto &obj_id : actor->high_availability_object_ids_) {
+    request->add_high_availability_object_ids(obj_id.Binary());
+  }
 
   auto client = core_worker_clients_.GetOrConnect(worker->GetAddress());
   client->PushNormalTask(

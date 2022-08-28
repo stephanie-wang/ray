@@ -39,7 +39,7 @@ void LocalObjectManager::PinObjectsAndWaitForFree(
         local_objects_.emplace(object_id, std::make_pair<>(owner_address, false));
     if (inserted.second) {
       // This is the first time we're pinning this object.
-      RAY_LOG(DEBUG) << "Pinning object " << object_id;
+      RAY_LOG(DEBUG) << "Pinning object " << object_id << " owned by actor with name: " << owner_address.actor_name();
       pinned_objects_size_ += object->GetSize();
       pinned_objects_.emplace(object_id, std::move(object));
     } else {
@@ -60,7 +60,7 @@ void LocalObjectManager::PinObjectsAndWaitForFree(
     // Create a object eviction subscription message.
     auto wait_request = std::make_unique<rpc::WorkerObjectEvictionSubMessage>();
     wait_request->set_object_id(object_id.Binary());
-    wait_request->set_intended_worker_id(owner_address.worker_id());
+    wait_request->mutable_intended_owner_address()->CopyFrom(owner_address);
     rpc::Address subscriber_address;
     subscriber_address.set_raylet_id(self_node_id_.Binary());
     subscriber_address.set_ip_address(self_node_address_);
@@ -73,16 +73,28 @@ void LocalObjectManager::PinObjectsAndWaitForFree(
       RAY_CHECK(msg.has_worker_object_eviction_message());
       const auto object_eviction_msg = msg.worker_object_eviction_message();
       const auto object_id = ObjectID::FromBinary(object_eviction_msg.object_id());
-      ReleaseFreedObject(object_id);
-      core_worker_subscriber_->Unsubscribe(
-          rpc::ChannelType::WORKER_OBJECT_EVICTION, owner_address, object_id.Binary());
+      if (object_eviction_msg.has_new_owner_address()) {
+        RAY_LOG(DEBUG) << "Received new owner address for pinned object " << object_id;
+        auto it = local_objects_.find(object_id);
+        if (it != local_objects_.end()) {
+          RAY_CHECK(it->second.first.worker_id() == object_eviction_msg.new_owner_address().worker_id());
+          it->second.first = object_eviction_msg.new_owner_address();
+        }
+      } else {
+        ReleaseFreedObject(object_id);
+        core_worker_subscriber_->Unsubscribe(
+            rpc::ChannelType::WORKER_OBJECT_EVICTION, owner_address, object_id.Binary());
+      }
     };
 
     // Callback that is invoked when the owner of the object id is dead.
     auto owner_dead_callback = [this, owner_address](const std::string &object_id_binary,
                                                      const Status &) {
       const auto object_id = ObjectID::FromBinary(object_id_binary);
-      ReleaseFreedObject(object_id);
+      auto it = local_objects_.find(object_id);
+      bool detached_actor_owner = (it != local_objects_.end() && !it->second.first.actor_name().empty());
+      RAY_LOG(DEBUG) << "Owner of pinned object " << object_id << " is dead, actor with name: " << (detached_actor_owner ? it->second.first.actor_name() : "");
+      ReleaseFreedObject(object_id, /*global_free=*/!detached_actor_owner);
     };
 
     auto sub_message = std::make_unique<rpc::SubMessage>();
@@ -98,7 +110,8 @@ void LocalObjectManager::PinObjectsAndWaitForFree(
   }
 }
 
-void LocalObjectManager::ReleaseFreedObject(const ObjectID &object_id) {
+void LocalObjectManager::ReleaseFreedObject(const ObjectID &object_id,
+    bool global_free) {
   // Only free the object if it is not already freed.
   auto it = local_objects_.find(object_id);
   if (it == local_objects_.end() || it->second.second) {
@@ -126,13 +139,16 @@ void LocalObjectManager::ReleaseFreedObject(const ObjectID &object_id) {
     spilled_object_pending_delete_.push(object_id);
   }
 
-  // Try to evict all copies of the object from the cluster.
-  if (free_objects_period_ms_ >= 0) {
-    objects_to_free_.push_back(object_id);
-  }
-  if (objects_to_free_.size() == free_objects_batch_size_ ||
-      free_objects_period_ms_ == 0) {
-    FlushFreeObjects();
+  if (global_free) {
+    RAY_LOG(DEBUG) << "Freeing all copies of object " << object_id;
+    // Try to evict all copies of the object from the cluster.
+    if (free_objects_period_ms_ >= 0) {
+      objects_to_free_.push_back(object_id);
+    }
+    if (objects_to_free_.size() == free_objects_batch_size_ ||
+        free_objects_period_ms_ == 0) {
+      FlushFreeObjects();
+    }
   }
 }
 

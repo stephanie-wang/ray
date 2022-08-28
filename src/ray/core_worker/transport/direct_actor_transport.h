@@ -57,15 +57,21 @@ class CoreWorkerDirectTaskReceiver {
                            bool *is_retryable_error)>;
 
   using OnTaskDone = std::function<Status()>;
+  using RecoverHighAvailabilityObjectsHandler = std::function<void(
+      const std::vector<ObjectID> &object_ids,
+      const std::string &actor_name
+      )>;
 
   CoreWorkerDirectTaskReceiver(WorkerContext &worker_context,
                                instrumented_io_context &main_io_service,
                                const TaskHandler &task_handler,
-                               const OnTaskDone &task_done)
+                               const OnTaskDone &task_done,
+                               const RecoverHighAvailabilityObjectsHandler &recover_high_availability_objects)
       : worker_context_(worker_context),
         task_handler_(task_handler),
         task_main_io_service_(main_io_service),
         task_done_(task_done),
+        recover_objects_(recover_high_availability_objects),
         pool_manager_(std::make_shared<ConcurrencyGroupManager<BoundedExecutor>>()) {}
 
   /// Initialize this receiver. This must be called prior to use.
@@ -91,16 +97,15 @@ class CoreWorkerDirectTaskReceiver {
 
   void Stop();
 
- private:
-  /// Set up the configs for an actor.
-  /// This should be called once for the actor creation task.
-  void SetupActor(bool is_asyncio, int fiber_max_concurrency, bool execute_out_of_order);
-
  protected:
   /// Cache the concurrency groups of actors.
   absl::flat_hash_map<ActorID, std::vector<ConcurrencyGroup>> concurrency_groups_cache_;
 
  private:
+  /// Set up the configs for an actor.
+  /// This should be called once for the actor creation task.
+  void SetupActor(bool is_asyncio, int fiber_max_concurrency, bool execute_out_of_order);
+
   // Worker context.
   WorkerContext &worker_context_;
   /// The callback function to process a task.
@@ -109,6 +114,7 @@ class CoreWorkerDirectTaskReceiver {
   instrumented_io_context &task_main_io_service_;
   /// The callback function to be invoked when finishing a task.
   OnTaskDone task_done_;
+  RecoverHighAvailabilityObjectsHandler recover_objects_;
   /// Shared pool for producing new core worker clients.
   std::shared_ptr<rpc::CoreWorkerClientPool> client_pool_;
   /// Address of our RPC server.

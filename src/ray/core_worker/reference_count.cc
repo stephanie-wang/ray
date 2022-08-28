@@ -73,6 +73,28 @@ void ReferenceCounter::SetObjectOwnerActorName(const ObjectID &object_id, const 
   RAY_CHECK(it->second.owned_by_us) << object_id;
   it->second.owner_address->set_actor_name(actor_name);
   RAY_LOG(DEBUG) << "Set object " << object_id << " owner actor name to " << actor_name;
+
+  if (it->second.submitted_task_ref_count > 0) {
+    RAY_LOG(ERROR) << "HA object " << object_id << " has submitted task ref count " << it->second.submitted_task_ref_count << " during ownership change.";
+  }
+  if (it->second.nested().contained_in_owned.size()) {
+    RAY_LOG(ERROR) << "HA object " << object_id << " has nested owned ref count " << it->second.nested().contained_in_owned.size() << " during ownership change.";
+  }
+  if (it->second.nested().contained_in_borrowed_ids.size()) {
+    RAY_LOG(ERROR) << "HA object " << object_id << " has nested borrowed ref count " << it->second.nested().contained_in_borrowed_ids.size() << " during ownership change.";
+  }
+  if (it->second.borrow_info != nullptr) {
+    RAY_LOG(ERROR) << "HA object " << object_id << " has borrowers " << it->second.borrow().borrowers.size() << " during ownership change.";
+  }
+
+  RAY_LOG(DEBUG) << "Sending message to update owner address for object " << object_id;
+  rpc::PubMessage pub_message;
+  pub_message.set_key_id(object_id.Binary());
+  pub_message.mutable_worker_object_eviction_message()->set_object_id(
+      object_id.Binary());
+  pub_message.set_channel_type(rpc::ChannelType::WORKER_OBJECT_EVICTION);
+  pub_message.mutable_worker_object_eviction_message()->mutable_new_owner_address()->CopyFrom(it->second.owner_address.value());
+  object_info_publisher_->Publish(pub_message);
 }
 
 ReferenceCounter::ReferenceTable ReferenceCounter::ReferenceTableFromProto(
@@ -730,6 +752,7 @@ void ReferenceCounter::UpdateObjectPinnedAtRaylet(const ObjectID &object_id,
     if (!it->second.OutOfScope(lineage_pinning_enabled_)) {
       if (check_node_alive_(raylet_id)) {
         it->second.pinned_at_raylet_id = raylet_id;
+        UpdateObjectPendingCreation(object_id, false);
       } else {
         ReleasePlasmaObject(it);
         objects_to_recover_.push_back(object_id);

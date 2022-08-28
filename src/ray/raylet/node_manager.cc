@@ -2924,6 +2924,24 @@ MemoryUsageRefreshCallback NodeManager::CreateMemoryUsageRefreshCallback() {
   };
 }
 
+void NodeManager::HandleResetObjectOwner(const rpc::ResetObjectOwnerRequest &request,
+                            rpc::ResetObjectOwnerReply *reply,
+                            rpc::SendReplyCallback send_reply_callback) {
+  std::vector<ObjectID> object_ids;
+  for (int64_t i = 0; i < request.object_ids_size(); i++) {
+    object_ids.push_back(ObjectID::FromBinary(request.object_ids(i)));
+  }
+  object_manager_.ResetObjectOwner(object_ids,
+      request.owner_address(),
+      [this, reply, send_reply_callback](const std::vector<ObjectID> &local_object_ids) {
+        for (const auto &local_object_id : local_object_ids) {
+          reply->add_object_ids_present(local_object_id.Binary());
+          RAY_LOG(DEBUG) << "Replying to ResetObjectOwner " << local_object_id << " is local";
+        }
+        send_reply_callback(Status::OK(), nullptr, nullptr);
+      });
+}
+
 }  // namespace raylet
 
 }  // namespace ray
