@@ -373,6 +373,7 @@ void GcsServer::InitGcsActorManager(const GcsInitData &gcs_init_data) {
       gcs_table_storage_->ActorTable(),
       *gcs_node_manager_,
       cluster_task_manager_,
+      gcs_high_availability_object_manager_,
       schedule_failure_handler,
       schedule_success_handler,
       raylet_client_pool_,

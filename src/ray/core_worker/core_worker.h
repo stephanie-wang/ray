@@ -478,6 +478,7 @@ class CoreWorker : public rpc::CoreWorkerServiceHandler {
       const std::vector<ObjectID> &object_ids);
 
   void RecoverHighAvailabilityObjects(const std::vector<ObjectID> &object_ids,
+    const absl::flat_hash_map<TaskID, TaskSpecification> &lineage,
     const std::string &actor_name);
 
   /// Create an actor.

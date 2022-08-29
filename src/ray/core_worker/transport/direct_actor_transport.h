@@ -59,6 +59,7 @@ class CoreWorkerDirectTaskReceiver {
   using OnTaskDone = std::function<Status()>;
   using RecoverHighAvailabilityObjectsHandler = std::function<void(
       const std::vector<ObjectID> &object_ids,
+      const absl::flat_hash_map<TaskID, TaskSpecification> &lineage,
       const std::string &actor_name
       )>;
 

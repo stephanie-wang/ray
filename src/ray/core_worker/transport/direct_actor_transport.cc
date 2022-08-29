@@ -62,13 +62,18 @@ void CoreWorkerDirectTaskReceiver::HandleTask(
                task_spec.MaxActorConcurrency(),
                task_spec.ExecuteOutOfOrder());
     std::vector<ObjectID> high_availability_object_ids;
+    absl::flat_hash_map<TaskID, TaskSpecification> lineage;
     for (int64_t i = 0; i < request.high_availability_object_ids_size(); i++) {
       high_availability_object_ids.push_back(ObjectID::FromBinary(request.high_availability_object_ids(i)));
+    }
+    for (const auto &task : request.lineage()) {
+      auto it = lineage.emplace(TaskID::FromBinary(task.task_id()), TaskSpecification(task)).first;
+      it->second.GetMutableMessage().mutable_caller_address()->CopyFrom(rpc_address_);
     }
     if (!high_availability_object_ids.empty()) {
       const auto &actor_name = task_spec.GetMessage().actor_creation_task_spec().name();
       RAY_CHECK(!actor_name.empty());
-      recover_objects_(high_availability_object_ids, actor_name);
+      recover_objects_(high_availability_object_ids, lineage, actor_name);
     }
   }
 

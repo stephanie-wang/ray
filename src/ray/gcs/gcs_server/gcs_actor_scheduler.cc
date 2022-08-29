@@ -28,6 +28,7 @@ GcsActorScheduler::GcsActorScheduler(
     GcsActorTable &gcs_actor_table,
     const GcsNodeManager &gcs_node_manager,
     std::shared_ptr<ClusterTaskManager> cluster_task_manager,
+    std::shared_ptr<GcsHighAvailabilityObjectManager> high_availability_object_manager,
     GcsActorSchedulerFailureCallback schedule_failure_handler,
     GcsActorSchedulerSuccessCallback schedule_success_handler,
     std::shared_ptr<rpc::NodeManagerClientPool> raylet_client_pool,
@@ -38,6 +39,7 @@ GcsActorScheduler::GcsActorScheduler(
       gcs_actor_table_(gcs_actor_table),
       gcs_node_manager_(gcs_node_manager),
       cluster_task_manager_(std::move(cluster_task_manager)),
+      high_availability_object_manager_(high_availability_object_manager),
       schedule_failure_handler_(std::move(schedule_failure_handler)),
       schedule_success_handler_(std::move(schedule_success_handler)),
       raylet_client_pool_(raylet_client_pool),
@@ -437,8 +439,13 @@ void GcsActorScheduler::CreateActorOnWorker(std::shared_ptr<GcsActor> actor,
     resources.Add(std::move(resource));
   }
   request->mutable_resource_mapping()->CopyFrom(resources);
+  absl::flat_hash_map<TaskID, TaskSpecification> lineage;
   for (const auto &obj_id : actor->high_availability_object_ids_) {
     request->add_high_availability_object_ids(obj_id.Binary());
+    high_availability_object_manager_->GetLineage(obj_id, &lineage);
+  }
+  for (const auto &task : lineage) {
+    request->add_lineage()->CopyFrom(task.second.GetMessage());
   }
 
   auto client = core_worker_clients_.GetOrConnect(worker->GetAddress());

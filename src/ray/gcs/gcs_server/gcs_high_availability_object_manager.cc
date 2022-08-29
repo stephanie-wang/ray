@@ -36,19 +36,51 @@ void GcsHighAvailabilityObjectManager::HandleGetHighAvailabilityObject(const rpc
 void GcsHighAvailabilityObjectManager::HandlePutHighAvailabilityObject(const rpc::PutHighAvailabilityObjectRequest &request,
                           rpc::PutHighAvailabilityObjectReply *reply,
                           rpc::SendReplyCallback send_reply_callback) {
-  ObjectID obj_id = ObjectID::FromBinary(request.object_id());
-  ActorID actor_id = ActorID::FromBinary(request.data().actor_id());
-  PutHighAvailabilityObject(obj_id, actor_id, request.data().owner_address());
+  //ObjectID obj_id = ObjectID::FromBinary(request.object_id());
+  //ActorID actor_id = ActorID::FromBinary(request.data().actor_id());
+  //PutHighAvailabilityObjects(obj_id, actor_id, request.data().owner_address());
   GCS_RPC_SEND_REPLY(send_reply_callback, reply, Status::OK());
 }
 
-void GcsHighAvailabilityObjectManager::PutHighAvailabilityObject(const ObjectID &object_id,
-    const ActorID &actor_id,
-    const rpc::Address &owner_address) {
-  RAY_LOG(DEBUG) << "Object ID " << object_id << " owned by actor " << actor_id << " " << owner_address.actor_name();
-  RAY_CHECK(objects_.emplace(object_id, std::make_pair(actor_id, owner_address)).second);
+void GcsHighAvailabilityObjectManager::PutHighAvailabilityObjects(const std::vector<ObjectID> &object_ids,
+      const absl::flat_hash_map<TaskID, TaskSpecification> &lineage,
+      const ActorID &actor_id,
+      const rpc::Address &owner_address) {
+  for (const auto &object_id : object_ids) {
+    RAY_LOG(DEBUG) << "Object ID " << object_id << " owned by actor " << actor_id << " " << owner_address.actor_name();
+    RAY_CHECK(objects_.emplace(object_id, std::make_pair(actor_id, owner_address)).second);
+  }
+
+  for (const auto &task : lineage) {
+    lineage_.emplace(task.first, task.second);
+  }
 }
 
+void GcsHighAvailabilityObjectManager::GetLineage(const ObjectID &object_id,
+                absl::flat_hash_map<TaskID, TaskSpecification> *lineage) const {
+  const TaskID &task_id = object_id.TaskId();
+  if (lineage->count(task_id)) {
+    return;
+  }
+  const auto it = lineage_.find(task_id);
+  if (it == lineage_.end()) {
+    return;
+  }
+  RAY_CHECK(lineage->emplace(task_id, it->second).second);
+
+  // If the task can no longer be retried, decrement the lineage ref count
+  // for each of the task's args.
+  for (size_t i = 0; i < it->second.NumArgs(); i++) {
+    if (it->second.ArgByRef(i)) {
+      GetLineage(it->second.ArgId(i), lineage);
+    } else {
+      const auto &inlined_refs = it->second.ArgInlinedRefs(i);
+      for (const auto &inlined_ref : inlined_refs) {
+        GetLineage(ObjectID::FromBinary(inlined_ref.object_id()), lineage);
+      }
+    }
+  }
+}
 
 }  // namespace gcs
 }  // namespace ray

@@ -15,6 +15,7 @@
 #pragma once
 
 #include "ray/common/runtime_env_manager.h"
+#include "ray/common/task/task_spec.h"
 #include "ray/gcs/gcs_server/gcs_function_manager.h"
 #include "ray/gcs/gcs_server/gcs_init_data.h"
 #include "ray/gcs/gcs_server/gcs_table_storage.h"
@@ -36,12 +37,17 @@ class GcsHighAvailabilityObjectManager : public rpc::HighAvailabilityObjectHandl
                             rpc::PutHighAvailabilityObjectReply *reply,
                             rpc::SendReplyCallback send_reply_callback) override;
 
-  void PutHighAvailabilityObject(const ObjectID &object_id,
+  void PutHighAvailabilityObjects(const std::vector<ObjectID> &object_ids,
+      const absl::flat_hash_map<TaskID, TaskSpecification> &lineage,
       const ActorID &actor_id,
       const rpc::Address &owner_address);
 
+  void GetLineage(const ObjectID &object_id,
+                  absl::flat_hash_map<TaskID, TaskSpecification> *lineage) const;
+
  private:
   absl::flat_hash_map<ObjectID, std::pair<ActorID, rpc::Address>> objects_;
+  absl::flat_hash_map<TaskID, TaskSpecification> lineage_;
 };
 
 }  // namespace gcs

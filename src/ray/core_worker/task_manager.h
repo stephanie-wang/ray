@@ -272,6 +272,11 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   /// Fill every task information of the current worker to GetCoreWorkerStatsReply.
   void FillTaskInfo(rpc::GetCoreWorkerStatsReply *reply, const int64_t limit) const;
 
+  void GetLineage(const ObjectID &object_id,
+                  absl::flat_hash_map<TaskID, TaskSpecification> *lineage) const;
+
+  int64_t AddLineage(const ObjectID &object_id, const absl::flat_hash_map<TaskID, TaskSpecification> &lineage);
+
  private:
   struct TaskEntry {
     TaskEntry(const TaskSpecification &spec_arg,
@@ -337,6 +342,12 @@ class TaskManager : public TaskFinisherInterface, public TaskResubmissionInterfa
   int64_t RemoveLineageReference(const ObjectID &object_id,
                                  std::vector<ObjectID> *ids_to_release)
       LOCKS_EXCLUDED(mu_);
+
+  void GetLineageInternal(const ObjectID &object_id,
+                  absl::flat_hash_map<TaskID, TaskSpecification> *lineage)
+    const EXCLUSIVE_LOCKS_REQUIRED(mu_);
+
+  int64_t AddLineageInternal(const ObjectID &object_id, const absl::flat_hash_map<TaskID, TaskSpecification> &lineage);
 
   /// Helper function to call RemoveSubmittedTaskReferences on the remaining
   /// dependencies of the given task spec after the task has finished or

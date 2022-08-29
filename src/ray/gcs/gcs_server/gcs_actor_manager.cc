@@ -442,14 +442,22 @@ void GcsActorManager::HandleCheckpointActor(const rpc::CheckpointActorRequest &r
 
   rpc::Address actor_address = it->second->GetAddress();
   actor_address.set_actor_name(it->second->GetName());
+  std::vector<ObjectID> object_ids;
   for (const auto &object_id_binary : request.object_ids_to_add()) {
-    const auto &object_id = ObjectID::FromBinary(object_id_binary);
-    high_availability_object_manager_->PutHighAvailabilityObject(
-        object_id,
-        actor_id,
-        actor_address);
+    auto object_id = ObjectID::FromBinary(object_id_binary);
+    object_ids.push_back(object_id);
     it->second->high_availability_object_ids_.insert(object_id);
   }
+  absl::flat_hash_map<TaskID, TaskSpecification> lineage;
+  for (const auto &task_spec : request.lineage()) {
+    lineage.emplace(TaskID::FromBinary(task_spec.task_id()), TaskSpecification(task_spec));
+  }
+  high_availability_object_manager_->PutHighAvailabilityObjects(
+      object_ids,
+      lineage,
+      actor_id,
+      actor_address);
+
   for (const auto &object_id_binary : request.object_ids_to_remove()) {
     const auto &object_id = ObjectID::FromBinary(object_id_binary);
     // TODO(swang): Remove from HAObjectManager.

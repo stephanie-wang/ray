@@ -24,6 +24,7 @@
 #include "ray/common/task/task_spec.h"
 #include "ray/gcs/gcs_server/gcs_node_manager.h"
 #include "ray/gcs/gcs_server/gcs_table_storage.h"
+#include "ray/gcs/gcs_server/gcs_high_availability_object_manager.h"
 #include "ray/raylet/scheduling/cluster_task_manager.h"
 #include "ray/raylet/scheduling/scheduling_ids.h"
 #include "ray/raylet_client/raylet_client.h"
@@ -130,6 +131,7 @@ class GcsActorScheduler : public GcsActorSchedulerInterface {
       GcsActorTable &gcs_actor_table,
       const GcsNodeManager &gcs_node_manager,
       std::shared_ptr<ClusterTaskManager> cluster_task_manager_,
+      std::shared_ptr<GcsHighAvailabilityObjectManager> high_availability_object_manager,
       GcsActorSchedulerFailureCallback schedule_failure_handler,
       GcsActorSchedulerSuccessCallback schedule_success_handler,
       std::shared_ptr<rpc::NodeManagerClientPool> raylet_client_pool,
@@ -378,6 +380,7 @@ class GcsActorScheduler : public GcsActorSchedulerInterface {
   const GcsNodeManager &gcs_node_manager_;
   /// The cluster task manager.
   std::shared_ptr<ClusterTaskManager> cluster_task_manager_;
+  std::shared_ptr<GcsHighAvailabilityObjectManager> high_availability_object_manager_;
   /// The handler to handle the scheduling failures.
   GcsActorSchedulerFailureCallback schedule_failure_handler_;
   /// The handler to handle the successful scheduling.

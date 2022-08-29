@@ -106,6 +106,52 @@ std::vector<rpc::ObjectReference> TaskManager::AddPendingTask(
   return returned_refs;
 }
 
+int64_t TaskManager::AddLineage(const ObjectID &object_id, const absl::flat_hash_map<TaskID, TaskSpecification> &lineage) {
+  absl::MutexLock lock(&mu_);
+  return AddLineageInternal(object_id, lineage);
+}
+
+int64_t TaskManager::AddLineageInternal(const ObjectID &object_id, const absl::flat_hash_map<TaskID, TaskSpecification> &lineage) {
+  const TaskID &task_id = object_id.TaskId();
+  auto it = submissible_tasks_.find(task_id);
+  if (it != submissible_tasks_.end()) {
+    it->second.reconstructable_return_ids.insert(object_id);
+    return 0;
+  }
+
+  const auto spec_it = lineage.find(task_id);
+  if (spec_it == lineage.end()) {
+    RAY_LOG(DEBUG) << "No lineage found for object " << object_id;
+    return 0;
+  }
+  // TODO(swang): Fix max retries.
+  auto inserted = submissible_tasks_.emplace(task_id,
+                                             TaskEntry(spec_it->second, /*max_retries=*/3, /*num_returns=*/0));
+  RAY_CHECK(inserted.second);
+  it = inserted.first;
+  it->second.num_successful_executions = 1;
+  it->second.status = rpc::TaskStatus::FINISHED;
+  it->second.reconstructable_return_ids.insert(object_id);
+  it->second.lineage_footprint_bytes = it->second.spec.GetMessage().ByteSizeLong();
+
+  int64_t inserted_count = 1;
+
+  // If the task can no longer be retried, decrement the lineage ref count
+  // for each of the task's args.
+  for (size_t i = 0; i < it->second.spec.NumArgs(); i++) {
+    if (it->second.spec.ArgByRef(i)) {
+      inserted_count += AddLineageInternal(it->second.spec.ArgId(i), lineage);
+    } else {
+      const auto &inlined_refs = it->second.spec.ArgInlinedRefs(i);
+      for (const auto &inlined_ref : inlined_refs) {
+        inserted_count += AddLineageInternal(ObjectID::FromBinary(inlined_ref.object_id()), lineage);
+      }
+    }
+  }
+
+  return inserted_count;
+}
+
 bool TaskManager::ResubmitTask(const TaskID &task_id, std::vector<ObjectID> *task_deps) {
   TaskSpecification spec;
   bool resubmit = false;
@@ -549,6 +595,38 @@ void TaskManager::RemoveFinishedTaskReferences(
                                                    borrowed_refs,
                                                    &deleted);
   in_memory_store_->Delete(deleted);
+}
+
+void TaskManager::GetLineage(const ObjectID &object_id,
+  absl::flat_hash_map<TaskID, TaskSpecification> *lineage) const {
+  absl::MutexLock lock(&mu_);
+  GetLineageInternal(object_id, lineage);
+}
+
+void TaskManager::GetLineageInternal(const ObjectID &object_id,
+  absl::flat_hash_map<TaskID, TaskSpecification> *lineage) const {
+  const TaskID &task_id = object_id.TaskId();
+  if (lineage->count(task_id)) {
+    return;
+  }
+  const auto it = submissible_tasks_.find(task_id);
+  if (it == submissible_tasks_.end()) {
+    return;
+  }
+  RAY_CHECK(lineage->emplace(task_id, it->second.spec).second);
+
+  // If the task can no longer be retried, decrement the lineage ref count
+  // for each of the task's args.
+  for (size_t i = 0; i < it->second.spec.NumArgs(); i++) {
+    if (it->second.spec.ArgByRef(i)) {
+      GetLineageInternal(it->second.spec.ArgId(i), lineage);
+    } else {
+      const auto &inlined_refs = it->second.spec.ArgInlinedRefs(i);
+      for (const auto &inlined_ref : inlined_refs) {
+        GetLineageInternal(ObjectID::FromBinary(inlined_ref.object_id()), lineage);
+      }
+    }
+  }
 }
 
 int64_t TaskManager::RemoveLineageReference(const ObjectID &object_id,

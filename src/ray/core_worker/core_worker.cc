@@ -105,9 +105,10 @@ CoreWorker::CoreWorker(const CoreWorkerOptions &options, const WorkerID &worker_
         },
         [this](
           const std::vector<ObjectID> &object_ids,
+          const absl::flat_hash_map<TaskID, TaskSpecification> &lineage,
           const std::string &actor_name
           ) {
-          return RecoverHighAvailabilityObjects(object_ids, actor_name);
+          return RecoverHighAvailabilityObjects(object_ids, lineage, actor_name);
         });
   }
 
@@ -1641,9 +1642,15 @@ Status CoreWorker::SaveDetachedActorCheckpoint(
   RAY_CHECK(!actor_id.IsNil());
   request.set_actor_id(actor_id.Binary());
   request.set_checkpoint_data(checkpoint_data);
+  absl::flat_hash_map<TaskID, TaskSpecification> lineage;
   for (const auto &object_id : object_ids) {
     request.add_object_ids_to_add(object_id.Binary());
+    task_manager_->GetLineage(object_id, &lineage);
   }
+  for (const auto &task : lineage) {
+    request.add_lineage()->CopyFrom(task.second.GetMessage());
+  }
+
   std::promise<Status> promise;
   auto future = promise.get_future();
   gcs_client_->Actors().SaveDetachedActorCheckpoint(
@@ -1658,6 +1665,7 @@ Status CoreWorker::SaveDetachedActorCheckpoint(
 
 void CoreWorker::RecoverHighAvailabilityObjects(
     const std::vector<ObjectID> &object_ids,
+    const absl::flat_hash_map<TaskID, TaskSpecification> &lineage,
     const std::string &actor_name) {
   rpc::Address address(rpc_address_);
   address.set_actor_name(actor_name);
@@ -1666,11 +1674,19 @@ void CoreWorker::RecoverHighAvailabilityObjects(
         // TODO(swang)
         /*object_size=*/0,
         // TODO(swang)
-        /*is_reconstructable=*/false,
+        /*is_reconstructable=*/true,
         // Pin the object forever.
         /*add_local_ref=*/true);
     // TODO(swang): Recovery should also store the lineage.
   }
+
+  int64_t lineage_count = 0;
+  for (const auto &object_id : object_ids) {
+    // TODO(swang): Also need to add the intermediate objects
+    // in the lineage to the ref counter.
+    lineage_count += task_manager_->AddLineage(object_id, lineage);
+  }
+  RAY_LOG(DEBUG) << "Added " << lineage_count << " lineage entries out of " << lineage.size() << " received";
 
   rpc::ResetObjectOwnerRequest request;
   for (const auto &object_id : object_ids) {

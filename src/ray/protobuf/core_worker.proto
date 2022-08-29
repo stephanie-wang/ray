@@ -104,6 +104,7 @@ message PushTaskRequest {
   // Resource mapping ids assigned to the worker executing the task.
   repeated ResourceMapEntry resource_mapping = 5;
   repeated bytes high_availability_object_ids = 6;
+  repeated TaskSpec lineage = 7;
 }
 
 message PushTaskReply {
