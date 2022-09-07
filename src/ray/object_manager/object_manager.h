@@ -186,6 +186,7 @@ class ObjectManager : public ObjectManagerInterface,
   /// pinned by the raylet, so we can comfotable evict after spilling the object from
   /// local object manager. False otherwise.
   bool IsPlasmaObjectSpillable(const ObjectID &object_id);
+  bool IsPlasmaObjectEagerSpillable(const ObjectID &object_id);
 
   /// Consider pushing an object to a remote object manager. This object manager
   /// may choose to ignore the Push call (e.g., if Push is called twice in a row

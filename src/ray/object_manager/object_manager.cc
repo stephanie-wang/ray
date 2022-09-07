@@ -140,6 +140,10 @@ ObjectManager::~ObjectManager() { StopRpcService(); }
 
 void ObjectManager::Stop() { plasma::plasma_store_runner->Stop(); }
 
+bool ObjectManager::IsPlasmaObjectEagerSpillable(const ObjectID &object_id) {
+  return plasma::plasma_store_runner->IsPlasmaObjectEagerSpillable(object_id);
+}
+
 bool ObjectManager::IsPlasmaObjectSpillable(const ObjectID &object_id) {
   return plasma::plasma_store_runner->IsPlasmaObjectSpillable(object_id);
 }

@@ -119,6 +119,10 @@ void PlasmaStoreRunner::Shutdown() {
   }
 }
 
+bool PlasmaStoreRunner::IsPlasmaObjectEagerSpillable(const ObjectID &object_id) {
+  return store_->IsObjectEagerSpillable(object_id);
+}
+
 bool PlasmaStoreRunner::IsPlasmaObjectSpillable(const ObjectID &object_id) {
   return store_->IsObjectSpillable(object_id);
 }

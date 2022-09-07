@@ -172,6 +172,7 @@ Java_io_ray_runtime_object_NativeObjectStore_nativeAddLocalReference(
   auto object_id = JavaByteArrayToId<ObjectID>(env, objectId);
   auto core_worker = CoreWorkerProcess::TryGetWorker(worker_id);
   RAY_CHECK(core_worker);
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] " << __func__ << " call AddLocalReference";
   core_worker->AddLocalReference(object_id);
 }
 

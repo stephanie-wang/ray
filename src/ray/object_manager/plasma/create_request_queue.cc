@@ -219,9 +219,10 @@ bool CreateRequestQueue::SkiRental(){
 Status CreateRequestQueue::ProcessRequests() {
   // Suppress OOM dump to once per grace period.
   bool logged_oom = false;
-  static bool enable_blocktasks = RayConfig::instance().enable_BlockTasks();
-  static bool enable_blocktasks_spill = RayConfig::instance().enable_BlockTasksSpill();
-  static bool enable_evicttasks = RayConfig::instance().enable_EvictTasks();
+  static const bool enable_blocktasks = RayConfig::instance().enable_BlockTasks();
+  static const bool enable_blocktasks_spill = RayConfig::instance().enable_BlockTasksSpill();
+  static const bool enable_evicttasks = RayConfig::instance().enable_EvictTasks();
+  static const bool enable_eagerSpill = RayConfig::instance().enable_EagerSpill();
   size_t num_spinning_workers = 0;
 
   //TODO(Jae) Check if taskId differs within a same task with multiple objects
@@ -238,7 +239,7 @@ Status CreateRequestQueue::ProcessRequests() {
     auto status =
         ProcessRequest(/*fallback_allocator=*/false, request, &spilling_required,
                        &block_tasks_required, &evict_tasks_required, &lowest_pri);
-    if (spilling_required && !enable_blocktasks_spill) {
+    if (spilling_required && !enable_blocktasks_spill && !enable_eagerSpill) {
       spill_objects_callback_();
     }
 
@@ -254,8 +255,8 @@ Status CreateRequestQueue::ProcessRequests() {
 			<< enable_blocktasks <<" " << enable_evicttasks << " " 
 			<< enable_blocktasks_spill << ") on priority "
 			<< lowest_pri;
-	    on_object_creation_blocked_callback_(lowest_pri, block_tasks_required,
-	  		  evict_tasks_required, false, num_spinning_workers, 0);
+	    on_object_creation_blocked_callback_(lowest_pri, ObjectID(), block_tasks_required,
+	  		  false, evict_tasks_required, false, num_spinning_workers, 0);
 	  }
 
       FinishRequest(queue_it);
@@ -274,81 +275,88 @@ Status CreateRequestQueue::ProcessRequests() {
         oom_start_time_ns_ = now;
       }
 
-	  if (enable_blocktasks || enable_evicttasks || enable_blocktasks_spill) {
-        RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
-			<< enable_blocktasks <<" " << enable_evicttasks << " " 
-			<< enable_blocktasks_spill << ") on priority "
-			<< lowest_pri << " should_spill " << should_spill_;
+	  if(!enable_eagerSpill){
+	    if (enable_blocktasks || enable_evicttasks || enable_blocktasks_spill) {
+          RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
+			  << enable_blocktasks <<" " << enable_evicttasks << " " 
+			  << enable_blocktasks_spill << ") on priority "
+			  << lowest_pri << " should_spill " << should_spill_;
 		
-          RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of requests: "  << queue_.size();
-		  should_spill_ |= SkiRental();
-          num_spinning_workers = spinning_tasks_.GetNumSpinningTasks();
-		  //*********************************************
-		  num_spinning_workers = 0;
-		  absl::flat_hash_set<ray::TaskID> task_set;
+            RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of requests: "  << queue_.size();
+		    should_spill_ |= SkiRental();
+            num_spinning_workers = spinning_tasks_.GetNumSpinningTasks();
+		    //*********************************************
+		    num_spinning_workers = 0;
+		    absl::flat_hash_set<ray::TaskID> task_set;
 
-		  for(auto &q: queue_){
-		    task_set.insert(q.second->object_id.TaskId());
-		  }
+		    for(auto &q: queue_){
+		      task_set.insert(q.second->object_id.TaskId());
+		    }
 
-		  num_spinning_workers = task_set.size();
-          RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of spinning tasks: "  << num_spinning_workers;
-		  //*********************************************
-		if(new_dependency_added_ && new_request_added_ && enable_blocktasks_spill && !should_spill_){
-	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
+		    num_spinning_workers = task_set.size();
+            RAY_LOG(DEBUG) << "[JAE_DEBUG] Num of spinning tasks: "  << num_spinning_workers;
+		    //*********************************************
+		  if(new_dependency_added_ && new_request_added_ && enable_blocktasks_spill && !should_spill_){
+	        on_object_creation_blocked_callback_(lowest_pri, ObjectID(), false, enable_blocktasks, 
 		      enable_evicttasks, true, num_spinning_workers, (request)->object_size);
-		  //Check Deadlock only when a new object creation is requested
-		  new_request_added_ = false;
-  		  new_dependency_added_ = false;
-		}else{
-	      on_object_creation_blocked_callback_(lowest_pri, enable_blocktasks, 
+		    //Check Deadlock only when a new object creation is requested
+		    new_request_added_ = false;
+  		    new_dependency_added_ = false;
+		  }else{
+	        on_object_creation_blocked_callback_(lowest_pri, ObjectID(), false, enable_blocktasks, 
 		      enable_evicttasks, false, num_spinning_workers, (request)->object_size);
-		}
+		}  
 
-	    if ((enable_blocktasks_spill || enable_evicttasks) && (!should_spill_)) { 
-		  //should_spill is set in 2 cases
-		  //1. block_spill callback gives #of spinning tasks to task_manager.
-		  //Task_manager sets should_spill if #spinning_tasks==#leased_workers
-		  //2. If evict_tasks does not evict any tasks
-          return Status::TransientObjectStoreFull(
+	      if ((enable_blocktasks_spill || enable_evicttasks) && (!should_spill_)) { 
+		    //should_spill is set in 2 cases
+		    //1. block_spill callback gives #of spinning tasks to task_manager.
+		    //Task_manager sets should_spill if #spinning_tasks==#leased_workers
+		    //2. If evict_tasks does not evict any tasks
+            return Status::TransientObjectStoreFull(
               "Waiting for higher priority tasks to finish");
-		}
-		//Alternative Design point. Always set should_spill_ from task_manager.
-		//Current design reduce callback function. But spill called once only
+		  }
+		  //Alternative Design point. Always set should_spill_ from task_manager.
+		  //Current design reduce callback function. But spill called once only
 		  RAY_LOG(DEBUG) << "[JAE_DEBUG] should_spill unset";
-		//should_spill_ = false;
-	  }
+		  //should_spill_ = false;
+	    }
 
-      auto grace_period_ns = oom_grace_period_ns_;
-      auto spill_pending = spill_objects_callback_();
-      if (spill_pending) {
-        RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
-        oom_start_time_ns_ = -1;
-        return Status::TransientObjectStoreFull("Waiting for objects to spill.");
-      } else if (now - oom_start_time_ns_ < grace_period_ns) {
-        // We need a grace period since (1) global GC takes a bit of time to
-        // kick in, and (2) there is a race between spilling finishing and space
-        // actually freeing up in the object store.
-        RAY_LOG(DEBUG) << "In grace period before fallback allocation / oom.";
-        return Status::ObjectStoreFull("Waiting for grace period.");
-      } else {
-        // Trigger the fallback allocator.
-        RAY_LOG(DEBUG) << "fallback allocator called";
-        auto status = ProcessRequest(/*fallback_allocator=*/true, request,
+        auto grace_period_ns = oom_grace_period_ns_;
+        auto spill_pending = spill_objects_callback_();
+        if (spill_pending) {
+          RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
+          oom_start_time_ns_ = -1;
+          return Status::TransientObjectStoreFull("Waiting for objects to spill.");
+        } else if (now - oom_start_time_ns_ < grace_period_ns) {
+          // We need a grace period since (1) global GC takes a bit of time to
+          // kick in, and (2) there is a race between spilling finishing and space
+          // actually freeing up in the object store.
+          RAY_LOG(DEBUG) << "In grace period before fallback allocation / oom.";
+          return Status::ObjectStoreFull("Waiting for grace period.");
+        } else {
+          // Trigger the fallback allocator.
+          RAY_LOG(DEBUG) << "fallback allocator called";
+          auto status = ProcessRequest(/*fallback_allocator=*/true, request,
                                 /*spilling_required=*/nullptr, nullptr, nullptr, nullptr);
-        if (!status.ok()) {
-          std::string dump = "";
-          if (dump_debug_info_callback_ && !logged_oom) {
-            dump = dump_debug_info_callback_();
-            logged_oom = true;
+          if (!status.ok()) {
+            std::string dump = "";
+            if (dump_debug_info_callback_ && !logged_oom) {
+              dump = dump_debug_info_callback_();
+              logged_oom = true;
+            }
+          RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
+            << (request)->object_id << " of size "
+            << (request)->object_size / 1024 / 1024 << "MB\n"
+            << dump;
           }
-        RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
-          << (request)->object_id << " of size "
-          << (request)->object_size / 1024 / 1024 << "MB\n"
-          << dump;
+          FinishRequest(queue_it);
         }
-        FinishRequest(queue_it);
-      }
+	  }else{
+//spill_objects_callback_();
+	    on_object_creation_blocked_callback_(lowest_pri, ObjectID(), true, false, 
+		      false, false, 0, 0);
+          return Status::ObjectStoreFull("Waiting for grace period.");
+	  }
     }
 	RAY_LOG(DEBUG) << "[JAE_DEBUG] Remaining requests: " << queue_.size();
   }

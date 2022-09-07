@@ -36,6 +36,8 @@ namespace core {
 // Interface for mocking.
 class ReferenceCounterInterface {
  public:
+  virtual bool EagerSpillIncreaseLocalReference(const ObjectID &object_id) = 0;
+  virtual bool EagerSpillDecreaseLocalReference(const ObjectID &object_id) = 0;
   virtual void AddLocalReference(const ObjectID &object_id,
                                  const std::string &call_site) = 0;
   virtual bool AddBorrowedObject(const ObjectID &object_id, const ObjectID &outer_id,
@@ -87,6 +89,10 @@ class ReferenceCounter : public ReferenceCounterInterface,
   /// Return true if the object is owned by us.
   bool OwnedByUs(const ObjectID &object_id) const;
 
+  bool EagerSpillIncreaseLocalReference(const ObjectID &object_id)
+      LOCKS_EXCLUDED(mutex_);
+  bool EagerSpillDecreaseLocalReference(const ObjectID &object_id)
+      LOCKS_EXCLUDED(mutex_);
   /// Increase the reference count for the ObjectID by one. If there is no
   /// entry for the ObjectID, one will be created. The object ID will not have
   /// any owner information, since we don't know how it was created.
@@ -486,7 +492,6 @@ class ReferenceCounter : public ReferenceCounterInterface,
     return ret;
   }
   void ResetDeletedObjects(){
-	RAY_LOG(DEBUG) << "[JAE_DEBUG] ResetDeletedObjects called ";
     deleted_objects_.clear();
   }
 
@@ -797,7 +802,6 @@ class ReferenceCounter : public ReferenceCounterInterface,
                                     const rpc::WorkerAddress &borrower_addr);
 
   void AddDeletedObjects(const ObjectID &id){
-	RAY_LOG(DEBUG) << "[JAE_DEBUG] AddDeleteObjects called "<<id;
     deleted_objects_.push_back(id);
   }
 
@@ -826,6 +830,8 @@ class ReferenceCounter : public ReferenceCounterInterface,
 
   /// Holds all reference counts and dependency information for tracked ObjectIDs.
   ReferenceTable object_id_refs_ GUARDED_BY(mutex_);
+
+  absl::flat_hash_set<ObjectID> eager_spilled_objects_ GUARDED_BY(mutex_);
 
   /// Holds priority of tracked ObjectIDs.
   PriorityTable object_id_priority_ GUARDED_BY(mutex_);

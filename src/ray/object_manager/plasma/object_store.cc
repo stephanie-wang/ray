@@ -91,6 +91,7 @@ bool ObjectStore::DeleteObject(const ObjectID &object_id) {
   if (entry == nullptr) {
     return false;
   }
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteObject called";
   allocator_.Free(std::move(entry->allocation));
   object_table_.erase(object_id);
   return true;

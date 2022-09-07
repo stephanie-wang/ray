@@ -282,6 +282,7 @@ bool ClusterTaskManager::PoppedWorkerHandler(
 
   // Remove task dependencies.
   if (!spec.GetDependencies().empty()) {
+    RAY_LOG(DEBUG) << "[JAE_DEBUG] RemoveTaskDependencies called from priority " << task.GetTaskSpecification().GetPriority();
     task_dependency_manager_.RemoveTaskDependencies(task.GetTaskSpecification().TaskId());
   }
 

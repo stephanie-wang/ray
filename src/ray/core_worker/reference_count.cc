@@ -210,6 +210,27 @@ void ReferenceCounter::UpdateObjectSize(const ObjectID &object_id, int64_t objec
   }
 }
 
+bool ReferenceCounter::EagerSpillDecreaseLocalReference(const ObjectID &object_id){
+  absl::MutexLock lock(&mutex_);
+  /*
+  eager_spilled_objects_.insert(object_id);
+  absl::MutexLock lock(&mutex_);
+  auto it = object_id_refs_.find(object_id);
+  if (it != object_id_refs_.end()) {
+    it->second.local_ref_count--;
+	return true;
+  }
+  return false;
+  */
+  return eager_spilled_objects_.erase(object_id);
+}
+
+bool ReferenceCounter::EagerSpillIncreaseLocalReference(const ObjectID &object_id){
+  absl::MutexLock lock(&mutex_);
+  eager_spilled_objects_.insert(object_id);
+  return true;
+}
+
 void ReferenceCounter::AddLocalReference(const ObjectID &object_id,
                                          const std::string &call_site) {
   absl::MutexLock lock(&mutex_);
@@ -257,7 +278,8 @@ void ReferenceCounter::RemoveLocalReference(const ObjectID &object_id,
   it->second.local_ref_count--;
   RAY_LOG(DEBUG) << "Remove local reference " << object_id;
   PRINT_REF_COUNT(it);
-  if (it->second.RefCount() == 0) {
+  auto spilled_obj_it = eager_spilled_objects_.find(object_id);
+  if (it->second.RefCount() == 0 && spilled_obj_it == eager_spilled_objects_.end()) {
     DeleteReferenceInternal(it, deleted);
   }
 }

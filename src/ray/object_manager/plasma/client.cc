@@ -61,7 +61,7 @@ class PlasmaBuffer : public SharedMemoryBuffer {
                const std::shared_ptr<Buffer> &buffer)
       : SharedMemoryBuffer(buffer, 0, buffer->Size()),
         client_(client),
-        object_id_(object_id) {}
+        object_id_(object_id) {RAY_LOG(DEBUG) << "[JAE_DEBUG] PlasmaBuffer created";}
 
  private:
   std::shared_ptr<PlasmaClient::Impl> client_;
@@ -134,6 +134,9 @@ class PlasmaClient::Impl : public std::enable_shared_from_this<PlasmaClient::Imp
 
   Status Get(const ObjectID *object_ids, int64_t num_objects, int64_t timeout_ms,
              ObjectBuffer *object_buffers, bool is_from_worker);
+
+  void EagerSpillDecreaseObjectCount(const ObjectID &object_id);
+  void EagerSpillIncreaseObjectCount(const ObjectID &object_id);
 
   Status Release(const ObjectID &object_id);
 
@@ -211,7 +214,7 @@ class PlasmaClient::Impl : public std::enable_shared_from_this<PlasmaClient::Imp
   std::recursive_mutex client_mutex_;
 };
 
-PlasmaBuffer::~PlasmaBuffer() { RAY_UNUSED(client_->Release(object_id_)); }
+PlasmaBuffer::~PlasmaBuffer() { RAY_LOG(DEBUG) << "[JAE_DEBUG] ~PlasmaBuffer call Release()"; RAY_UNUSED(client_->Release(object_id_)); }
 
 PlasmaClient::Impl::Impl() : store_capacity_(0) {}
 
@@ -527,6 +530,34 @@ Status PlasmaClient::Impl::MarkObjectUnused(const ObjectID &object_id) {
   return Status::OK();
 }
 
+void PlasmaClient::Impl::EagerSpillDecreaseObjectCount(const ObjectID &object_id) {
+	/*
+  auto elem = objects_in_use_.find(object_id);
+  ObjectInUseEntry *object_entry;
+  if (elem == objects_in_use_.end()) {
+    object_entry = objects_in_use_[object_id].get();
+  } else {
+    object_entry = elem->second.get();
+    RAY_CHECK(object_entry->count > 0);
+  }
+  object_entry->count -= 1;
+  */
+  Release(object_id);
+}
+
+void PlasmaClient::Impl::EagerSpillIncreaseObjectCount(const ObjectID &object_id) {
+  auto elem = objects_in_use_.find(object_id);
+  ObjectInUseEntry *object_entry;
+  if (elem == objects_in_use_.end()) {
+    object_entry = objects_in_use_[object_id].get();
+  } else {
+    object_entry = elem->second.get();
+    RAY_CHECK(object_entry->count > 0);
+  }
+  object_entry->count += 1;
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] EagerSpillIncreaseObjectCount called, count:" << object_entry->count;
+}
+
 Status PlasmaClient::Impl::Release(const ObjectID &object_id) {
   std::lock_guard<std::recursive_mutex> guard(client_mutex_);
 
@@ -543,6 +574,7 @@ Status PlasmaClient::Impl::Release(const ObjectID &object_id) {
   if (object_entry->second->count == 0) {
     // Tell the store that the client no longer needs the object.
     RAY_RETURN_NOT_OK(MarkObjectUnused(object_id));
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] Release() call SendReleaseRequest";
     RAY_RETURN_NOT_OK(SendReleaseRequest(store_conn_, object_id));
     auto iter = deletion_cache_.find(object_id);
     if (iter != deletion_cache_.end()) {
@@ -577,6 +609,7 @@ Status PlasmaClient::Impl::Contains(const ObjectID &object_id, bool *has_object)
 
 Status PlasmaClient::Impl::Seal(const ObjectID &object_id) {
   std::lock_guard<std::recursive_mutex> guard(client_mutex_);
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] Seal called";
 
   // Make sure this client has a reference to the object before sending the
   // request to Plasma.
@@ -753,6 +786,14 @@ Status PlasmaClient::TryCreateImmediately(const ObjectID &object_id,
 Status PlasmaClient::Get(const std::vector<ObjectID> &object_ids, int64_t timeout_ms,
                          std::vector<ObjectBuffer> *object_buffers, bool is_from_worker) {
   return impl_->Get(object_ids, timeout_ms, object_buffers, is_from_worker);
+}
+
+void PlasmaClient::EagerSpillDecreaseObjectCount(const ObjectID &object_id) {
+  return impl_->EagerSpillDecreaseObjectCount(object_id);
+}
+
+void PlasmaClient::EagerSpillIncreaseObjectCount(const ObjectID &object_id) {
+  return impl_->EagerSpillIncreaseObjectCount(object_id);
 }
 
 Status PlasmaClient::Release(const ObjectID &object_id) {

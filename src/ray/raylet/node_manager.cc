@@ -227,8 +227,16 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             return GetLocalObjectManager().IsSpillingInProgress();
           },
           /*on_object_creation_blocked_callback=*/
-          [this](const Priority &base_priority, bool block_tasks,
+          [this](const Priority &base_priority, const ObjectID &object_id,
+		    bool delete_eager_spilled_objects, bool block_tasks,
             bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
+			if(delete_eager_spilled_objects){
+		      local_object_manager_.DeleteEagerSpilledObjects();
+			  return;
+			}
+			if(!block_tasks && !evict_tasks && !block_spill && num_spinning_workers == 0 && pending_size == 0){
+			  local_object_manager_.MapObjectIDPriority(object_id, base_priority);
+			}
             if(block_tasks){
               cluster_task_manager_->BlockTasks(base_priority, io_service_);
             }
@@ -303,6 +311,17 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           [this](const std::vector<ObjectID> &object_ids) {
             object_manager_.FreeObjects(object_ids,
                                         /*local_only=*/false);
+          },
+          /*store_object_count_*/
+          [this](const ObjectID &object_id, bool increase, bool decrease) {
+		  	if(increase)
+			  store_client_.EagerSpillIncreaseObjectCount(object_id);
+		  	if(decrease)
+			  store_client_.EagerSpillDecreaseObjectCount(object_id);
+          },
+          /*is_plasma_object_eager_spillable*/
+          [this](const ObjectID &object_id) {
+            return object_manager_.IsPlasmaObjectEagerSpillable(object_id);
           },
           /*is_plasma_object_spillable*/
           [this](const ObjectID &object_id) {
@@ -2095,7 +2114,6 @@ std::string compact_tag_string(const opencensus::stats::ViewDescriptor &view,
 
 bool NodeManager::GetObjectsFromPlasma(const std::vector<ObjectID> &object_ids,
                                        std::vector<std::unique_ptr<RayObject>> *results) {
-	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] 1";
   // Pin the objects in plasma by getting them and holding a reference to
   // the returned buffer.
   // NOTE: the caller must ensure that the objects already exist in plasma before
@@ -2111,7 +2129,6 @@ bool NodeManager::GetObjectsFromPlasma(const std::vector<ObjectID> &object_ids,
            .ok()) {
     return false;
   }
-	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] 2";
 
   for (const auto &plasma_result : plasma_results) {
     if (plasma_result.data == nullptr) {
@@ -2142,6 +2159,7 @@ void NodeManager::HandlePinObjectIDs(const rpc::PinObjectIDsRequest &request,
     send_reply_callback(Status::Invalid("Failed to get objects."), nullptr, nullptr);
     return;
   }
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandlePinObjectIDs call PinObjectsAndWaitForFree()";
   local_object_manager_.PinObjectsAndWaitForFree(object_ids, std::move(results), owner_address);
   send_reply_callback(Status::OK(), nullptr, nullptr);
 }

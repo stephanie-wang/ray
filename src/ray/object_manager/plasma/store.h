@@ -79,6 +79,7 @@ class PlasmaStore {
   /// absolutely know what's going on). This method won't work correctly if it is used
   /// before the object is pinned by raylet for the first time.
   bool IsObjectSpillable(const ObjectID &object_id) LOCKS_EXCLUDED(mutex_);
+  bool IsObjectEagerSpillable(const ObjectID &object_id) LOCKS_EXCLUDED(mutex_);
 
   /// Return the plasma object bytes that are consumed by core workers.
   int64_t GetConsumedBytes();

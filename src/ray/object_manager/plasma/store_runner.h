@@ -22,6 +22,7 @@ class PlasmaStoreRunner {
              ray::DeleteObjectCallback delete_object_callback);
   void Stop();
 
+  bool IsPlasmaObjectEagerSpillable(const ObjectID &object_id);
   bool IsPlasmaObjectSpillable(const ObjectID &object_id);
 
   int64_t GetConsumedBytes();

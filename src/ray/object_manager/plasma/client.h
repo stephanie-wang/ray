@@ -150,6 +150,8 @@ class PlasmaClient {
   Status Get(const std::vector<ObjectID> &object_ids, int64_t timeout_ms,
              std::vector<ObjectBuffer> *object_buffers, bool is_from_worker);
 
+  void EagerSpillDecreaseObjectCount(const ObjectID &object_id);
+  void EagerSpillIncreaseObjectCount(const ObjectID &object_id);
   /// Tell Plasma that the client no longer needs the object. This should be
   /// called after Get() or Create() when the client is done with the object.
   /// After this call, the buffer returned by Get() is no longer valid.

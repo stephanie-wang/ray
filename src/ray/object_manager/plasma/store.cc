@@ -165,6 +165,9 @@ PlasmaError PlasmaStore::HandleCreateObjectRequest(
                    << ", data_size=" << object_info.data_size
                    << ", metadata_size=" << object_info.metadata_size
                    << ", remaining_size=" << allocator_.GetFootprintLimit() - allocator_.Allocated();
+  }else if(error == PlasmaError::OK){
+	on_object_creation_blocked_callback_(object_info.priority, object_info.object_id, false, false,
+			false, false, 0, 0);
   }
   const int64_t footprint_limit = allocator_.GetFootprintLimit();
   float allocated_percentage;
@@ -311,7 +314,7 @@ void PlasmaStore::ReleaseObject(const ObjectID &object_id,
 	    }
 		if(allocated_percentage < block_tasks_threshold_){
 		  RAY_LOG(DEBUG) << "[JAE_DEBUG] ReleaseObject unsetting block task allocated allocated_percentage is " << allocated_percentage << " tid:"<< std::this_thread::get_id();
-	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
+	      on_object_creation_blocked_callback_(ray::Priority(), ObjectID(), false, true, false, false, 0, 0);
 		  block_task_flag_.store(false, std::memory_order_release);
 	    }
       //}
@@ -487,7 +490,7 @@ Status PlasmaStore::ProcessMessage(const std::shared_ptr<Client> &client,
 	    }
 		if(allocated_percentage < block_tasks_threshold_){
 		  RAY_LOG(DEBUG) << "[JAE_DEBUG] on_object_creation_blocked_callback unsetting block task allocated allocated_percentage is " << allocated_percentage;
-	      on_object_creation_blocked_callback_(ray::Priority(), true, false, false, 0, 0);
+	      on_object_creation_blocked_callback_(ray::Priority(), ObjectID(), false, true, false, false, 0, 0);
 		  block_task_flag_.store(false, std::memory_order_release);
 	    }
       //}
@@ -589,6 +592,21 @@ void PlasmaStore::ReplyToCreateClient(const std::shared_ptr<Client> &client,
 }
 
 int64_t PlasmaStore::GetConsumedBytes() { return total_consumed_bytes_; }
+
+bool PlasmaStore::IsObjectEagerSpillable(const ObjectID &object_id) {
+  static const bool enable_eagerSpill = RayConfig::instance().enable_EagerSpill();
+  if(!enable_eagerSpill)
+    return false;
+  absl::MutexLock lock(&mutex_);
+  auto entry = object_lifecycle_mgr_.GetObject(object_id);
+  if (!entry) {
+    // Object already evicted or deleted.
+    return false;
+  }
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] obj:" << object_id << " sealed:" << entry->Sealed() << " ref:" << entry->GetRefCount();
+  //Eager spillable if driver holds a reference
+  return entry->Sealed() && entry->GetRefCount() <= 2;
+}
 
 bool PlasmaStore::IsObjectSpillable(const ObjectID &object_id) {
   absl::MutexLock lock(&mutex_);

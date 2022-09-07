@@ -180,7 +180,6 @@ cdef RayObjectsToDataMetadataPairs(
             data_metadata_pairs.append((data, metadata))
     return data_metadata_pairs
 
-
 cdef VectorToObjectRefs(const c_vector[CObjectReference] &object_refs):
     result = []
     for i in range(object_refs.size()):

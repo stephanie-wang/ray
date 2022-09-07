@@ -147,6 +147,13 @@ class SerializationContext:
             # cloudpickle directly or captured in a remote function/actor),
             # then pin the object for the lifetime of this worker by adding
             # a local reference that won't ever be removed.
+            exception_str = "[JAE_DEBUG] calling add_object_ref_reference from add_contained_object_ref"
+            logger.exception(exception_str)
+            ray._private.utils.push_error_to_driver(
+                ray.worker.global_worker,
+                "spill_objects_error",
+                traceback.format_exc() + exception_str,
+                job_id=None)
             ray.worker.global_worker.core_worker.add_object_ref_reference(
                 object_ref)
 

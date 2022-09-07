@@ -18,6 +18,8 @@
 
 #include <functional>
 
+#include "absl/container/btree_map.h"
+
 #include "ray/common/id.h"
 #include "ray/common/ray_object.h"
 #include "ray/gcs/accessor.h"
@@ -45,6 +47,8 @@ class LocalObjectManager {
       int64_t min_spilling_size, bool is_external_storage_type_fs,
       int64_t max_fused_object_count,
       std::function<void(const std::vector<ObjectID> &)> on_objects_freed,
+      std::function<void(const ray::ObjectID &, bool, bool)> store_object_count,
+      std::function<bool(const ray::ObjectID &)> is_plasma_object_eager_spillable,
       std::function<bool(const ray::ObjectID &)> is_plasma_object_spillable,
       pubsub::SubscriberInterface *core_worker_subscriber)
       : self_node_id_(node_id),
@@ -60,6 +64,8 @@ class LocalObjectManager {
         min_spilling_size_(min_spilling_size),
         num_active_workers_(0),
         max_active_workers_(max_io_workers),
+		store_object_count_(store_object_count),
+        is_plasma_object_eager_spillable_(is_plasma_object_eager_spillable),
         is_plasma_object_spillable_(is_plasma_object_spillable),
         is_external_storage_type_fs_(is_external_storage_type_fs),
         max_fused_object_count_(max_fused_object_count),
@@ -139,6 +145,11 @@ class LocalObjectManager {
 
   std::string DebugString() const;
 
+  void MapObjectIDPriority(const ObjectID &object_id, const ray::Priority priority){
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] Called";
+    objectID_to_priority_[object_id] = priority;
+  }
+  bool DeleteEagerSpilledObjects();
  private:
   FRIEND_TEST(LocalObjectManagerTest, TestSpillObjectsOfSize);
   FRIEND_TEST(LocalObjectManagerTest, TestSpillUptoMaxFuseCount);
@@ -259,6 +270,9 @@ class LocalObjectManager {
   /// The max number of active spill workers.
   const int64_t max_active_workers_;
 
+  std::function<void(const ray::ObjectID &, bool, bool)> store_object_count_;
+
+  std::function<bool(const ray::ObjectID &)> is_plasma_object_eager_spillable_;
   /// Callback to check if a plasma object is pinned in workers.
   /// Return true if unpinned, meaning we can safely spill the object. False otherwise.
   std::function<bool(const ray::ObjectID &)> is_plasma_object_spillable_;
@@ -311,10 +325,21 @@ class LocalObjectManager {
   int64_t last_restore_log_ns_ = 0;
 
   void EagerSpill();
+  bool EagerSpillObjectsOfSize(int64_t num_bytes_to_spill);
+  void EagerSpillObjectsInternal(const std::vector<ObjectID> &objects_ids,
+                            std::function<void(const ray::Status &)> callback);
+  void OnObjectEagerSpilled(const std::vector<ObjectID> &object_ids,
+                       const rpc::SpillObjectsReply &worker_reply);
   bool eager_spill_running_ = false;
   // Replicas of pinned_objects_ sorted by Priority
   absl::btree_map<ray::Priority, ObjectID>
       pinned_objects_prioity_;
+  absl::flat_hash_map<ObjectID, std::pair<std::unique_ptr<RayObject>, rpc::Address>>
+      objects_pending_eager_spill_;
+  absl::flat_hash_map<ObjectID, std::pair<size_t, rpc::Address>> eager_spilled_objects_;
+  absl::flat_hash_map<ObjectID, ray::Priority> objectID_to_priority_;
+  absl::flat_hash_set<ObjectID>
+      expired_objects_;
 };
 
 };  // namespace raylet

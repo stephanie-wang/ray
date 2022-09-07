@@ -217,6 +217,7 @@ void DependencyManager::RemoveTaskDependencies(const TaskID &task_id) {
   for (const auto &obj_id : task_entry->second.dependencies) {
     auto it = required_objects_.find(obj_id);
     RAY_CHECK(it != required_objects_.end());
+    RAY_LOG(DEBUG) << "[JAE_DEBUG] calling RemoveObjectIfNotNeeded for object: " << obj_id;
     it->second.dependent_tasks.erase(task_id);
     RemoveObjectIfNotNeeded(it);
   }

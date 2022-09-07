@@ -1178,6 +1178,7 @@ Status CoreWorker::CreateOwned(const std::shared_ptr<Buffer> &metadata,
     // a `WaitForRefRemoved` RPC request will be sent back to
     // the current worker. So we need to make sure ref count is > 0
     // by invoking `AddLocalReference` first.
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] CreateOwned call AddLocalReference";
     AddLocalReference(*object_id);
     RAY_UNUSED(reference_counter_->AddBorrowedObject(*object_id, ObjectID::Nil(),
                                                      real_owner_address));
@@ -2368,6 +2369,7 @@ Status CoreWorker::PinExistingReturnObject(const ObjectID &return_id,
 
   // Temporarily set the return object's owner's address. This is needed to retrieve the
   // value from plasma.
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] PinExistingReturnObject call AddLocalReference";
   reference_counter_->AddLocalReference(return_id, "<temporary (pin return object)>");
   reference_counter_->AddBorrowedObject(return_id, ObjectID::Nil(), owner_address);
 
@@ -2465,7 +2467,7 @@ Status CoreWorker::GetAndPinArgsForExecutor(const TaskSpecification &task,
       // Pin all args passed by reference for the duration of the task.  This
       // ensures that when the task completes, we can retrieve metadata about
       // any borrowed ObjectIDs that were serialized in the argument's value.
-      RAY_LOG(DEBUG) << "Incrementing ref for argument ID " << arg_id;
+      RAY_LOG(DEBUG) << " AddLocalReference Incrementing ref for argument ID " << arg_id;
       reference_counter_->AddLocalReference(arg_id, task.CallSiteString());
       // Attach the argument's owner's address. This is needed to retrieve the
       // value from plasma.
@@ -2497,7 +2499,7 @@ Status CoreWorker::GetAndPinArgsForExecutor(const TaskSpecification &task,
       // time it finishes.
       for (const auto &inlined_ref : task.ArgInlinedRefs(i)) {
         const auto inlined_id = ObjectID::FromBinary(inlined_ref.object_id());
-        RAY_LOG(DEBUG) << "Incrementing ref for borrowed ID " << inlined_id;
+        RAY_LOG(DEBUG) << " AddLocalReference Incrementing ref for borrowed ID " << inlined_id;
         // We do not need to add the ownership information here because it will
         // get added once the language frontend deserializes the value, before
         // the ObjectID can be used.
@@ -2636,7 +2638,7 @@ void CoreWorker::HandleGetObjectStatus(const rpc::GetObjectStatusRequest &reques
   }
 
   ObjectID object_id = ObjectID::FromBinary(request.object_id());
-  RAY_LOG(DEBUG) << "Received GetObjectStatus " << object_id;
+  RAY_LOG(DEBUG) << " AddLocalReference Received GetObjectStatus " << object_id;
   // Acquire a reference to the object. This prevents the object from being
   // evicted out from under us while we check the object status and start the
   // Get.
@@ -3086,10 +3088,19 @@ void CoreWorker::HandleLocalGC(const rpc::LocalGCRequest &request,
 void CoreWorker::HandleSpillObjects(const rpc::SpillObjectsRequest &request,
                                     rpc::SpillObjectsReply *reply,
                                     rpc::SendReplyCallback send_reply_callback) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] HandleSpillObjects called";
+  static const bool enable_eagerSpill = RayConfig::instance().enable_EagerSpill();
   if (options_.spill_objects != nullptr) {
     auto object_refs =
         VectorFromProtobuf<rpc::ObjectReference>(request.object_refs_to_spill());
+	if(enable_eagerSpill){
+	  for(auto ref: object_refs){
+	    reference_counter_->EagerSpillIncreaseLocalReference(ObjectID::FromBinary(ref.object_id()));
+	  }
+	}
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] calling options_.spill_objects ";
     std::vector<std::string> object_urls = options_.spill_objects(object_refs);
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] options_.spill_objects called";
     for (size_t i = 0; i < object_urls.size(); i++) {
       reply->add_spilled_objects_url(std::move(object_urls[i]));
     }
@@ -3103,9 +3114,13 @@ void CoreWorker::HandleSpillObjects(const rpc::SpillObjectsRequest &request,
 void CoreWorker::HandleAddSpilledUrl(const rpc::AddSpilledUrlRequest &request,
                                      rpc::AddSpilledUrlReply *reply,
                                      rpc::SendReplyCallback send_reply_callback) {
+  static const bool enable_eagerSpill = RayConfig::instance().enable_EagerSpill();
   const ObjectID object_id = ObjectID::FromBinary(request.object_id());
   const std::string &spilled_url = request.spilled_url();
   const NodeID node_id = NodeID::FromBinary(request.spilled_node_id());
+  if(enable_eagerSpill){
+    reference_counter_->EagerSpillDecreaseLocalReference(object_id);
+  }
   RAY_LOG(DEBUG) << "Received AddSpilledUrl request for object " << object_id
                  << ", which has been spilled to " << spilled_url << " on node "
                  << node_id;
