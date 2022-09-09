@@ -1232,31 +1232,35 @@ bool ClusterTaskManager::ReturnCpuResourcesToBlockedWorker(
 }
 
 void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t first_pending_obj_size,
-	 			ObjectManager &object_manager_, instrumented_io_context &io_service_){
-  bool enable_deadlock1 = RayConfig::instance().enable_Deadlock1();
-  bool enable_deadlock2 = RayConfig::instance().enable_Deadlock2();
+	 			LocalObjectManager &local_object_manager, instrumented_io_context &io_service_){
+  static const bool enable_eagerSpill = RayConfig::instance().enable_EagerSpill();
+  static const bool enable_deadlock1 = RayConfig::instance().enable_Deadlock1();
+  static const bool enable_deadlock2 = RayConfig::instance().enable_Deadlock2();
   static Priority init_priority;
   //Deadlock #1
-  RAY_LOG(DEBUG) << "[" << __func__ << "] called (" << num_spinning_workers <<"/" << leased_workers_.size() <<") spinning";
   if(enable_deadlock1 && num_spinning_workers && num_spinning_workers == leased_workers_.size()){
 	RAY_LOG(DEBUG) << "[" << __func__ << "] All leased workers are spinning ";
-	io_service_.post([&object_manager_](){
-	  object_manager_.SetShouldSpill(true);
-	},"");
+	if(enable_eagerSpill){
+	  io_service_.post([this](){
+	    object_manager_.SetShouldSpill(true);
+	  },"");
+	}else{
+	  local_object_manager.DeleteEagerSpilledObjects(true);
+	}
 	BlockTasks(init_priority, io_service_);
   }else{
-	if(!enable_deadlock2)
+	if(!enable_deadlock2){
+      if(enable_eagerSpill){
+	    local_object_manager.DeleteEagerSpilledObjects(true);
+	  }
 	  return;
+	}
   //Deadlock Detection #2
 	std::vector<const ObjectID*> objects_in_obj_store;
 	int64_t free_memory = object_manager_.GetObjectsInObjectStore(&objects_in_obj_store);
 	//No Objects in the object store == No GCable object
 	if(objects_in_obj_store.empty()){
 	  RAY_LOG(DEBUG) << "[" << __func__ << "] Object Store is empty ";
-	  return;
-	  io_service_.post([&object_manager_](){
-		object_manager_.SetShouldSpill(true);
-	  },"");
 	  BlockTasks(init_priority, io_service_);
 	  return;
 	}
@@ -1266,27 +1270,32 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	rpc::GetObjectWorkingSetRequest request;
 	for(size_t i=0; i< objects_in_obj_store.size(); i++){
 	  request.add_object_ids(objects_in_obj_store[i]->Binary());
-	  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC ObjectIDs " << objects_in_obj_store[i];
 	}
-	conn->GetObjectWorkingSet(request,  [&object_manager_, &io_service_, this, first_pending_obj_size, free_memory]
-							  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
-		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is called " << reply.gcable_object_ids_size();
-							  int64_t gcable_size = free_memory;
-							  for(int i=0; i<reply.gcable_object_ids_size(); i++){
-								TaskID task_id = TaskID::FromBinary(reply.gcable_object_ids(i));
-								gcable_size += object_manager_.GetTaskObjectSize(task_id);
-							  }
-							  bool is_deadlock = false;
-							  if(first_pending_obj_size > gcable_size){
-								is_deadlock = true;
-								//TODO(Jae) Change this to turn off backpressure 
-	  							BlockTasks(init_priority, io_service_);
-							  }
-		  RAY_LOG(DEBUG) << "[" << __func__ << "] RPC reply is Deadlock " << is_deadlock << " gcable size:"<<gcable_size << " first pending object size:" << first_pending_obj_size;
-							  io_service_.post([&object_manager_, is_deadlock](){
-								object_manager_.SetShouldSpill(is_deadlock);
-							  },"");
-							});
+	conn->GetObjectWorkingSet(request, 
+			[&io_service_, &local_object_manager, this, first_pending_obj_size, free_memory]
+	  (const Status &status, const rpc::GetObjectWorkingSetReply &reply){
+	  int64_t gcable_size = free_memory;
+	  for(int i=0; i<reply.gcable_object_ids_size(); i++){
+		TaskID task_id = TaskID::FromBinary(reply.gcable_object_ids(i));
+		gcable_size += object_manager_.GetTaskObjectSize(task_id);
+	  }
+	  bool is_deadlock = false;
+	  if(first_pending_obj_size > gcable_size){
+		is_deadlock = true;
+		//TODO(Jae) Change this to turn off backpressure 
+		BlockTasks(init_priority, io_service_);
+	  }
+	  RAY_LOG(DEBUG)<<"["<< __func__<<"] RPC reply Deadlock: "<<is_deadlock<<" gcable size:"
+	  <<gcable_size << " first pending object size:" << first_pending_obj_size;
+
+	  if(enable_eagerSpill){
+	    local_object_manager.DeleteEagerSpilledObjects(true);
+	  }else{
+	    io_service_.post([this, is_deadlock](){
+		  object_manager_.SetShouldSpill(is_deadlock);
+	    },"");
+	  }
+	});
   }
 }
 
@@ -1319,7 +1328,8 @@ bool ClusterTaskManager::EvictTasks(Priority base_priority) {
 
 void ClusterTaskManager::BlockTasks(Priority base_priority, instrumented_io_context &io_service_) {
   static Priority init_priority;
-  if(RayConfig::instance().enable_BlockTasks()){
+  static const bool enable_blockTasks = RayConfig::instance().enable_BlockTasks();
+  if(enable_blockTasks){
     block_requested_priority_ = base_priority;
     if(base_priority == init_priority && task_blocked_){
 	  io_service_.post([this](){

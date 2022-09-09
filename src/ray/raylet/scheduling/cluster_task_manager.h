@@ -112,7 +112,7 @@ class ClusterTaskManager : public ClusterTaskManagerInterface {
   //Block new tasks from being scheduled with this priority
   void BlockTasks(Priority, instrumented_io_context &io_service_) override;
   bool EvictTasks(Priority) override;
-  void CheckDeadlock(size_t, int64_t first_pending_obj_size, ObjectManager &object_manger_,
+  void CheckDeadlock(size_t, int64_t first_pending_obj_size, LocalObjectManager &local_object_manager,
 		  instrumented_io_context &io_service_) override;
 
   /// (Step 1) Queue tasks and schedule.

@@ -3093,6 +3093,7 @@ void CoreWorker::HandleSpillObjects(const rpc::SpillObjectsRequest &request,
   if (options_.spill_objects != nullptr) {
     auto object_refs =
         VectorFromProtobuf<rpc::ObjectReference>(request.object_refs_to_spill());
+	//Increase reference so the eager spilled objects will not be evicted
 	if(enable_eagerSpill){
 	  for(auto ref: object_refs){
 	    reference_counter_->EagerSpillIncreaseLocalReference(ObjectID::FromBinary(ref.object_id()));
@@ -3165,6 +3166,7 @@ void CoreWorker::HandleRestoreSpilledObjects(
 void CoreWorker::HandleDeleteSpilledObjects(
     const rpc::DeleteSpilledObjectsRequest &request,
     rpc::DeleteSpilledObjectsReply *reply, rpc::SendReplyCallback send_reply_callback) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] calling delete_spilled_objects ";
   if (options_.delete_spilled_objects != nullptr) {
     std::vector<std::string> spilled_objects_url;
     spilled_objects_url.reserve(request.spilled_objects_url_size());

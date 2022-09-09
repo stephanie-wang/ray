@@ -302,6 +302,7 @@ int PlasmaStore::RemoveFromClientObjectIds(const ObjectID &object_id,
 
 void PlasmaStore::ReleaseObject(const ObjectID &object_id,
                                 const std::shared_ptr<Client> &client) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] ReleaseObject called";
   auto entry = object_lifecycle_mgr_.GetObject(object_id);
   RAY_CHECK(entry != nullptr);
   // Remove the client from the object's array of clients.

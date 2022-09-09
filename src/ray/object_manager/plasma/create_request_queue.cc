@@ -352,9 +352,8 @@ Status CreateRequestQueue::ProcessRequests() {
           FinishRequest(queue_it);
         }
 	  }else{
-//spill_objects_callback_();
 	    on_object_creation_blocked_callback_(lowest_pri, ObjectID(), true, false, 
-		      false, false, 0, 0);
+		      false, false, enable_blocktasks_spill, 0);
           return Status::ObjectStoreFull("Waiting for grace period.");
 	  }
     }

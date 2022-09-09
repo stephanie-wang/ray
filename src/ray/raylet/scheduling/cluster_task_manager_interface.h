@@ -17,6 +17,7 @@
 #include "ray/raylet/worker.h"
 #include "ray/rpc/server_call.h"
 #include "src/ray/protobuf/node_manager.pb.h"
+#include "ray/raylet/local_object_manager.h"
 
 namespace ray {
 namespace raylet {
@@ -95,7 +96,7 @@ class ClusterTaskManagerInterface {
   /// false if the task is already running.
   virtual void BlockTasks(Priority, instrumented_io_context&) = 0;
   virtual bool EvictTasks(Priority) = 0;
-  virtual void CheckDeadlock(size_t, int64_t,  ObjectManager&, instrumented_io_context&) = 0;
+  virtual void CheckDeadlock(size_t, int64_t,  LocalObjectManager&, instrumented_io_context&) = 0;
   virtual bool CancelTask(const TaskID &task_id,
                           bool runtime_env_setup_failed = false) = 0;
 

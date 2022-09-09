@@ -149,7 +149,7 @@ class LocalObjectManager {
 	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] Called";
     objectID_to_priority_[object_id] = priority;
   }
-  bool DeleteEagerSpilledObjects();
+  bool DeleteEagerSpilledObjects(bool delete_all);
  private:
   FRIEND_TEST(LocalObjectManagerTest, TestSpillObjectsOfSize);
   FRIEND_TEST(LocalObjectManagerTest, TestSpillUptoMaxFuseCount);
@@ -332,14 +332,13 @@ class LocalObjectManager {
                        const rpc::SpillObjectsReply &worker_reply);
   bool eager_spill_running_ = false;
   // Replicas of pinned_objects_ sorted by Priority
-  absl::btree_map<ray::Priority, ObjectID>
-      pinned_objects_prioity_;
+  absl::btree_map<ray::Priority, ObjectID> pinned_objects_prioity_;
+  absl::flat_hash_map<ObjectID, ray::Priority> objectID_to_priority_;
   absl::flat_hash_map<ObjectID, std::pair<std::unique_ptr<RayObject>, rpc::Address>>
       objects_pending_eager_spill_;
   absl::flat_hash_map<ObjectID, std::pair<size_t, rpc::Address>> eager_spilled_objects_;
-  absl::flat_hash_map<ObjectID, ray::Priority> objectID_to_priority_;
-  absl::flat_hash_set<ObjectID>
-      expired_objects_;
+  absl::flat_hash_set<ObjectID> expired_objects_;
+  absl::flat_hash_set<ObjectID> freed_during_eager_spill_;
 };
 
 };  // namespace raylet

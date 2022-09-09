@@ -230,10 +230,6 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           [this](const Priority &base_priority, const ObjectID &object_id,
 		    bool delete_eager_spilled_objects, bool block_tasks,
             bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
-			if(delete_eager_spilled_objects){
-		      local_object_manager_.DeleteEagerSpilledObjects();
-			  return;
-			}
 			if(!block_tasks && !evict_tasks && !block_spill && num_spinning_workers == 0 && pending_size == 0){
 			  local_object_manager_.MapObjectIDPriority(object_id, base_priority);
 			}
@@ -245,24 +241,35 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
                 RAY_LOG(DEBUG) << "[" << __func__ << "] all workers are spinning: " << num_spinning_workers;
                 if(evict_tasks){
                   if(cluster_task_manager_->EvictTasks(base_priority)){
-                RAY_LOG(DEBUG) << "[" << __func__ << "] EvictTasks Return true: ";
-			        io_service_.post([this](){
-			 	      object_manager_.SetShouldSpill(true);
-				    },"");
+					if(delete_eager_spilled_objects){
+		              local_object_manager_.DeleteEagerSpilledObjects(true);
+					}else{
+			          io_service_.post([this](){
+			 	        object_manager_.SetShouldSpill(true);
+				      },"");
+					}
 				    return;
 			      }else{
-                RAY_LOG(DEBUG) << "[" << __func__ << "] EvictTasks destroyed workers num_workers now: "<< worker_pool_.GetAllRegisteredWorkersNum();
+                    RAY_LOG(DEBUG) << "[" << __func__ << 
+						"] EvictTasks destroyed workers num_workers now: "<< worker_pool_.GetAllRegisteredWorkersNum();
 				  }
                 }else{
-			      io_service_.post([this](){
-			        object_manager_.SetShouldSpill(true);
-			      },"");
+					if(delete_eager_spilled_objects){
+		              local_object_manager_.DeleteEagerSpilledObjects(true);
+					}else{
+			          io_service_.post([this](){
+			 	        object_manager_.SetShouldSpill(true);
+				      },"");
+					}
  			      return;
 				}
 			  }
 			}
             if(block_spill){
-			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, object_manager_, io_service_);
+			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, local_object_manager_, io_service_);
+			}else if(delete_eager_spilled_objects){
+		      local_object_manager_.DeleteEagerSpilledObjects(true);
+			  return;
 			}
 		  },
           /*object_store_full_callback=*/
