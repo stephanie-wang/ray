@@ -86,8 +86,12 @@ void LocalObjectManager::PinObjectsAndWaitForFree(const std::vector<ObjectID> &o
 }
 
 void LocalObjectManager::EagerSpill() {
+	/*
   if (eager_spill_running_ || !objects_pending_eager_spill_.empty()
 		  || RayConfig::instance().object_spilling_config().empty()) {
+		  */
+  if (eager_spill_running_ || 
+		  RayConfig::instance().object_spilling_config().empty()) {
     return;
   }
   eager_spill_running_ = true;
@@ -350,6 +354,7 @@ void LocalObjectManager::EagerSpillObjectsInternal(
 	  //eager_spilled_objects_.insert(id);
       pinned_objects_.erase(it);
       pinned_objects_size_ -= object_size;
+	  pinned_objects_prioity_.erase(objectID_to_priority_[id]);
     }
   }
 
@@ -388,7 +393,9 @@ void LocalObjectManager::EagerSpillObjectsInternal(
                 auto it = objects_pending_eager_spill_.find(object_id);
                 RAY_CHECK(it != objects_pending_eager_spill_.end());
                 pinned_objects_size_ += it->second.first->GetSize();
+				RAY_LOG(DEBUG) << "[JAE_DEBUG] eager spilling error for obj: " << object_id;
                 pinned_objects_.emplace(object_id, std::move(it->second));
+	  			pinned_objects_prioity_.emplace(objectID_to_priority_[object_id], object_id);
 		        eager_spilled_objects_.erase(object_id);
                 objects_pending_eager_spill_.erase(it);
               }
@@ -507,11 +514,17 @@ bool LocalObjectManager::DeleteEagerSpilledObjects(bool delete_all){
        const ObjectID &object_id = eager_spilled_it.first;
         RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteEagerSpilledObjects deleting " << object_id;
 	    pinned_objects_.erase(object_id);
+        pinned_objects_prioity_.erase(objectID_to_priority_[object_id]);
         store_object_count_(object_id, false, true);
 	  }
 	  eager_spilled_objects_.clear();
 	}else{
       //TODO(Jae) Ski-Rental
+	}
+	if(!ret){
+      RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteEagerSpilledObjects nothing to delete pinned:" 
+		  << pinned_objects_.size() << " eager_spilled:" << eager_spilled_objects_.size() 
+		  <<" pending_eager_spill:"<< objects_pending_eager_spill_.size();
 	}
 	return ret;
 }
