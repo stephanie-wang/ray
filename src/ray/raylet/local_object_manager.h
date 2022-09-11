@@ -330,9 +330,11 @@ class LocalObjectManager {
                             std::function<void(const ray::Status &)> callback);
   void OnObjectEagerSpilled(const std::vector<ObjectID> &object_ids,
                        const rpc::SpillObjectsReply &worker_reply);
+  void RemovePinnedObjects(const ObjectID &object_id, size_t);
+
   bool eager_spill_running_ = false;
   // Replicas of pinned_objects_ sorted by Priority
-  absl::btree_map<ray::Priority, ObjectID> pinned_objects_prioity_;
+  absl::btree_map<ray::Priority, absl::flat_hash_set<ObjectID> > pinned_objects_prioity_;
   absl::flat_hash_map<ObjectID, ray::Priority> objectID_to_priority_;
   absl::flat_hash_map<ObjectID, std::pair<std::unique_ptr<RayObject>, rpc::Address>>
       objects_pending_eager_spill_;

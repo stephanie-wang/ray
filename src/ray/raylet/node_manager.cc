@@ -230,8 +230,11 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
           [this](const Priority &base_priority, const ObjectID &object_id,
 		    bool delete_eager_spilled_objects, bool block_tasks,
             bool evict_tasks, bool block_spill, size_t num_spinning_workers, int64_t pending_size) {
-			if(!block_tasks && !evict_tasks && !block_spill && num_spinning_workers == 0 && pending_size == 0){
+			static const ObjectID default_object_id = ObjectID();
+			static const Priority default_priority = Priority();
+			if(object_id != default_object_id && base_priority != default_priority){
 			  local_object_manager_.MapObjectIDPriority(object_id, base_priority);
+			  return;
 			}
             if(block_tasks){
               cluster_task_manager_->BlockTasks(base_priority, io_service_);
@@ -242,7 +245,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
                 if(evict_tasks){
                   if(cluster_task_manager_->EvictTasks(base_priority)){
 					if(delete_eager_spilled_objects){
-		              local_object_manager_.DeleteEagerSpilledObjects(true);
+			          io_service_.post([this](){
+		                local_object_manager_.DeleteEagerSpilledObjects(true);
+				      },"");
 					}else{
 			          io_service_.post([this](){
 			 	        object_manager_.SetShouldSpill(true);
@@ -255,7 +260,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 				  }
                 }else{
 					if(delete_eager_spilled_objects){
-		              local_object_manager_.DeleteEagerSpilledObjects(true);
+			          io_service_.post([this](){
+		                local_object_manager_.DeleteEagerSpilledObjects(true);
+				      },"");
 					}else{
 			          io_service_.post([this](){
 			 	        object_manager_.SetShouldSpill(true);
@@ -268,7 +275,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
             if(block_spill){
 			  cluster_task_manager_->CheckDeadlock(num_spinning_workers, pending_size, local_object_manager_, io_service_);
 			}else if(delete_eager_spilled_objects){
-		      local_object_manager_.DeleteEagerSpilledObjects(true);
+			  io_service_.post([this](){
+				local_object_manager_.DeleteEagerSpilledObjects(true);
+			  },"");
 			  return;
 			}
 		  },

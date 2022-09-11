@@ -354,6 +354,7 @@ Status CreateRequestQueue::ProcessRequests() {
 	  }else{
 	    on_object_creation_blocked_callback_(lowest_pri, ObjectID(), true, false, 
 		      false, false, enable_blocktasks_spill, 0);
+	   RAY_LOG(DEBUG) << "[JAE_DEBUG] delete eager spilled objects called from ProcessRequests: ";
           return Status::ObjectStoreFull("Waiting for grace period.");
 	  }
     }

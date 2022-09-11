@@ -25,7 +25,7 @@ namespace raylet {
 void LocalObjectManager::PinObjectsAndWaitForFree(const std::vector<ObjectID> &object_ids,
                                     std::vector<std::unique_ptr<RayObject>> &&objects,
                                     const rpc::Address &owner_address) {
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] Called";
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] Called :" << object_ids.size();
   static const bool enable_eagerSpill = RayConfig::instance().enable_EagerSpill();
   for (size_t i = 0; i < object_ids.size(); i++) {
     const auto &object_id = object_ids[i];
@@ -43,7 +43,7 @@ void LocalObjectManager::PinObjectsAndWaitForFree(const std::vector<ObjectID> &o
     RAY_LOG(DEBUG) << "Pinning object " << object_id;
     pinned_objects_size_ += object->GetSize();
     pinned_objects_.emplace(object_id, std::make_pair(std::move(object), owner_address));
-	pinned_objects_prioity_.emplace(objectID_to_priority_[object_id], object_id);
+    pinned_objects_prioity_[objectID_to_priority_[object_id]].insert(object_id);
 
     // Create a object eviction subscription message.
     auto wait_request = std::make_unique<rpc::WorkerObjectEvictionSubMessage>();
@@ -116,9 +116,7 @@ void LocalObjectManager::ReleaseFreedObject(const ObjectID &object_id) {
   spilled_object_pending_delete_.push(object_id);
 
   if (pinned_objects_.count(object_id)) {
-    pinned_objects_size_ -= pinned_objects_[object_id].first->GetSize();
-    pinned_objects_.erase(object_id);
-	pinned_objects_prioity_.erase(objectID_to_priority_[object_id]);
+	RemovePinnedObjects(object_id, pinned_objects_[object_id].first->GetSize());
 	objectID_to_priority_.erase(object_id);
   }
 
@@ -214,14 +212,19 @@ bool LocalObjectManager::EagerSpillObjectsOfSize(int64_t num_bytes_to_spill) {
   RAY_LOG(DEBUG) << "Choosing objects to eager-spill from priority of total size " << num_bytes_to_spill;
   while (bytes_to_spill <= num_bytes_to_spill && it_priority != pinned_objects_prioity_.rend() &&
          counts < max_fused_object_count_) {
-	auto &obj_id = it_priority->second;
-  RAY_LOG(DEBUG) << "obj: " << obj_id << " spillable:" << is_plasma_object_eager_spillable_(obj_id);
-    if (is_plasma_object_eager_spillable_(obj_id)) {
-      bytes_to_spill += pinned_objects_[obj_id].first->GetSize();
-      objects_to_spill.push_back(obj_id);
-    }
+	auto it = it_priority->second.begin();
+    while(bytes_to_spill <= num_bytes_to_spill && it!= it_priority->second.end() &&
+         counts < max_fused_object_count_){
+      const ObjectID &obj_id = *it;
+      RAY_LOG(DEBUG) << "obj: " << obj_id << " spillable:" << is_plasma_object_eager_spillable_(obj_id);
+      if (is_plasma_object_eager_spillable_(obj_id)) {
+        bytes_to_spill += pinned_objects_[obj_id].first->GetSize();
+        objects_to_spill.push_back(obj_id);
+      }
+	  it++;
+	  counts++;
+	}
     it_priority++;
-    counts += 1;
   }
   if (!objects_to_spill.empty()) {
     RAY_LOG(DEBUG) << "Eager Spilling objects of total size " << bytes_to_spill
@@ -320,6 +323,21 @@ void LocalObjectManager::SpillObjects(const std::vector<ObjectID> &object_ids,
   SpillObjectsInternal(object_ids, callback);
 }
 
+void LocalObjectManager::RemovePinnedObjects(const ObjectID &object_id, size_t size){
+  const auto it = pinned_objects_.find(object_id);
+  if(it != pinned_objects_.end()){
+    pinned_objects_size_ -= size;
+    pinned_objects_.erase(object_id);
+  }else{
+	RAY_LOG(DEBUG) << "[JAE_DEBUG] [" << __func__ << "] Error pinned_object not found:";
+  }
+  ray::Priority &pri = objectID_to_priority_[object_id];
+  pinned_objects_prioity_[pri].erase(object_id);
+  if(pinned_objects_prioity_[pri].size() == 0){
+    pinned_objects_prioity_.erase(pri);
+  }
+}
+
 void LocalObjectManager::EagerSpillObjectsInternal(
     const std::vector<ObjectID> &object_ids,
     std::function<void(const ray::Status &)> callback) {
@@ -347,14 +365,12 @@ void LocalObjectManager::EagerSpillObjectsInternal(
       store_object_count_(id, true, false);
 
       // Move a pinned object to the pending spill object.
-      auto object_size = it->second.first->GetSize();
+      size_t object_size = it->second.first->GetSize();
       num_bytes_pending_spill_ += object_size;
-      objects_pending_eager_spill_[id] = std::move(it->second);
 
 	  //eager_spilled_objects_.insert(id);
-      pinned_objects_.erase(it);
-      pinned_objects_size_ -= object_size;
-	  pinned_objects_prioity_.erase(objectID_to_priority_[id]);
+      objects_pending_eager_spill_[id] = std::move(it->second);
+	  RemovePinnedObjects(id, object_size);
     }
   }
 
@@ -392,10 +408,10 @@ void LocalObjectManager::EagerSpillObjectsInternal(
                 const auto &object_id = objects_to_spill[i];
                 auto it = objects_pending_eager_spill_.find(object_id);
                 RAY_CHECK(it != objects_pending_eager_spill_.end());
-                pinned_objects_size_ += it->second.first->GetSize();
 				RAY_LOG(DEBUG) << "[JAE_DEBUG] eager spilling error for obj: " << object_id;
+                pinned_objects_size_ += it->second.first->GetSize();
                 pinned_objects_.emplace(object_id, std::move(it->second));
-	  			pinned_objects_prioity_.emplace(objectID_to_priority_[object_id], object_id);
+                pinned_objects_prioity_[objectID_to_priority_[object_id]].insert(object_id);
 		        eager_spilled_objects_.erase(object_id);
                 objects_pending_eager_spill_.erase(it);
               }
@@ -513,9 +529,9 @@ bool LocalObjectManager::DeleteEagerSpilledObjects(bool delete_all){
 	    ret = true;
        const ObjectID &object_id = eager_spilled_it.first;
         RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteEagerSpilledObjects deleting " << object_id;
-	    pinned_objects_.erase(object_id);
-        pinned_objects_prioity_.erase(objectID_to_priority_[object_id]);
+		RemovePinnedObjects(object_id, eager_spilled_it.second.first);
         store_object_count_(object_id, false, true);
+        RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteEagerSpilledObjects deleted " << object_id;
 	  }
 	  eager_spilled_objects_.clear();
 	}else{
@@ -531,7 +547,7 @@ bool LocalObjectManager::DeleteEagerSpilledObjects(bool delete_all){
 
 void LocalObjectManager::OnObjectEagerSpilled(const std::vector<ObjectID> &object_ids,
                                          const rpc::SpillObjectsReply &worker_reply) {
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] OnObjectEagerSpilled called";
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] OnObjectEagerSpilled called #objs:"<<worker_reply.spilled_objects_url_size();
   std::vector<std::string> object_url_to_delete;
   for (size_t i = 0; i < static_cast<size_t>(worker_reply.spilled_objects_url_size());
        ++i) {
@@ -564,7 +580,7 @@ void LocalObjectManager::OnObjectEagerSpilled(const std::vector<ObjectID> &objec
     num_bytes_pending_spill_ -= object_size;
 	eager_spilled_objects_.emplace(object_id, std::make_pair(it->second.first->GetSize(), it->second.second));
     objects_pending_eager_spill_.erase(it);
-	pinned_objects_prioity_.erase(objectID_to_priority_[object_id]);
+	RemovePinnedObjects(object_id, object_size);
 	objectID_to_priority_.erase(object_id);
 	if(freed_during_eager_spill_.contains(object_id)){
 	  object_url_to_delete.emplace_back(object_url);

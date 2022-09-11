@@ -1245,13 +1245,17 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	    object_manager_.SetShouldSpill(true);
 	  },"");
 	}else{
-	  local_object_manager.DeleteEagerSpilledObjects(true);
+	  io_service_.post([&local_object_manager, this](){
+	    local_object_manager.DeleteEagerSpilledObjects(true);
+	  },"");
 	}
 	BlockTasks(init_priority, io_service_);
   }else{
 	if(!enable_deadlock2){
       if(enable_eagerSpill){
-	    local_object_manager.DeleteEagerSpilledObjects(true);
+	    io_service_.post([&local_object_manager, this](){
+	      local_object_manager.DeleteEagerSpilledObjects(true);
+	    },"");
 	  }
 	  return;
 	}
@@ -1289,7 +1293,9 @@ void ClusterTaskManager::CheckDeadlock(size_t num_spinning_workers, int64_t firs
 	  <<gcable_size << " first pending object size:" << first_pending_obj_size;
 
 	  if(enable_eagerSpill){
-	    local_object_manager.DeleteEagerSpilledObjects(true);
+	    io_service_.post([&local_object_manager, this, is_deadlock](){
+	      local_object_manager.DeleteEagerSpilledObjects(is_deadlock);
+	    },"");
 	  }else{
 	    io_service_.post([this, is_deadlock](){
 		  object_manager_.SetShouldSpill(is_deadlock);

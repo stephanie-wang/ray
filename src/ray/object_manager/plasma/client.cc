@@ -565,6 +565,7 @@ Status PlasmaClient::Impl::Release(const ObjectID &object_id) {
 
   // If the client is already disconnected, ignore release requests.
   if (!store_conn_) {
+    RAY_LOG(DEBUG) << "[JAE_DEBUG] [Release] no connection";
     return Status::OK();
   }
   auto object_entry = objects_in_use_.find(object_id);
@@ -611,8 +612,8 @@ Status PlasmaClient::Impl::Contains(const ObjectID &object_id, bool *has_object)
 }
 
 Status PlasmaClient::Impl::Seal(const ObjectID &object_id) {
-  std::lock_guard<std::recursive_mutex> guard(client_mutex_);
   RAY_LOG(DEBUG) << "[JAE_DEBUG] Seal called";
+  std::lock_guard<std::recursive_mutex> guard(client_mutex_);
 
   // Make sure this client has a reference to the object before sending the
   // request to Plasma.
@@ -669,6 +670,7 @@ Status PlasmaClient::Impl::Abort(const ObjectID &object_id) {
 }
 
 Status PlasmaClient::Impl::Delete(const std::vector<ObjectID> &object_ids) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] Delete called";
   std::lock_guard<std::recursive_mutex> guard(client_mutex_);
 
   std::vector<ObjectID> not_in_use_ids;
@@ -695,6 +697,7 @@ Status PlasmaClient::Impl::Delete(const std::vector<ObjectID> &object_ids) {
 }
 
 Status PlasmaClient::Impl::Evict(int64_t num_bytes, int64_t &num_bytes_evicted) {
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] Evict called";
   std::lock_guard<std::recursive_mutex> guard(client_mutex_);
 
   // Send a request to the store to evict objects.
