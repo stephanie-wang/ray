@@ -286,14 +286,14 @@ void ReferenceCounter::RemoveLocalReference(const ObjectID &object_id,
 
 Priority& ReferenceCounter::GetObjectPriority(const ObjectID &object_id){
   absl::MutexLock lock(&mutex_);
-  auto it = object_id_priority_.find(object_id);
+  auto it = task_id_priority_.find(object_id.TaskId());
   RAY_LOG(DEBUG) << "[JAE_DEBUG] GetObjectPriority object: " << object_id <<
-	  " Priority: " << object_id_priority_[object_id];
+	  " Priority: " << task_id_priority_[object_id.TaskId()];
   /*
   RAY_CHECK(it != object_id_priority_.end()) << "Object priority not found " << object_id
 	  <<" count:" << object_id_priority_.count(object_id);
 	  */
-  RAY_CHECK(object_id_priority_.count(object_id) > 0) << "Object priority not found " << object_id;
+  RAY_CHECK(task_id_priority_.count(object_id.TaskId()) > 0) << "Object priority not found " << object_id;
   return it->second;
 }
 
@@ -301,7 +301,7 @@ void ReferenceCounter::UpdateObjectPriority(
 		const ObjectID &object_id,
 		const Priority &priority){
   absl::MutexLock lock(&mutex_);
-  object_id_priority_[object_id] =  priority;
+  task_id_priority_[object_id.TaskId()] =  priority;
   RAY_LOG(DEBUG) << "[JAE_DEBUG] UpdateObjectPriority object: " << object_id <<
 	  " Priority: " << priority;
 }
