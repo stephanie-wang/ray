@@ -658,7 +658,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
 
   using ReferenceTable = absl::flat_hash_map<ObjectID, Reference>;
 
-  using PriorityTable = absl::flat_hash_map<ObjectID, Priority>;
+  using PriorityTable = absl::flat_hash_map<TaskID, Priority>;
 
   void SetNestedRefInUseRecursive(ReferenceTable::iterator inner_ref_it)
       EXCLUSIVE_LOCKS_REQUIRED(mutex_);
@@ -834,7 +834,7 @@ class ReferenceCounter : public ReferenceCounterInterface,
   absl::flat_hash_set<ObjectID> eager_spilled_objects_ GUARDED_BY(mutex_);
 
   /// Holds priority of tracked ObjectIDs.
-  PriorityTable object_id_priority_ GUARDED_BY(mutex_);
+  PriorityTable task_id_priority_ GUARDED_BY(mutex_);
 
   /// Objects whose values have been freed by the language frontend.
   /// The values in plasma will not be pinned. An object ID is
