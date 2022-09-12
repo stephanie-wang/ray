@@ -526,8 +526,13 @@ bool LocalObjectManager::DeleteEagerSpilledObjects(bool delete_all){
 	bool ret = false;
 	if(delete_all){
 	  for(auto &eager_spilled_it : eager_spilled_objects_){
+        const ObjectID &object_id = eager_spilled_it.first;
+	    if(!is_plasma_object_spillable_(object_id)){
+          RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteEagerSpilledObjects object " << object_id
+			 <<" not spillable";
+	      continue;
+	    }
 	    ret = true;
-       const ObjectID &object_id = eager_spilled_it.first;
         RAY_LOG(DEBUG) << "[JAE_DEBUG] DeleteEagerSpilledObjects deleting " << object_id;
 		RemovePinnedObjects(object_id, eager_spilled_it.second.first);
         store_object_count_(object_id, false, true);

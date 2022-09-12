@@ -531,7 +531,6 @@ Status PlasmaClient::Impl::MarkObjectUnused(const ObjectID &object_id) {
 }
 
 void PlasmaClient::Impl::EagerSpillDecreaseObjectCount(const ObjectID &object_id) {
-	/*
   auto elem = objects_in_use_.find(object_id);
   ObjectInUseEntry *object_entry;
   if (elem == objects_in_use_.end()) {
@@ -540,9 +539,9 @@ void PlasmaClient::Impl::EagerSpillDecreaseObjectCount(const ObjectID &object_id
     object_entry = elem->second.get();
     RAY_CHECK(object_entry->count > 0);
   }
-  object_entry->count -= 1;
-  */
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] EagerSpillDecreaseObjectCount calling Release";
+  //object_entry->count -= 1;
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] EagerSpillDecreaseObjectCount calling Release: "
+	  << object_id << ", count:" << object_entry->count;
   Release(object_id);
 }
 
@@ -556,11 +555,12 @@ void PlasmaClient::Impl::EagerSpillIncreaseObjectCount(const ObjectID &object_id
     RAY_CHECK(object_entry->count > 0);
   }
   object_entry->count += 1;
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] EagerSpillIncreaseObjectCount called, count:" << object_entry->count;
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] EagerSpillIncreaseObjectCount called: " 
+	  << object_id << ", count:" << object_entry->count;
 }
 
 Status PlasmaClient::Impl::Release(const ObjectID &object_id) {
-  RAY_LOG(DEBUG) << "[JAE_DEBUG] Release called";
+  RAY_LOG(DEBUG) << "[JAE_DEBUG] Release called: " << object_id;
   std::lock_guard<std::recursive_mutex> guard(client_mutex_);
 
   // If the client is already disconnected, ignore release requests.

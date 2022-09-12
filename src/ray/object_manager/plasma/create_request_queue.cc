@@ -275,6 +275,8 @@ Status CreateRequestQueue::ProcessRequests() {
         oom_start_time_ns_ = now;
       }
 
+	  bool spill_pending;
+
 	  if(!enable_eagerSpill){
 	    if (enable_blocktasks || enable_evicttasks || enable_blocktasks_spill) {
           RAY_LOG(DEBUG) << "[JAE_DEBUG] calling object_creation_blocked_callback (" 
@@ -321,42 +323,41 @@ Status CreateRequestQueue::ProcessRequests() {
 		  //should_spill_ = false;
 	    }
 
-        auto grace_period_ns = oom_grace_period_ns_;
-        auto spill_pending = spill_objects_callback_();
-        if (spill_pending) {
-          RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
-          oom_start_time_ns_ = -1;
-          return Status::TransientObjectStoreFull("Waiting for objects to spill.");
-        } else if (now - oom_start_time_ns_ < grace_period_ns) {
-          // We need a grace period since (1) global GC takes a bit of time to
-          // kick in, and (2) there is a race between spilling finishing and space
-          // actually freeing up in the object store.
-          RAY_LOG(DEBUG) << "In grace period before fallback allocation / oom.";
-          return Status::ObjectStoreFull("Waiting for grace period.");
-        } else {
-          // Trigger the fallback allocator.
-          RAY_LOG(DEBUG) << "fallback allocator called";
-          auto status = ProcessRequest(/*fallback_allocator=*/true, request,
-                                /*spilling_required=*/nullptr, nullptr, nullptr, nullptr);
-          if (!status.ok()) {
-            std::string dump = "";
-            if (dump_debug_info_callback_ && !logged_oom) {
-              dump = dump_debug_info_callback_();
-              logged_oom = true;
-            }
-          RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
-            << (request)->object_id << " of size "
-            << (request)->object_size / 1024 / 1024 << "MB\n"
-            << dump;
-          }
-          FinishRequest(queue_it);
-        }
+        spill_pending = spill_objects_callback_();
 	  }else{
-	    on_object_creation_blocked_callback_(lowest_pri, ObjectID(), true, false, 
+	    spill_pending = on_object_creation_blocked_callback_(lowest_pri, ObjectID(), true, false, 
 		      false, false, enable_blocktasks_spill, 0);
 	   RAY_LOG(DEBUG) << "[JAE_DEBUG] delete eager spilled objects called from ProcessRequests: ";
-          return Status::ObjectStoreFull("Waiting for grace period.");
 	  }
+      auto grace_period_ns = oom_grace_period_ns_;
+      if (spill_pending) {
+        RAY_LOG(DEBUG) << "Reset grace period " << status << " " << spill_pending;
+        oom_start_time_ns_ = -1;
+        return Status::TransientObjectStoreFull("Waiting for objects to spill.");
+      } else if (now - oom_start_time_ns_ < grace_period_ns) {
+        // We need a grace period since (1) global GC takes a bit of time to
+        // kick in, and (2) there is a race between spilling finishing and space
+        // actually freeing up in the object store.
+        RAY_LOG(DEBUG) << "In grace period before fallback allocation / oom.";
+        return Status::ObjectStoreFull("Waiting for grace period.");
+      } else {
+        // Trigger the fallback allocator.
+        RAY_LOG(DEBUG) << "fallback allocator called";
+        auto status = ProcessRequest(/*fallback_allocator=*/true, request,
+                              /*spilling_required=*/nullptr, nullptr, nullptr, nullptr);
+        if (!status.ok()) {
+          std::string dump = "";
+          if (dump_debug_info_callback_ && !logged_oom) {
+            dump = dump_debug_info_callback_();
+            logged_oom = true;
+          }
+        RAY_LOG(INFO) << "Out-of-memory: Failed to create object "
+          << (request)->object_id << " of size "
+          << (request)->object_size / 1024 / 1024 << "MB\n"
+          << dump;
+        }
+        FinishRequest(queue_it);
+      }
     }
 	RAY_LOG(DEBUG) << "[JAE_DEBUG] Remaining requests: " << queue_.size();
   }

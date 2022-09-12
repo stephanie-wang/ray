@@ -234,7 +234,7 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			static const Priority default_priority = Priority();
 			if(object_id != default_object_id && base_priority != default_priority){
 			  local_object_manager_.MapObjectIDPriority(object_id, base_priority);
-			  return;
+			  return true;
 			}
             if(block_tasks){
               cluster_task_manager_->BlockTasks(base_priority, io_service_);
@@ -248,12 +248,13 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			          io_service_.post([this](){
 		                local_object_manager_.DeleteEagerSpilledObjects(true);
 				      },"");
+                      return GetLocalObjectManager().IsSpillingInProgress();
 					}else{
 			          io_service_.post([this](){
 			 	        object_manager_.SetShouldSpill(true);
 				      },"");
 					}
-				    return;
+				    return true;
 			      }else{
                     RAY_LOG(DEBUG) << "[" << __func__ << 
 						"] EvictTasks destroyed workers num_workers now: "<< worker_pool_.GetAllRegisteredWorkersNum();
@@ -263,12 +264,13 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			          io_service_.post([this](){
 		                local_object_manager_.DeleteEagerSpilledObjects(true);
 				      },"");
+                      return GetLocalObjectManager().IsSpillingInProgress();
 					}else{
 			          io_service_.post([this](){
 			 	        object_manager_.SetShouldSpill(true);
 				      },"");
 					}
- 			      return;
+ 			      return true;
 				}
 			  }
 			}
@@ -278,8 +280,9 @@ NodeManager::NodeManager(instrumented_io_context &io_service, const NodeID &self
 			  io_service_.post([this](){
 				local_object_manager_.DeleteEagerSpilledObjects(true);
 			  },"");
-			  return;
+              return GetLocalObjectManager().IsSpillingInProgress();
 			}
+			return true;
 		  },
           /*object_store_full_callback=*/
           [this]() {

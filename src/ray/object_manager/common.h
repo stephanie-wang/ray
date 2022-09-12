@@ -29,7 +29,7 @@ using SpillObjectsCallback = std::function<bool()>;
 
 /// Callback when the creation of object(s) is blocked. The priority is the
 /// highest priority of a blocked object.
-using ObjectCreationBlockedCallback = std::function<void(const ray::Priority &priority, const ObjectID &object_id,
+using ObjectCreationBlockedCallback = std::function<bool(const ray::Priority &priority, const ObjectID &object_id,
 		bool DeleteEagerSpilledObjects, bool BlockTasks, bool EvictTasks, bool BlockSpill, size_t num_spinning_workers, int64_t pending_size)>;
 
 using SetShouldSpillCallback = std::function<void(bool should_spill)>;
