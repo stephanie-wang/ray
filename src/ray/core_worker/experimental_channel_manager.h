@@ -137,7 +137,7 @@ class ExperimentalChannelManager {
     std::unique_ptr<plasma::MutableObject> mutable_object;
   };
 
-  Status EnsureGetAcquired(ReaderChannel &channel);
+  Status EnsureGetAcquired(const ObjectID &object_id, ReaderChannel &channel);
 
   absl::flat_hash_map<ObjectID, WriterChannel> writer_channels_;
   absl::flat_hash_map<ObjectID, ReaderChannel> reader_channels_;

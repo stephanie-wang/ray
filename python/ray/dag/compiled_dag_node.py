@@ -1,4 +1,6 @@
 from collections import defaultdict
+from contextlib import contextmanager
+import queue
 from typing import Any, Dict, List, Tuple, Union, Optional
 import logging
 import threading
@@ -16,7 +18,9 @@ logger = logging.getLogger(__name__)
 
 
 @DeveloperAPI
-def do_allocate_channel(self, buffer_size_bytes: int, num_readers: int = 1) -> Channel:
+def do_allocate_channel(
+    self, buffer_size_bytes: int, num_readers: int, pipelined: bool
+) -> Channel:
     """Generic actor method to allocate an output channel.
 
     Args:
@@ -26,7 +30,7 @@ def do_allocate_channel(self, buffer_size_bytes: int, num_readers: int = 1) -> C
     Returns:
         The allocated channel.
     """
-    self._output_channel = Channel(buffer_size_bytes, num_readers)
+    self._output_channel = Channel(buffer_size_bytes, num_readers, pipelined=pipelined)
     return self._output_channel
 
 
@@ -50,6 +54,43 @@ def do_exec_compiled_task(
             the loop.
     """
     self._dag_cancelled = False
+    outer = self
+
+    # Pipeline arg fetching.
+    class InputReader(threading.Thread):
+        def __init__(self, input_channel_idxs):
+            super().__init__(daemon=True)
+            # Queue size cannot be greater than 1 since the shm channel only has two
+            # buffers, otherwise we'd hit the "Reader missed a value" error.
+            self.queue = queue.Queue(1)
+            self.input_channel_idxs = input_channel_idxs
+
+        def run(self):
+            while not outer._dag_cancelled:
+                res = [(idx, c.begin_read()) for idx, c in self.input_channel_idxs]
+                self.queue.put(res)
+
+        def read(self) -> Any:
+            return self.queue.get()
+
+        def end_read(self) -> None:
+            for _, c in self.input_channel_idxs:
+                c.end_read()
+
+    # Pipeline output writing.
+    class OutputWriter(threading.Thread):
+        def __init__(self, output_channel):
+            super().__init__(daemon=True)
+            self.queue = queue.Queue()
+            self._output_channel = output_channel
+
+        def run(self):
+            while not outer._dag_cancelled:
+                res = self.queue.get()
+                self._output_channel.write(res)
+
+        def write(self, val: Any) -> None:
+            self.queue.put(val)
 
     try:
         self._input_channels = [i for i in inputs if isinstance(i, Channel)]
@@ -65,9 +106,15 @@ def do_exec_compiled_task(
             else:
                 resolved_inputs.append(inp)
 
+        input_reader = InputReader(input_channel_idxs)
+        input_reader.start()
+        output_writer = OutputWriter(self._output_channel)
+        output_writer.start()
+
         while True:
-            for idx, channel in input_channel_idxs:
-                resolved_inputs[idx] = channel.begin_read()
+            res = input_reader.read()
+            for idx, output in res:
+                resolved_inputs[idx] = output
 
             try:
                 output_val = method(*resolved_inputs)
@@ -83,14 +130,13 @@ def do_exec_compiled_task(
                     traceback_str=backtrace,
                     cause=exc,
                 )
-                self._output_channel.write(wrapped)
+                output_writer.write(wrapped)
             else:
                 if self._dag_cancelled:
                     raise RuntimeError("DAG execution cancelled")
-                self._output_channel.write(output_val)
-
-            for _, channel in input_channel_idxs:
-                channel.end_read()
+                output_writer.write(output_val)
+            finally:
+                input_reader.end_read()
 
     except Exception:
         logging.exception("Compiled DAG task exited with exception")
@@ -148,7 +194,10 @@ class CompiledDAG:
     information.
     """
 
-    def __init__(self, buffer_size_bytes: Optional[int]):
+    def __init__(self, buffer_size_bytes: Optional[int], max_concurrency: int):
+        if max_concurrency < 1:
+            raise ValueError("Concurrency must be at least 1")
+        self._max_concurrency: int = max_concurrency
         self._buffer_size_bytes: Optional[int] = buffer_size_bytes
         if self._buffer_size_bytes is None:
             self._buffer_size_bytes = MAX_BUFFER_SIZE
@@ -180,6 +229,10 @@ class CompiledDAG:
         self.worker_task_refs: List["ray.ObjectRef"] = []
         # Set of actors present in the DAG.
         self.actor_refs = set()
+
+        # Result fetch pipelining.
+        self._pending = queue.Queue()
+        self._completed = queue.Queue()
 
     def _add_node(self, node: "ray.dag.DAGNode") -> None:
         idx = self.counter
@@ -309,11 +362,11 @@ class CompiledDAG:
                 self.dag_output_channels,
             )
 
-        queue = [self.input_task_idx]
+        frontier = [self.input_task_idx]
         visited = set()
         # Create output buffers
-        while queue:
-            cur_idx = queue.pop(0)
+        while frontier:
+            cur_idx = frontier.pop(0)
             if cur_idx in visited:
                 continue
             visited.add(cur_idx)
@@ -328,6 +381,7 @@ class CompiledDAG:
                         do_allocate_channel,
                         buffer_size_bytes=self._buffer_size_bytes,
                         num_readers=task.num_readers,
+                        pipelined=self._max_concurrency > 1,
                     )
                 )
                 self.actor_refs.add(task.dag_node._get_actor_handle())
@@ -335,12 +389,13 @@ class CompiledDAG:
                 task.output_channel = Channel(
                     buffer_size_bytes=self._buffer_size_bytes,
                     num_readers=task.num_readers,
+                    pipelined=self._max_concurrency > 1,
                 )
             else:
                 assert isinstance(task.dag_node, MultiOutputNode)
 
             for idx in task.downstream_node_idxs:
-                queue.append(idx)
+                frontier.append(idx)
 
         for node_idx, task in self.idx_to_task.items():
             if node_idx == self.input_task_idx:
@@ -400,8 +455,42 @@ class CompiledDAG:
             assert len(self.dag_output_channels) == 1
             self.dag_output_channels = self.dag_output_channels[0]
 
+        # Pipeline input submission.
+        class Submitter(threading.Thread):
+            def __init__(self, input_channel, monitor):
+                self._inputs = queue.Queue()
+                self._input_channel = input_channel
+                self._monitor = monitor
+                super().__init__(daemon=True)
+
+            def submit(self, args: Any) -> None:
+                self._inputs.put(args)
+
+            def run(self):
+                while not self._monitor.in_teardown:
+                    args = self._inputs.get()
+                    self._input_channel.write(args)
+
+        # Pipeline output fetching.
+        class Fetcher(threading.Thread):
+            def __init__(self, pending, completed, monitor):
+                self._pending = pending
+                self._completed = completed
+                self._monitor = monitor
+                super().__init__(daemon=True)
+
+            def run(self):
+                while not self._monitor.in_teardown:
+                    chn = self._pending.get()
+                    res = chn.begin_read()
+                    self._completed.put((res, chn))
+
         # Driver should ray.put on input, ray.get/release on output
         self._monitor = self._monitor_failures()
+        self._submitter = Submitter(self.dag_input_channel, self._monitor)
+        self._submitter.start()
+        self._fetcher = Fetcher(self._pending, self._completed, self._monitor)
+        self._fetcher.start()
         return (self.dag_input_channel, self.dag_output_channels, self._monitor)
 
     def _monitor_failures(self):
@@ -472,8 +561,34 @@ class CompiledDAG:
             raise NotImplementedError("Compiled DAGs do not support kwargs")
 
         input_channel, output_channels = self._get_or_compile()
-        input_channel.write(args[0])
+        self._submitter.submit(args[0])
+
+        if self._max_concurrency > 1:
+            self._pending.put(output_channels)
+            num_pending = self._completed.qsize() + self._pending.qsize()
+            if num_pending > self._max_concurrency:
+                raise ValueError(
+                    f"the number of active executions ({num_pending}) exceeds "
+                    f"the max concurrency ({self._max_concurrency})"
+                )
+            return None  # use has_next() / get_next()
+
         return output_channels
+
+    def has_next(self) -> bool:
+        if self._max_concurrency <= 1:
+            raise ValueError("has_next() requires max_concurrency > 1")
+        return self._completed.qsize() > 0 or self._pending.qsize() > 0
+
+    @contextmanager
+    def get_next(self):
+        if self._max_concurrency <= 1:
+            raise ValueError("get_next() requires max_concurrency > 1")
+        result, chn = self._completed.get()
+        try:
+            yield result
+        finally:
+            chn.end_read()
 
     def teardown(self):
         """Teardown and cancel all worker tasks for this DAG."""
@@ -485,9 +600,9 @@ class CompiledDAG:
 
 @DeveloperAPI
 def build_compiled_dag_from_ray_dag(
-    dag: "ray.dag.DAGNode", buffer_size_bytes: Optional[int]
+    dag: "ray.dag.DAGNode", buffer_size_bytes: Optional[int], max_concurrency: int
 ) -> "CompiledDAG":
-    compiled_dag = CompiledDAG(buffer_size_bytes)
+    compiled_dag = CompiledDAG(buffer_size_bytes, max_concurrency)
 
     def _build_compiled_dag(node):
         compiled_dag._add_node(node)
