@@ -34,6 +34,56 @@ def do_allocate_channel(
     return self._output_channel
 
 
+# Pipeline arg fetching.
+class ChannelInputReader(threading.Thread):
+    def __init__(self, outer, input_channel_idxs):
+        super().__init__(daemon=True)
+        # Queue size cannot be greater than 1 since the shm channel only has two
+        # buffers, otherwise we'd hit the "Reader missed a value" error.
+        self.queue = queue.Queue(1)
+        self.outer = outer
+        self.input_channel_idxs = input_channel_idxs
+
+    def run(self):
+        while not self.outer._dag_cancelled:
+            try:
+                res = [(idx, c.begin_read()) for idx, c in self.input_channel_idxs]
+            except Exception as exc:
+                res = exc
+
+            self.queue.put(res)
+
+    def read(self) -> Any:
+        val = self.queue.get()
+        if isinstance(val, Exception):
+            raise val
+
+        return val
+
+    def end_read(self) -> None:
+        for _, c in self.input_channel_idxs:
+            c.end_read()
+
+
+# Pipeline output writing.
+class ChannelOutputWriter(threading.Thread):
+    def __init__(self, outer, output_channel):
+        super().__init__(daemon=True)
+        self.queue = queue.Queue()
+        self.outer = outer
+        self._output_channel = output_channel
+
+    def run(self):
+        while not self.outer._dag_cancelled:
+            res = self.queue.get()
+            self._output_channel.write(res)
+
+    def write(self, val: Any) -> None:
+        if self.outer._dag_cancelled:
+            raise RuntimeError("DAG execution cancelled")
+        self.queue.put(val)
+
+
 @DeveloperAPI
 def do_exec_compiled_task(
     self,
@@ -56,42 +106,6 @@ def do_exec_compiled_task(
     self._dag_cancelled = False
     outer = self
 
-    # Pipeline arg fetching.
-    class InputReader(threading.Thread):
-        def __init__(self, input_channel_idxs):
-            super().__init__(daemon=True)
-            # Queue size cannot be greater than 1 since the shm channel only has two
-            # buffers, otherwise we'd hit the "Reader missed a value" error.
-            self.queue = queue.Queue(1)
-            self.input_channel_idxs = input_channel_idxs
-
-        def run(self):
-            while not outer._dag_cancelled:
-                res = [(idx, c.begin_read()) for idx, c in self.input_channel_idxs]
-                self.queue.put(res)
-
-        def read(self) -> Any:
-            return self.queue.get()
-
-        def end_read(self) -> None:
-            for _, c in self.input_channel_idxs:
-                c.end_read()
-
-    # Pipeline output writing.
-    class OutputWriter(threading.Thread):
-        def __init__(self, output_channel):
-            super().__init__(daemon=True)
-            self.queue = queue.Queue()
-            self._output_channel = output_channel
-
-        def run(self):
-            while not outer._dag_cancelled:
-                res = self.queue.get()
-                self._output_channel.write(res)
-
-        def write(self, val: Any) -> None:
-            self.queue.put(val)
-
     try:
         self._input_channels = [i for i in inputs if isinstance(i, Channel)]
         method = getattr(self, actor_method_name)
@@ -106,13 +120,14 @@ def do_exec_compiled_task(
             else:
                 resolved_inputs.append(inp)
 
-        input_reader = InputReader(input_channel_idxs)
+        input_reader = ChannelInputReader(outer, input_channel_idxs)
         input_reader.start()
-        output_writer = OutputWriter(self._output_channel)
+        output_writer = ChannelOutputWriter(outer, self._output_channel)
         output_writer.start()
 
         while True:
             res = input_reader.read()
+
             for idx, output in res:
                 resolved_inputs[idx] = output
 
@@ -132,11 +147,10 @@ def do_exec_compiled_task(
                 )
                 output_writer.write(wrapped)
             else:
-                if self._dag_cancelled:
-                    raise RuntimeError("DAG execution cancelled")
                 output_writer.write(output_val)
             finally:
-                input_reader.end_read()
+                if not self._dag_cancelled:
+                    input_reader.end_read()
 
     except Exception:
         logging.exception("Compiled DAG task exited with exception")

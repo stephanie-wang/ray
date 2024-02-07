@@ -1,5 +1,6 @@
 import io
 import logging
+import queue
 import time
 from typing import Any, Optional
 
@@ -98,7 +99,7 @@ class Channel:
         self._num_readers = num_readers
         self._worker = ray._private.worker.global_worker
         self._worker.check_connected()
-        self._next_end_read = []
+        self._next_end_read = queue.Queue()
 
         self._writer_registered = False
         self._reader_registered = False
@@ -109,7 +110,9 @@ class Channel:
 
         self._worker.core_worker.experimental_channel_register_writer(self._base_ref)
         if self._swap_ref is not None:
-            self._worker.core_worker.experimental_channel_register_writer(self._swap_ref)
+            self._worker.core_worker.experimental_channel_register_writer(
+                self._swap_ref
+            )
         self._writer_registered = True
 
     def _ensure_registered_as_reader(self):
@@ -118,7 +121,9 @@ class Channel:
 
         self._worker.core_worker.experimental_channel_register_reader(self._base_ref)
         if self._swap_ref is not None:
-            self._worker.core_worker.experimental_channel_register_writer(self._swap_ref)
+            self._worker.core_worker.experimental_channel_register_writer(
+                self._swap_ref
+            )
         self._reader_registered = True
 
     @staticmethod
@@ -184,11 +189,14 @@ class Channel:
             Any: The deserialized value.
         """
         self._ensure_registered_as_reader()
-        value = ray.get(self._base_ref)
-        self._next_end_read.append(self._base_ref)
+        ref = self._base_ref
+        # Perform the swap first in case ray.get raises an
+        # Exception.
+        self._next_end_read.put(ref)
         if self._swap_ref:
             self._base_ref, self._swap_ref = self._swap_ref, self._base_ref
 
+        value = ray.get(ref)
         return value
 
     def end_read(self):
@@ -199,7 +207,7 @@ class Channel:
         value is written, then drop the value.
         """
         self._ensure_registered_as_reader()
-        ref = self._next_end_read.pop(0)
+        ref = self._next_end_read.get()
         self._worker.core_worker.experimental_channel_read_release([ref])
 
     def close(self) -> None:
