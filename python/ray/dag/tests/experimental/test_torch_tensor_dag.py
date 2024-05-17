@@ -372,6 +372,45 @@ def test_torch_tensor_nccl_wrong_shape(ray_start_regular):
     time.sleep(3)
 
 
+def test_torch_tensor_nccl_broadcast(ray_start_regular):
+    if not USE_GPU:
+        pytest.skip("NCCL tests require GPUs")
+
+    assert (
+        sum(node["Resources"].get("GPU", 0) for node in ray.nodes()) > 2
+    ), "This test requires at least 3 GPUs"
+
+    actor_cls = TorchTensorWorker.options(num_gpus=1)
+
+    sender = actor_cls.remote()
+    receivers = [actor_cls.remote() for _ in range(2)]
+
+    with InputNode() as inp:
+        dag = sender.send_dict_with_tuple_args.bind(inp)
+        dag = dag.with_contains_type_hint(TorchTensorType(transport="nccl"))
+        dag = MultiOutputNode([receiver.recv_dict.bind(dag) for receiver in receivers])
+
+    compiled_dag = dag.experimental_compile()
+
+    for i in range(3):
+        i += 1
+
+        shape = (10 * i,)
+        dtype = torch.float16
+        args = (shape, dtype, i)
+
+        output_channel = compiled_dag.execute(args)
+        # TODO(swang): Replace with fake ObjectRef.
+        results = output_channel.begin_read()
+        expected_result = {
+                j: (j, shape, dtype) for j in range(i)
+                }
+        assert results == [expected_result for _ in receivers]
+        output_channel.end_read()
+
+    compiled_dag.teardown()
+
+
 if __name__ == "__main__":
     if os.environ.get("PARALLEL_CI"):
         sys.exit(pytest.main(["-n", "auto", "--boxed", "-vs", __file__]))

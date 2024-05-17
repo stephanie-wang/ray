@@ -184,6 +184,13 @@ class TorchTensorNcclChannel(ChannelInterface):
             self._nccl_group.get_rank(reader) for reader in self._readers
         ]
 
+        # If the send/recv involves all peers, then we should use broadcast
+        # instead of individual p2p ops for better performance.
+        self._use_broadcast: bool = False
+        all_ranks = set([self._writer_rank] + self._reader_ranks)
+        if len(all_ranks) == self._nccl_group.world_size and len(all_ranks) > 2:
+            self._use_broadcast = True
+
         if (
             self._writer_rank is not None
             and self._writer_rank == self._nccl_group.get_self_rank()
@@ -293,14 +300,24 @@ class TorchTensorNcclChannel(ChannelInterface):
         # metadata first so that the receiver can read the metadata and then
         # launch the same NCCL op.
         for tensor in tensors:
-            # TODO: If there are multiple readers, can replace with a
-            # broadcast.
+            # TODO(swang): If there are multiple tensors to send, we might want
+            # to flatten them into one to reduce the number of NCCL ops needed.
+            self._write_single_tensor(tensor)
+
+    def _write_single_tensor(self, tensor: "torch.Tensor") -> None:
+        if self._use_broadcast:
+            self._nccl_group.broadcast_send(tensor)
+        else:
             for rank in self._reader_ranks:
                 self._nccl_group.send(tensor, rank)
 
     def _begin_read_single_tensor(self, typ: "TorchTensorType") -> "torch.Tensor":
         buf = self.torch.zeros(typ.shape, dtype=typ.dtype, device=self._device)
-        self._nccl_group.recv(buf, self._writer_rank)
+        if self._use_broadcast:
+            self._nccl_group.broadcast_recv(buf, self._writer_rank)
+        else:
+            self._nccl_group.recv(buf, self._writer_rank)
+
         return buf
 
     def begin_read(self) -> Union["torch.Tensor", List["torch.Tensor"]]:

@@ -549,7 +549,6 @@ class CompiledDAG:
 
             if isinstance(task.dag_node, ClassMethodNode):
                 readers = [self.idx_to_task[idx] for idx in task.downstream_node_idxs]
-                assert len(readers) == 1
 
                 def _get_node_id(self):
                     return ray.get_runtime_context().get_node_id()

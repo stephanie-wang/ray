@@ -61,6 +61,7 @@ class _NcclGroup:
             cuda_stream: A raw CUDA stream to dispatch NCCL ops to. If rank is
                 specified, then this must be specified too.
         """
+        self._world_size: int = world_size
         self._rank: Optional[int] = rank
         self.nccl_util: Optional[ModuleType] = None
         self._actor_handles = actor_handles
@@ -98,6 +99,10 @@ class _NcclGroup:
             )
 
         self._closed = False
+
+    @property
+    def world_size(self) -> int:
+        return self._world_size
 
     def _get_actor_handles(self) -> List["ray.actor.ActorHandle"]:
         return self._actor_handles
@@ -170,6 +175,65 @@ class _NcclGroup:
             self.nccl_util.get_nccl_tensor_dtype(buf),
             peer_rank,
             self._cuda_stream.ptr,
+        )
+
+        # Buffer values are undefined if NCCL ops are aborted. Therefore, we
+        # need to synchronize here and check that the channel is still open to
+        # ensure that the receive buffer is valid.
+        # TODO(swang): Avoid CUDA synchronization.
+        self._cuda_stream.synchronize()
+        if self._closed:
+            raise IOError("NCCL group has been destroyed.")
+
+    def broadcast_send(self, value: "torch.Tensor"):
+        """
+        Broadcast a torch.Tensor to all peers.
+
+        This returns when the broadcast kernel has been queued, but the kernel may
+        not have completed. Therefore, the caller should ensure that there are
+        no concurrent writes to the sent `value` until the broadcast has finished.
+        That is, either all writes should be submitted on the current stream
+        (self._cuda_stream) or, if on a different stream, that stream should
+        synchronize with the current stream.
+
+        Args:
+            value: The torch.Tensor to send. It should already be on this
+                actor's default device.
+            peer_rank: The rank of the actor to send to.
+        """
+        if self._closed:
+            raise IOError("NCCL group has been destroyed.")
+        self._comm.broadcast(
+            self.nccl_util.get_tensor_ptr(value),
+            self.nccl_util.get_tensor_ptr(value),
+            value.numel(),
+            self.nccl_util.get_nccl_tensor_dtype(value),
+            self._rank,
+            self._cuda_stream.ptr,
+        )
+
+    def broadcast_recv(self, buf: "torch.Tensor", root_rank: int):
+        """
+        Receive a torch.Tensor broadcasted from the root rank and synchronize
+        the current stream.
+
+        After this call returns, the receive buffer is safe to read from from
+        any stream. An IOError will be raised if an error occurred (e.g.,
+        remote actor died), and the buffer is not safe to read.
+
+        Args:
+            buf: The torch.Tensor to receive into. This buffer is safe to read
+            root_rank: The rank of the root actor of the broadcast.
+        """
+        if self._closed:
+            raise IOError("NCCL group has been destroyed.")
+        self._comm.broadcast(
+                0,  # Not used on receivers.
+                self.nccl_util.get_tensor_ptr(buf),
+                buf.numel(),
+                self.nccl_util.get_nccl_tensor_dtype(buf),
+                root_rank,
+                self._cuda_stream.ptr,
         )
 
         # Buffer values are undefined if NCCL ops are aborted. Therefore, we
