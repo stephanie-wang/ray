@@ -206,10 +206,10 @@ class ReaderInterface:
     def __init__(self, input_channels: List[ChannelInterface]):
         if isinstance(input_channels, List):
             for chan in input_channels:
-                assert isinstance(chan, ChannelInterface)
+                assert isinstance(chan, ChannelInterface), chan
             self._has_single_output = False
         else:
-            assert isinstance(input_channels, ChannelInterface)
+            assert isinstance(input_channels, ChannelInterface), input_channels
             self._has_single_output = True
             input_channels = [input_channels]
 

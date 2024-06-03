@@ -126,6 +126,43 @@ def test_actor_multi_methods(ray_start_regular):
     compiled_dag.teardown()
 
 
+def test_input_as_output_errors(ray_start_regular):
+    """
+    Currently we don't support passing the InputNode as an output.
+    """
+    with InputNode() as inp:
+        dag = inp
+
+    with pytest.raises(NotImplementedError):
+        _ = dag.experimental_compile()
+
+    with InputNode() as inp:
+        dag = inp[0]
+
+    with pytest.raises(NotImplementedError):
+        _ = dag.experimental_compile()
+
+
+def test_consume_and_output_task_return(ray_start_regular):
+    """
+    Test that a task output can be used as both an argument to another DAG
+    task and as the final output of the DAG.
+    """
+    a = Actor.remote(0)
+
+    with InputNode() as inp:
+        dag1 = a.echo.bind(inp)
+        dag2 = a.echo.bind(dag1)
+        dag = MultiOutputNode([dag1, dag2])
+
+    assert ray.get(dag.execute(1)) == [1, 1]
+
+    compiled_dag = dag.experimental_compile()
+    assert compiled_dag.execute(1).begin_read() == [1, 1]
+
+    compiled_dag.teardown()
+
+
 def test_actor_methods_execution_order(ray_start_regular):
     actor1 = Actor.remote(0)
     actor2 = Actor.remote(0)

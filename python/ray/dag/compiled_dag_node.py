@@ -206,16 +206,15 @@ class AwaitableDAGOutput:
 class CompiledTask:
     """Wraps the normal Ray DAGNode with some metadata."""
 
-    def __init__(self, idx: int, dag_node: "ray.dag.DAGNode"):
+    def __init__(self, dag_node: "ray.dag.DAGNode"):
         """
         Args:
-            idx: A unique index into the original DAG.
             dag_node: The original DAG node created by the user.
         """
-        self.idx = idx
+        self.id_: str = dag_node.get_stable_uuid()
         self.dag_node = dag_node
 
-        self.downstream_node_idxs: Dict[int, "ray.actor.ActorHandle"] = {}
+        self.downstream_node_ids: Dict[int, "ray.actor.ActorHandle"] = {}
         self.output_channel = None
         self.arg_type_hints: List["ChannelOutputType"] = []
 
@@ -225,7 +224,7 @@ class CompiledTask:
 
     @property
     def num_readers(self) -> int:
-        return len(self.downstream_node_idxs)
+        return len(self.downstream_node_ids)
 
     def __str__(self) -> str:
         return f"""
@@ -233,6 +232,14 @@ Node: {self.dag_node}
 Arguments: {self.args}
 Output: {self.output_channel}
 """
+
+    @property
+    def actor_handle(self) -> ray.actor.ActorHandle:
+        from ray.dag import ClassMethodNode
+
+        if isinstance(self.dag_node, ClassMethodNode):
+            return self.dag_node._get_actor_handle()
+        return None
 
 
 @DeveloperAPI
@@ -425,17 +432,13 @@ class CompiledDAG:
         # order of inputs written to the DAG.
         self._dag_submission_lock = asyncio.Lock()
 
-        # idx -> CompiledTask.
-        self.idx_to_task: Dict[int, "CompiledTask"] = {}
-        # DAGNode -> idx.
-        self.dag_node_to_idx: Dict["ray.dag.DAGNode", int] = {}
-        # idx counter.
-        self.counter: int = 0
+        # DAGNode stable id -> CompiledTask.
+        self.node_id_to_task: Dict[str, "CompiledTask"] = {}
 
         # Attributes that are set during preprocessing.
         # Preprocessing identifies the input node and output node.
-        self.input_task_idx: Optional[int] = None
-        self.output_task_idx: Optional[int] = None
+        self.input_task_id: Optional[str] = None
+        self.output_task_id: Optional[str] = None
         self.has_single_output: bool = False
         self.actor_task_count: Dict["ray._raylet.ActorID", int] = defaultdict(int)
 
@@ -465,12 +468,10 @@ class CompiledDAG:
         self._nccl_group_id: Optional[str] = None
 
     def _add_node(self, node: "ray.dag.DAGNode") -> None:
-        idx = self.counter
-        self.idx_to_task[idx] = CompiledTask(idx, node)
-        self.dag_node_to_idx[node] = idx
-        self.counter += 1
+        id_ = node.get_stable_uuid()
+        self.node_id_to_task[id_] = CompiledTask(node)
 
-    def _preprocess(self) -> None:
+    def _preprocess(self, output_node_id: str) -> None:
         """Before compiling, preprocess the DAG to build an index from task to
         upstream and downstream tasks, and to set the input and output node(s)
         of the DAG.
@@ -486,26 +487,26 @@ class CompiledDAG:
             MultiOutputNode,
         )
 
-        self.input_task_idx, self.output_task_idx = None, None
+        self.input_task_id, self.output_task_id = None, None
         self.actor_task_count.clear()
         self._type_hints.clear()
 
         nccl_actors: Set["ray.actor.ActorHandle"] = set()
 
         # Find the input node to the DAG.
-        for idx, task in self.idx_to_task.items():
+        for id_, task in self.node_id_to_task.items():
             if isinstance(task.dag_node, InputNode):
-                assert self.input_task_idx is None, "more than one InputNode found"
-                self.input_task_idx = idx
+                assert self.input_task_id is None, "more than one InputNode found"
+                self.input_task_id = id_
         # TODO: Support no-input DAGs (use an empty object to signal).
-        if self.input_task_idx is None:
+        if self.input_task_id is None:
             raise NotImplementedError(
                 "Compiled DAGs currently require exactly one InputNode"
             )
 
         # For each task node, set its upstream and downstream task nodes.
         # Also collect the set of tasks that produce torch.tensors.
-        for node_idx, task in self.idx_to_task.items():
+        for node_id, task in self.node_id_to_task.items():
             dag_node = task.dag_node
             if not (
                 isinstance(dag_node, InputNode)
@@ -551,48 +552,37 @@ class CompiledDAG:
                 if not isinstance(arg, DAGNode):
                     continue
 
-                upstream_node_idx = self.dag_node_to_idx[arg]
-                upstream_node = self.idx_to_task[upstream_node_idx]
-                downstream_actor_handle = None
-                if isinstance(task.dag_node, ClassMethodNode):
-                    downstream_actor_handle = task.dag_node._get_actor_handle()
+                upstream_node_id = arg.get_stable_uuid()
+                upstream_node = self.node_id_to_task[upstream_node_id]
 
                 # If the upstream node is an InputAttributeNode, treat the
                 # DAG's input node as the actual upstream node
                 if isinstance(upstream_node.dag_node, InputAttributeNode):
-                    upstream_node = self.idx_to_task[self.input_task_idx]
+                    upstream_node = self.node_id_to_task[self.input_task_id]
 
-                upstream_node.downstream_node_idxs[node_idx] = downstream_actor_handle
+                upstream_node.downstream_node_ids[node_id] = task.actor_handle
                 task.arg_type_hints.append(upstream_node.dag_node.type_hint)
 
                 if upstream_node.dag_node.type_hint.requires_nccl():
                     # Add all readers to the NCCL group.
-                    nccl_actors.add(downstream_actor_handle)
+                    nccl_actors.add(task.actor_handle)
 
             if dag_node.type_hint is not None:
                 self._type_hints.append(dag_node.type_hint)
 
-        # Find the (multi-)output node to the DAG.
-        for idx, task in self.idx_to_task.items():
-            if idx == self.input_task_idx or isinstance(
-                task.dag_node, InputAttributeNode
-            ):
-                continue
-            if len(task.downstream_node_idxs) == 0:
-                assert self.output_task_idx is None, "More than one output node found"
-                self.output_task_idx = idx
-
-        assert self.output_task_idx is not None
-        output_node = self.idx_to_task[self.output_task_idx].dag_node
+        assert output_node_id in self.node_id_to_task, (
+            f"OutputNode with ID {output_node_id} not found in "
+            f"DAG nodes: {list(self.node_id_to_task.keys())}"
+        )
+        self.output_task_id = output_node_id
         # Add an MultiOutputNode to the end of the DAG if it's not already there.
-        if not isinstance(output_node, MultiOutputNode):
+        output_node = self.node_id_to_task[output_node_id]
+        if not isinstance(output_node.dag_node, MultiOutputNode):
             self.has_single_output = True
-            output_node = MultiOutputNode([output_node])
+            output_node = MultiOutputNode([output_node.dag_node])
             self._add_node(output_node)
-            self.output_task_idx = self.dag_node_to_idx[output_node]
-            # Preprocess one more time so that we have the right output node
-            # now.
-            self._preprocess()
+            self.output_task_id = None
+            self._preprocess(output_node_id=output_node.get_stable_uuid())
 
         # If there were type hints indicating transport via NCCL, initialize
         # the NCCL group on the participating actors.
@@ -604,6 +594,7 @@ class CompiledDAG:
 
     def _get_or_compile(
         self,
+        output_node_id: str,
     ) -> None:
         """Compile an execution path. This allocates channels for adjacent
         tasks to send/receive values. An infinite task is submitted to each
@@ -623,23 +614,23 @@ class CompiledDAG:
             ClassMethodNode,
         )
 
-        if self.input_task_idx is None:
-            self._preprocess()
+        if self.input_task_id is None:
+            self._preprocess(output_node_id=output_node_id)
 
         if self._dag_submitter is not None:
             assert self._dag_output_fetcher is not None
             return
 
-        frontier = [self.input_task_idx]
+        frontier = [self.input_task_id]
         visited = set()
         # Create output buffers
         while frontier:
-            cur_idx = frontier.pop(0)
-            if cur_idx in visited:
+            cur_id = frontier.pop(0)
+            if cur_id in visited:
                 continue
-            visited.add(cur_idx)
+            visited.add(cur_id)
 
-            task = self.idx_to_task[cur_idx]
+            task = self.node_id_to_task[cur_id]
             # Create an output buffer for the actor method.
             assert task.output_channel is None
 
@@ -648,33 +639,26 @@ class CompiledDAG:
                 type_hint.set_nccl_group_id(self._nccl_group_id)
 
             if isinstance(task.dag_node, ClassMethodNode):
-                readers = [self.idx_to_task[idx] for idx in task.downstream_node_idxs]
-                assert len(readers) == 1
+                readers = [
+                    self.node_id_to_task[idx] for idx in task.downstream_node_ids
+                ]
 
                 def _get_node_id(self):
                     return ray.get_runtime_context().get_node_id()
 
-                if isinstance(readers[0].dag_node, MultiOutputNode):
-                    # This node is a multi-output node, which means that it will only be
-                    # read by the driver, not an actor. Thus, we handle this case by
-                    # setting `reader_handles` to `[None]`.
-                    reader_handles = [None]
-
-                    fn = task.dag_node._get_remote_method("__ray_call__")
-
-                    actor_node = ray.get(fn.remote(_get_node_id))
-
+                reader_handles = [reader.actor_handle for reader in readers]
+                if None in reader_handles:
+                    # This task's output is read by the driver.
                     # The driver and all actors that write outputs must be on the same
-                    # node for now.
+                    # node for now. Check that this is true.
+                    fn = task.dag_node._get_remote_method("__ray_call__")
+                    actor_node = ray.get(fn.remote(_get_node_id))
                     if actor_node != _get_node_id(self):
                         raise NotImplementedError(
                             "The driver and all actors that write outputs must be on "
                             "the same node for now."
                         )
-                else:
-                    reader_handles = [
-                        reader.dag_node._get_actor_handle() for reader in readers
-                    ]
+
                 fn = task.dag_node._get_remote_method("__ray_call__")
                 task.output_channel = ray.get(
                     fn.remote(
@@ -683,16 +667,19 @@ class CompiledDAG:
                         typ=type_hint,
                     )
                 )
-                actor_handle = task.dag_node._get_actor_handle()
-                self.actor_refs.add(actor_handle)
-                self.actor_to_tasks[actor_handle].append(task)
+                self.actor_refs.add(task.actor_handle)
+                self.actor_to_tasks[task.actor_handle].append(task)
             elif isinstance(task.dag_node, InputNode):
                 reader_handles_set = set()
-                for idx in task.downstream_node_idxs:
-                    reader_task = self.idx_to_task[idx]
-                    assert isinstance(reader_task.dag_node, ClassMethodNode)
-                    reader_handle = reader_task.dag_node._get_actor_handle()
-                    reader_handles_set.add(reader_handle)
+                for idx in task.downstream_node_ids:
+                    reader_task = self.node_id_to_task[idx]
+                    if reader_task.actor_handle in reader_handles_set:
+                        raise NotImplementedError(
+                            "Compiled DAGs currently do not support binding the "
+                            "same input on the same actor multiple times. "
+                            f"Violating actor: {reader_task.actor_handle}"
+                        )
+                    reader_handles_set.add(reader_task.actor_handle)
                 task.output_channel = do_allocate_channel(
                     self,
                     list(reader_handles_set),
@@ -703,18 +690,18 @@ class CompiledDAG:
                     task.dag_node, MultiOutputNode
                 )
 
-            for idx in task.downstream_node_idxs:
+            for idx in task.downstream_node_ids:
                 frontier.append(idx)
 
         # Validate input channels for tasks that have not been visited
-        for node_idx, task in self.idx_to_task.items():
+        for node_id, task in self.node_id_to_task.items():
             if (
-                node_idx == self.input_task_idx
-                or node_idx == self.output_task_idx
+                node_id == self.input_task_id
+                or node_id == self.output_task_id
                 or isinstance(task.dag_node, InputAttributeNode)
             ):
                 continue
-            if node_idx not in visited:
+            if node_id not in visited:
                 has_at_least_one_channel_input = False
                 for arg in task.args:
                     if isinstance(arg, DAGNode):
@@ -725,7 +712,7 @@ class CompiledDAG:
                         "or at least one other DAGNode as an input"
                     )
 
-        input_task = self.idx_to_task[self.input_task_idx]
+        input_task = self.node_id_to_task[self.input_task_id]
         # Register custom serializers for inputs provided to dag.execute().
         input_task.dag_node.type_hint.register_custom_serializer()
         self.dag_input_channel = input_task.output_channel
@@ -747,8 +734,8 @@ class CompiledDAG:
                         resolved_args.append(input_adapter)
                         has_at_least_one_channel_input = True
                     elif isinstance(arg, DAGNode):  # Other DAGNodes
-                        arg_idx = self.dag_node_to_idx[arg]
-                        arg_channel = self.idx_to_task[arg_idx].output_channel
+                        arg_id = arg.get_stable_uuid()
+                        arg_channel = self.node_id_to_task[arg_id].output_channel
                         assert arg_channel is not None
                         resolved_args.append(arg_channel)
                         has_at_least_one_channel_input = True
@@ -774,18 +761,24 @@ class CompiledDAG:
 
             self.actor_to_executable_tasks[actor_handle] = executable_tasks
             # Assign the task with the correct input and output buffers.
-            self.worker_task_refs[
-                task.dag_node._get_actor_handle()
-            ] = worker_fn.options(concurrency_group="_ray_system").remote(
+            self.worker_task_refs[task.actor_handle] = worker_fn.options(
+                concurrency_group="_ray_system"
+            ).remote(
                 do_exec_tasks,
                 executable_tasks,
             )
 
         self.dag_output_channels = []
-        for output in self.idx_to_task[self.output_task_idx].args:
+        for output in self.node_id_to_task[self.output_task_id].args:
             assert isinstance(output, DAGNode)
-            output_idx = self.dag_node_to_idx[output]
-            self.dag_output_channels.append(self.idx_to_task[output_idx].output_channel)
+            if isinstance(output, InputNode) or isinstance(output, InputAttributeNode):
+                raise NotImplementedError(
+                    "Compiled DAGs currently don't support outputting an InputNode."
+                )
+            output_id = output.get_stable_uuid()
+            self.dag_output_channels.append(
+                self.node_id_to_task[output_id].output_channel
+            )
             # Register custom serializers for DAG outputs.
             output.type_hint.register_custom_serializer()
 
@@ -924,8 +917,6 @@ class CompiledDAG:
         if self._enable_asyncio:
             raise ValueError("Use execute_async if enable_asyncio=True")
 
-        self._get_or_compile()
-
         inp = (args, kwargs)
         self._dag_submitter.write(inp)
 
@@ -950,7 +941,6 @@ class CompiledDAG:
         if not self._enable_asyncio:
             raise ValueError("Use execute if enable_asyncio=False")
 
-        self._get_or_compile()
         async with self._dag_submission_lock:
             inp = (args, kwargs)
             await self._dag_submitter.write(inp)
@@ -996,5 +986,5 @@ def build_compiled_dag_from_ray_dag(
         return node
 
     dag.apply_recursive(_build_compiled_dag)
-    compiled_dag._get_or_compile()
+    compiled_dag._get_or_compile(output_node_id=dag.get_stable_uuid())
     return compiled_dag

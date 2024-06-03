@@ -205,27 +205,36 @@ class Channel(ChannelInterface):
             )
             self._writer_ref = _create_channel_ref(self, typ.buffer_size_bytes)
 
-            if readers[0] is None:
-                # Reader is the driver. We assume that the reader and the writer are on
-                # the same node.
-                self._reader_node_id = self._writer_node_id
-                self._reader_ref = self._writer_ref
-            else:
-                # Reader and writer are on different nodes.
-                self._reader_node_id = _get_reader_node_id(self, readers[0])
-                for reader in readers:
-                    reader_node_id = _get_reader_node_id(self, reader)
-                    if reader_node_id != self._reader_node_id:
-                        raise NotImplementedError(
-                            "All readers must be on the same node for now."
-                        )
-                if self.is_remote():
-                    fn = readers[0].__ray_call__
-                    self._reader_ref = ray.get(
-                        fn.remote(_create_channel_ref, typ.buffer_size_bytes)
-                    )
+            # Set the reader node ID.
+            self._reader_node_id = None
+            for reader in readers:
+                if reader is None:
+                    # The driver is a reader. For now, the caller must ensure
+                    # that the driver is on the same node as the writer and
+                    # other readers.
+                    reader_node_id = self._writer_node_id
                 else:
-                    self._reader_ref = self._writer_ref
+                    reader_node_id = _get_reader_node_id(self, readers[0])
+
+                if (
+                    self._reader_node_id is not None
+                    and reader_node_id != self._reader_node_id
+                ):
+                    raise NotImplementedError(
+                        "All readers must be on the same node for now."
+                    )
+                if self._reader_node_id is None:
+                    self._reader_node_id = reader_node_id
+
+            # If the reader(s) are remote, then allocate a ref on the readers'
+            # node. Otherwise, reader(s) should read from the writer's ref.
+            if self.is_remote():
+                fn = readers[0].__ray_call__
+                self._reader_ref = ray.get(
+                    fn.remote(_create_channel_ref, typ.buffer_size_bytes)
+                )
+            else:
+                self._reader_ref = self._writer_ref
 
             is_creator = True
         else:
