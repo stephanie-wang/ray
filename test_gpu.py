@@ -19,8 +19,19 @@ from ray.experimental.channel import ChannelContext
 
 WORLD_SIZE = 2
 
+
+def wait_gced(tensor: torch.Tensor):
+    worker = ray._private.worker.global_worker
+    gc_event = worker.tensor_to_gc_event.get(tensor, None)
+    if gc_event is not None:
+        gc_event.wait()
+        
+
 @ray.remote
 class Actor:
+
+    def __init__(self):
+        self.tensor = None
 
     def register_custom_serializer(self):
         TorchTensorType().register_custom_serializer()
@@ -33,11 +44,18 @@ class Actor:
 
     @ray.method(tensor_transport="nccl")
     def randn(self, shape):
-        return torch.randn(shape)
+        assert self.tensor is None
+        self.tensor = torch.randn(shape)
+        return self.tensor
 
     def sum(self, tensor):
         print("SUM")
         return tensor.sum().item()
+
+    def wait_tensor_gced(self):
+        assert self.tensor is not None
+        wait_gced(self.tensor)
+        self.tensor = None
 
     def send(self, meta, dst_rank):
         worker = ray._private.worker.global_worker
@@ -74,12 +92,15 @@ if __name__ == "__main__":
     ref = actors[0].randn.remote(shape)
     ref = actors[1].sum.remote(ref)
     print(ray.get(ref))
+    ray.get(actors[0].wait_tensor_gced.remote())
 
     start = time.time()
     for _ in range(10):
         ref = actors[0].randn.remote(shape)
-        ref = actors[1].sum.remote(ref)
-        print(ray.get(ref))
+        sum_ref = actors[1].sum.remote(ref)
+        #sum_ref = actors[1].sum.remote(ref)
+        print(ray.get(sum_ref))
+        ray.get(actors[0].wait_tensor_gced.remote())
     end = time.time()
     print((end - start) / 10)
 

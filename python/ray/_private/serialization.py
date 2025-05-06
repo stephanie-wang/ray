@@ -582,4 +582,8 @@ class SerializationContext:
                 worker = ray._private.worker.global_worker
                 worker.in_actor_object_store[obj_id] = tensors
 
+                gc_event = threading.Event()
+                for tensor in tensors:
+                    worker.tensor_to_gc_event[tensor] = gc_event
+
             return val

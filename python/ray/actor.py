@@ -373,12 +373,22 @@ class ActorMethod:
                     src_actor, tensor_meta = tensor_meta
 
                     def send(self, obj_id, dst_rank):
+                        # TODO(swang): Catch exception in send task and set as
+                        # value in recv worker's in_actor_object_store. Tear
+                        # down communicator.
                         import torch.distributed as dist
                         worker = ray._private.worker.global_worker
-                        assert obj_id in worker.in_actor_object_store, worker.in_actor_object_store
-                        tensors = worker.in_actor_object_store[obj_id]
+                        assert obj_id in worker.in_actor_object_store, f"Object {obj_id} already garbage-collected"
+
+                        # Garbage collection.
+                        tensors = worker.in_actor_object_store.pop(obj_id)
+                        gc_event = None
                         for tensor in tensors:
                             dist.send(tensor, dst_rank)
+                            if gc_event is not None:
+                                assert worker.tensor_to_gc_event[tensor] is gc_event
+                            gc_event = worker.tensor_to_gc_event.pop(tensor)
+                        gc_event.set()
 
                     def recv(self, obj_id, src_rank, tensor_meta):
                         import torch
