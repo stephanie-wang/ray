@@ -372,7 +372,7 @@ class ActorMethod:
 
                     src_actor, tensor_meta = tensor_meta
 
-                    def send(self, obj_id, dst_rank):
+                    def send(self, obj_id, dst_rank, dep):
                         # TODO(swang): Catch exception in send task and set as
                         # value in recv worker's in_actor_object_store. Tear
                         # down communicator.
@@ -417,7 +417,17 @@ class ActorMethod:
                         assert dst_rank is not None
                         assert src_rank != dst_rank
 
-                    src_actor.__ray_call__.remote(send, arg.hex(), dst_rank)
+                    # This task will run on a different thread from the task
+                    # that produced the object. Pass tensor_meta as a
+                    # dependency to ensure that we don't start the send until
+                    # after the object has been produced on the actor.
+                    src_actor.__ray_call__.options(concurrency_group="_ray_system").remote(send,
+                                                                                           arg.hex(),
+                                                                                           dst_rank,
+                                                                                           tensor_meta)
+                    # TODO(swang): Handle the case where same ObjectRef is sent
+                    # twice to another actor. The actor may modify the first
+                    # copy sent.
                     actor.__ray_call__.remote(recv, arg.hex(), src_rank, tensor_meta)
 
             return actor._actor_method_call(

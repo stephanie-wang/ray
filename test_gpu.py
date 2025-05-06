@@ -27,7 +27,11 @@ def wait_gced(tensor: torch.Tensor):
         gc_event.wait()
         
 
-@ray.remote
+# NOTE: Create a concurrency group to get around the bug where main thread is
+# blocked by a running task. If we create a concurrency group, then tasks for
+# the default concurrency group will get executed by a default executor thread
+# instead of on the main thread.
+@ray.remote(concurrency_groups={"nil": 1})
 class Actor:
 
     def __init__(self):
@@ -97,10 +101,14 @@ if __name__ == "__main__":
     start = time.time()
     for _ in range(10):
         ref = actors[0].randn.remote(shape)
+
+        # Test that waiting for the previous tensor to get GCed doesn't block
+        # the next task.
+        actors[0].wait_tensor_gced.remote()
+
         sum_ref = actors[1].sum.remote(ref)
         #sum_ref = actors[1].sum.remote(ref)
         print(ray.get(sum_ref))
-        ray.get(actors[0].wait_tensor_gced.remote())
     end = time.time()
     print((end - start) / 10)
 
